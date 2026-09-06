@@ -1,0 +1,17 @@
+name = "bepu-pages"
+main = "./out"
+compatibility_date = "2026-01-01"
+
+[build]
+command = "npm run build && npm run export"
+
+[site]
+bucket = "./out"
+
+[env.production]
+account_id = "<YOUR_ACCOUNT_ID>"
+project_name = "bepu"  # Cloudflare Pages project slug
+
+
+# 환경 변수는 Cloudflare Pages 대시보드에서 설정하세요.
+# NEXT_PUBLIC_API_URL=https://api.yourdomain.com

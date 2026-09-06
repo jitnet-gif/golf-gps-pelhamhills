@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .animate-bounce-slow {
+    animation: bounce-slow 3s infinite;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* 베푸 메시지 내 링크 색상 (배경이 밝음) */
+  .bepu-content a {
+    color: #3B82F6;
+    /* blue-500 */
+    text-decoration: underline;
+    text-underline-offset: 4px;
+    font-weight: 700;
+  }
+
+  .bepu-content a:hover {
+    color: #2563EB;
+    /* blue-600 */
+  }
+
+  /* 유저 메시지 내 링크 색상 (배경이 코랄색) */
+  .user-content a {
+    color: white;
+    text-decoration: underline;
+    text-underline-offset: 4px;
+    font-weight: 700;
+  }
+}
+
+@theme inline {
+  --color-bepu-bg: #FFF9F0;
+  /* 웜 아이보리 - 편안한 배경 */
+  --color-bepu-coral: #FFB4B4;
+  /* 소프트 코랄 - 따뜻한 포옹 (Primary) */
+  --color-bepu-blue: #B4C4FF;
+  /* 라벤더 블루 - 신뢰와 경청 (Secondary) */
+  --color-bepu-mint: #B4FFE4;
+  /* 민트 그린 - 성장과 활기 (Point) */
+  --color-bepu-text: #3A3A40;
+  /* 부드러운 다크 그레이 텍스트 */
+  --color-bepu-bubble: #FFFFFF;
+  /* 베푸 말풍선 배경 (흰색) */
+  --color-user-bubble: #FFB4B4;
+  /* 사용자 말풍선 배경 (소프트 코랄) */
+
+  --font-sans: var(--font-pretendard), sans-serif;
+}
+
+:root {
+  --background: #FFF9F0;
+  --foreground: #3A3A40;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* 다크 모드의 경우 채도를 낮춘 파스텔 톤 적용 (향후 개선 가능) */
+    --background: #1A1A24;
+    --foreground: #F5F5F5;
+    --color-bepu-bubble: #2A2A35;
+    --color-user-bubble: #D98888;
+  }
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  /* 부드러운 그레인 질감 효과 (선택적 사용) */
+  /* background-image: url('/noise.png'); */
+}
+
+/* 스크롤바 커스텀 (파스텔 느낌 유지) */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--color-bepu-blue);
+  border-radius: 10px;
+}
