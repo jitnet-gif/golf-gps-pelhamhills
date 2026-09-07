@@ -258,32 +258,52 @@ CREATE TRIGGER update_scores_updated_at BEFORE UPDATE ON public.scores
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 -- ============================================================
--- 9. 샘플 데이터 (선택사항)
+-- 9. 코스 데이터: Pelham Hills Golf Club
 -- ============================================================
+--
+-- 196 Webber Road, Pelham (우편주소 Welland), ON L3B 5N8, Canada
+-- 코스 중심: 42.9851533, -79.3008404
+--
+-- 출처: OpenStreetMap (ODbL) — way 56217508
+--   par/handicap: golf=hole ways의 태그
+--   pin 좌표:     golf=pin 노드 (홀 경로 끝점과 0.0m 일치)
+--   length:       홀 경로 중심선 실측 (미터)
+--
+-- 주의: OSM에서 10번 홀이 ref=9로 잘못 태깅되어 있어 name 태그로 정정함.
+--       야디지는 OSM 경로 기반 계산값이므로 클럽 공식 스코어카드와 대조 필요.
 
--- 코스 예제
 INSERT INTO public.courses (name, location, par, holes)
-VALUES
-  ('Pelham Hills Golf Club', 'Seoul, South Korea', 72, 18),
-  ('Namsan Golf Course', 'Seoul, South Korea', 72, 18)
+VALUES ('Pelham Hills Golf Club', 'Pelham, Ontario, Canada', 71, 18)
 ON CONFLICT DO NOTHING;
 
--- 첫 번째 코스의 홀 예제 (일부)
-INSERT INTO public.holes (course_id, hole_number, par, handicap, length, pin_gps_lat, pin_gps_lng)
-SELECT
-  c.id,
-  hole_num,
-  CASE WHEN hole_num <= 9 THEN 4 ELSE 4 END,
-  hole_num,
-  350 + (hole_num * 10),
-  37.123 + (hole_num * 0.001),
-  127.456 + (hole_num * 0.001)
+INSERT INTO public.holes
+  (course_id, hole_number, par, handicap, length, pin_gps_lat, pin_gps_lng)
+SELECT c.id, v.hole_number, v.par, v.handicap, v.length, v.lat, v.lng
 FROM public.courses c
-CROSS JOIN LATERAL (
-  SELECT generate_series(1, 18) AS hole_num
-) h
+CROSS JOIN (VALUES
+  (1,  5,  8, 424, 42.9848712, -79.2964241),
+  (2,  4,  2, 287, 42.9844924, -79.3002131),
+  (3,  3, 14, 125, 42.9837016, -79.2986088),
+  (4,  5, 18, 392, 42.9801354, -79.2993226),
+  (5,  4,  6, 336, 42.9811010, -79.2965137),
+  (6,  4, 10, 289, 42.9834304, -79.2974607),
+  (7,  3, 12, 121, 42.9841256, -79.2961747),
+  (8,  4, 16, 298, 42.9871936, -79.2962567),
+  (9,  4,  4, 281, 42.9869009, -79.2996796),
+  (10, 4,  1, 338, 42.9832999, -79.3011038),
+  (11, 3, 15, 157, 42.9814791, -79.2997647),
+  (12, 5,  3, 427, 42.9822931, -79.3054001),
+  (13, 4, 11, 322, 42.9825092, -79.3013989),
+  (14, 3, 13, 170, 42.9839714, -79.3026284),
+  (15, 5,  5, 477, 42.9872487, -79.3056709),
+  (16, 3, 17, 122, 42.9874497, -79.3041946),
+  (17, 4,  9, 307, 42.9846818, -79.3038477),
+  (18, 4,  7, 334, 42.9877109, -79.3024831)
+) AS v(hole_number, par, handicap, length, lat, lng)
 WHERE c.name = 'Pelham Hills Golf Club'
-ON CONFLICT DO NOTHING;
+ON CONFLICT (course_id, hole_number) DO UPDATE
+  SET par = EXCLUDED.par, handicap = EXCLUDED.handicap, length = EXCLUDED.length,
+      pin_gps_lat = EXCLUDED.pin_gps_lat, pin_gps_lng = EXCLUDED.pin_gps_lng;
 
 -- ============================================================
 -- 10. 권한 설정
