@@ -16,7 +16,7 @@ const highlights = [
 const quickLinks = [
   { label: "Book a Tee-Time", href: "/booking" },
   { label: "View Memberships", href: "https://www.pelhamhills.com/membership/2026-memberships/" },
-  { label: "Reserve Indoor Golf", href: "https://pelhamhills.golfoclock.com/" },
+  { label: "Reserve Indoor Golf", href: "/simulator" },
   { label: "Contact the Club", href: "#visit" },
 ];
 
@@ -53,7 +53,10 @@ export default function Home() {
       </header>
 
       <section className="relative min-h-[calc(100vh-73px)] overflow-hidden">
-        <div className="absolute inset-0 bg-[url('/pelham-hills/hero-course.png')] bg-cover bg-center" />
+        <div
+          className="absolute inset-0 bg-cover bg-center"
+          style={{ backgroundImage: "url('/pelham-hills/hero-course.png')" }}
+        />
         <div className="absolute inset-0 bg-gradient-to-r from-[#10170f]/82 via-[#10170f]/48 to-[#10170f]/18" />
         <div className="relative mx-auto grid min-h-[calc(100vh-73px)] max-w-7xl content-center px-5 py-16 lg:px-8">
           <div className="max-w-3xl text-white">
@@ -140,7 +143,10 @@ export default function Home() {
       </section>
 
       <section className="grid lg:grid-cols-2" id="golf">
-        <div className="min-h-[420px] bg-[url('/pelham-hills/course-detail.png')] bg-cover bg-center" />
+        <div
+          className="min-h-[420px] bg-cover bg-center"
+          style={{ backgroundImage: "url('/pelham-hills/course-detail.png')" }}
+        />
         <div className="bg-[#214d2f] px-5 py-16 text-white sm:px-10 lg:px-16">
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-[#d6c28f]">Golf</p>
           <h2 className="mt-3 font-serif text-4xl font-semibold">A scenic round for every player.</h2>
@@ -182,7 +188,7 @@ export default function Home() {
           </div>
           <a
             className="rounded-sm bg-[#214d2f] px-6 py-4 text-center text-sm font-extrabold uppercase tracking-[0.12em] text-white"
-            href="https://pelhamhills.golfoclock.com/"
+            href="/simulator"
           >
             Reserve a Simulator
           </a>
