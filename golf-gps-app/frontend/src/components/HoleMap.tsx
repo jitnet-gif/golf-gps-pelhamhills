@@ -4,13 +4,13 @@ import {
   TileLayer,
   Marker,
   Popup,
+  Polyline,
   useMap,
   Circle,
 } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useAppStore } from '@/store/appStore';
-import { useMapTiles } from '@/hooks';
 
 // Fix default marker icons for Vite
 const DefaultIcon = L.icon({
@@ -36,60 +36,106 @@ const PinIcon = L.icon({
   popupAnchor: [0, -32],
 });
 
+// White ring on a dark disc - stays readable against fairway green in the
+// satellite imagery, and reads differently from the red pin.
+const TeeIcon = L.icon({
+  iconUrl:
+    'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iOSIgZmlsbD0iIzExMTgyNyIgZmlsbC1vcGFjaXR5PSIwLjg1Ii8+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iOSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjIiLz48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSIzIiBmaWxsPSIjZmZmIi8+PC9zdmc+',
+  iconSize: [24, 24],
+  iconAnchor: [12, 12],
+  popupAnchor: [0, -12],
+});
+
 L.Marker.prototype.options.icon = DefaultIcon;
+
+/** Esri World Imagery serves real detail down to z20 over Pelham Hills. */
+const MAX_ZOOM = 20;
+/** Framing a 120 m par 3 would otherwise push past the crisp imagery. */
+const HOLE_MAX_ZOOM = 19;
+
+export interface MapHole {
+  holeNumber: number;
+  par: number;
+  handicap?: number;
+  /** Metres, tee to pin along the centreline. */
+  length?: number;
+  latitude: number;
+  longitude: number;
+  teeLatitude?: number;
+  teeLongitude?: number;
+}
 
 interface HoleMapProps {
   courseId: string;
-  holes?: {
-    holeNumber: number;
-    latitude: number;
-    longitude: number;
-    par: number;
-    handicap?: number;
-  }[];
-  center?: { lat: number; lng: number };
+  holes?: MapHole[];
+  center: { lat: number; lng: number };
   zoom?: number;
+  /** Track the player instead of holding the frame on the selected hole. */
+  followGps?: boolean;
   onHoleClick?: (hole: number) => void;
 }
 
 const MapContent: React.FC<{
-  holes?: HoleMapProps['holes'];
+  holes?: MapHole[];
   onHoleClick?: (hole: number) => void;
   courseId: string;
   tileUrl: string;
-}> = ({ holes, onHoleClick, courseId, tileUrl }) => {
+  followGps: boolean;
+}> = ({ holes, onHoleClick, tileUrl, followGps }) => {
   const map = useMap();
-  const { gpsPosition, selectedHole } = useAppStore((state) => ({
-    gpsPosition: state.gpsPosition,
-    selectedHole: state.uiState.selectedHole,
-  }));
+  const gpsPosition = useAppStore((state) => state.gpsPosition);
+  const selectedHole = useAppStore((state) => state.uiState.selectedHole);
 
-  // Center map on GPS position when available
+  const activeHole = useMemo(
+    () => holes?.find((h) => h.holeNumber === selectedHole) ?? null,
+    [holes, selectedHole]
+  );
+
+  const teeLatLng = useMemo((): [number, number] | null => {
+    if (!activeHole) return null;
+    const { teeLatitude, teeLongitude } = activeHole;
+    return teeLatitude != null && teeLongitude != null
+      ? [teeLatitude, teeLongitude]
+      : null;
+  }, [activeHole]);
+
+  // Re-centre on the player only in follow mode. Reading a hole means the map
+  // has to hold still - a watchPosition stream would otherwise yank it back on
+  // every fix.
   useEffect(() => {
-    if (gpsPosition) {
-      map.setView(
-        [gpsPosition.latitude, gpsPosition.longitude],
-        map.getZoom()
+    if (!followGps || !gpsPosition) return;
+    map.setView([gpsPosition.latitude, gpsPosition.longitude], map.getZoom());
+  }, [followGps, gpsPosition, map]);
+
+  // Frame the selected hole so tee and pin are both on screen. Keyed on the
+  // hole number, so a GPS tick never re-frames a hole the user has panned away
+  // from.
+  useEffect(() => {
+    if (followGps || selectedHole === null) return;
+
+    const hole = holes?.find((h) => h.holeNumber === selectedHole);
+    if (!hole) return;
+
+    if (hole.teeLatitude != null && hole.teeLongitude != null) {
+      map.fitBounds(
+        L.latLngBounds([
+          [hole.teeLatitude, hole.teeLongitude],
+          [hole.latitude, hole.longitude],
+        ]),
+        { padding: [48, 48], maxZoom: HOLE_MAX_ZOOM }
       );
+    } else {
+      map.setView([hole.latitude, hole.longitude], HOLE_MAX_ZOOM);
     }
-  }, [gpsPosition, map]);
-
-  // Highlight selected hole
-  useEffect(() => {
-    if (selectedHole && holes) {
-      const hole = holes.find((h) => h.holeNumber === selectedHole);
-      if (hole) {
-        map.setView([hole.latitude, hole.longitude], 18);
-      }
-    }
-  }, [selectedHole, holes, map]);
+  }, [followGps, selectedHole, holes, map]);
 
   return (
     <>
       <TileLayer
-        url={tileUrl || 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'}
-        attribution="© Esri"
-        maxZoom={20}
+        url={tileUrl}
+        attribution="Imagery &copy; Esri, Maxar, Earthstar Geographics"
+        maxZoom={MAX_ZOOM}
+        maxNativeZoom={MAX_ZOOM}
         crossOrigin="anonymous"
       />
 
@@ -118,13 +164,44 @@ const MapContent: React.FC<{
         </>
       )}
 
-      {/* Hole pins */}
+      {/* Selected hole: the tee and its centreline to the pin */}
+      {activeHole && teeLatLng && (
+        <>
+          <Polyline
+            positions={[teeLatLng, [activeHole.latitude, activeHole.longitude]]}
+            pathOptions={{
+              color: '#ffffff',
+              weight: 2,
+              opacity: 0.9,
+              dashArray: '8 8',
+            }}
+          />
+          <Marker position={teeLatLng} icon={TeeIcon}>
+            <Popup>
+              <div className="text-sm">
+                <strong>Hole {activeHole.holeNumber} tee</strong>
+                {activeHole.length != null && (
+                  <>
+                    <br />
+                    {Math.round(activeHole.length * 1.09361)} yds to the pin
+                  </>
+                )}
+              </div>
+            </Popup>
+          </Marker>
+        </>
+      )}
+
+      {/* Hole pins - the rest of the course fades back once a hole is picked */}
       {holes &&
         holes.map((hole) => (
           <Marker
             key={hole.holeNumber}
             position={[hole.latitude, hole.longitude]}
             icon={PinIcon}
+            opacity={
+              selectedHole === null || selectedHole === hole.holeNumber ? 1 : 0.45
+            }
             eventHandlers={{
               click: () => onHoleClick?.(hole.holeNumber),
             }}
@@ -143,22 +220,28 @@ const MapContent: React.FC<{
   );
 };
 
+// Leaflet needs a {z}/{x}/{y} template, not a resolved URL. Esri World Imagery
+// serves {z}/{y}/{x} - note the swapped order.
+const TILE_URL =
+  import.meta.env.VITE_TILE_URL ||
+  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+
 export const HoleMap: React.FC<HoleMapProps> = ({
   courseId,
   holes,
-  center = { lat: 40.0, lng: -74.0 },
+  center,
   zoom = 16,
+  followGps = false,
   onHoleClick,
 }) => {
-  const { getTileUrl } = useMapTiles({ courseId });
-
-  const tileUrl = useMemo(() => getTileUrl(0, 0, 0), [getTileUrl]);
+  const tileUrl = TILE_URL;
 
   return (
     <div className="w-full h-full rounded-lg overflow-hidden border border-border">
       <MapContainer
         center={[center.lat, center.lng]}
         zoom={zoom}
+        maxZoom={MAX_ZOOM}
         style={{ height: '100%', width: '100%' }}
         zoomControl={true}
         scrollWheelZoom={true}
@@ -168,6 +251,7 @@ export const HoleMap: React.FC<HoleMapProps> = ({
           onHoleClick={onHoleClick}
           courseId={courseId}
           tileUrl={tileUrl}
+          followGps={followGps}
         />
       </MapContainer>
     </div>

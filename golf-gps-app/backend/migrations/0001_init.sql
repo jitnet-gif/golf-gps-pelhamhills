@@ -37,17 +37,19 @@ CREATE TABLE IF NOT EXISTS public.courses (
 );
 
 -- 인덱스
-CREATE INDEX idx_courses_created_at ON public.courses (created_at DESC);
-CREATE INDEX idx_courses_name ON public.courses USING GIN (to_tsvector('english', name));
+CREATE INDEX IF NOT EXISTS idx_courses_created_at ON public.courses (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_courses_name ON public.courses USING GIN (to_tsvector('english', name));
 
 -- RLS (Row-Level Security)
 ALTER TABLE public.courses ENABLE ROW LEVEL SECURITY;
 
 -- 정책: 누구나 읽기 가능
+DROP POLICY IF EXISTS "courses_read_all" ON public.courses;
 CREATE POLICY "courses_read_all" ON public.courses
   FOR SELECT USING (true);
 
 -- 정책: 관리자만 쓰기 가능 (현재는 비활성, 필요시 활성화)
+-- DROP POLICY IF EXISTS "courses_write_admin" ON public.courses;
 -- CREATE POLICY "courses_write_admin" ON public.courses
 --   FOR INSERT WITH CHECK (auth.uid() IN (SELECT user_id FROM admin_users));
 
@@ -70,12 +72,13 @@ CREATE TABLE IF NOT EXISTS public.holes (
 );
 
 -- 인덱스
-CREATE INDEX idx_holes_course_id ON public.holes (course_id);
-CREATE INDEX idx_holes_hole_number ON public.holes (hole_number);
+CREATE INDEX IF NOT EXISTS idx_holes_course_id ON public.holes (course_id);
+CREATE INDEX IF NOT EXISTS idx_holes_hole_number ON public.holes (hole_number);
 
 -- RLS
 ALTER TABLE public.holes ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "holes_read_all" ON public.holes;
 CREATE POLICY "holes_read_all" ON public.holes
   FOR SELECT USING (true);
 
@@ -96,16 +99,17 @@ CREATE TABLE IF NOT EXISTS public.rounds (
 );
 
 -- 인덱스
-CREATE INDEX idx_rounds_course_id ON public.rounds (course_id);
-CREATE INDEX idx_rounds_status ON public.rounds (status);
-CREATE INDEX idx_rounds_start_time ON public.rounds (start_time DESC);
+CREATE INDEX IF NOT EXISTS idx_rounds_course_id ON public.rounds (course_id);
+CREATE INDEX IF NOT EXISTS idx_rounds_status ON public.rounds (status);
+CREATE INDEX IF NOT EXISTS idx_rounds_start_time ON public.rounds (start_time DESC);
 -- player_ids 배열 검색을 위한 인덱스
-CREATE INDEX idx_rounds_player_ids ON public.rounds USING GIN (player_ids);
+CREATE INDEX IF NOT EXISTS idx_rounds_player_ids ON public.rounds USING GIN (player_ids);
 
 -- RLS
 ALTER TABLE public.rounds ENABLE ROW LEVEL SECURITY;
 
 -- 정책: 참여자만 읽기 가능 (또는 서비스 역할)
+DROP POLICY IF EXISTS "rounds_read_participants" ON public.rounds;
 CREATE POLICY "rounds_read_participants" ON public.rounds
   FOR SELECT USING (
     -- 참여자이거나, 또는 서비스 역할 (is_admin 정책은 나중에 추가)
@@ -117,6 +121,7 @@ CREATE POLICY "rounds_read_participants" ON public.rounds
   );
 
 -- 정책: 참여자만 수정 가능
+DROP POLICY IF EXISTS "rounds_update_participants" ON public.rounds;
 CREATE POLICY "rounds_update_participants" ON public.rounds
   FOR UPDATE USING (
     EXISTS (
@@ -145,15 +150,16 @@ CREATE TABLE IF NOT EXISTS public.scores (
 );
 
 -- 인덱스
-CREATE INDEX idx_scores_round_id ON public.scores (round_id);
-CREATE INDEX idx_scores_player_id ON public.scores (player_id);
-CREATE INDEX idx_scores_hole_id ON public.scores (hole_id);
-CREATE INDEX idx_scores_created_at ON public.scores (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_scores_round_id ON public.scores (round_id);
+CREATE INDEX IF NOT EXISTS idx_scores_player_id ON public.scores (player_id);
+CREATE INDEX IF NOT EXISTS idx_scores_hole_id ON public.scores (hole_id);
+CREATE INDEX IF NOT EXISTS idx_scores_created_at ON public.scores (created_at DESC);
 
 -- RLS
 ALTER TABLE public.scores ENABLE ROW LEVEL SECURITY;
 
 -- 정책: 자신의 점수 또는 같은 라운드의 다른 참여자의 점수 읽기
+DROP POLICY IF EXISTS "scores_read_own_or_same_round" ON public.scores;
 CREATE POLICY "scores_read_own_or_same_round" ON public.scores
   FOR SELECT USING (
     player_id = auth.uid()
@@ -166,6 +172,7 @@ CREATE POLICY "scores_read_own_or_same_round" ON public.scores
   );
 
 -- 정책: 라운드 참여자가 그룹의 점수를 기록 (예: 한 사람이 모두 입력)
+DROP POLICY IF EXISTS "scores_write_by_round_participant" ON public.scores;
 CREATE POLICY "scores_write_by_round_participant" ON public.scores
   FOR INSERT WITH CHECK (
     EXISTS (
@@ -176,6 +183,7 @@ CREATE POLICY "scores_write_by_round_participant" ON public.scores
   );
 
 -- 정책: 점수 수정은 자신의 점수만 또는 라운드 참여자가 수정
+DROP POLICY IF EXISTS "scores_update_own_or_participant" ON public.scores;
 CREATE POLICY "scores_update_own_or_participant" ON public.scores
   FOR UPDATE USING (
     player_id = auth.uid()
@@ -204,12 +212,13 @@ CREATE TABLE IF NOT EXISTS public.tile_metadata (
 );
 
 -- 인덱스
-CREATE INDEX idx_tile_metadata_course_id ON public.tile_metadata (course_id);
-CREATE INDEX idx_tile_metadata_zoom_level ON public.tile_metadata (zoom);
+CREATE INDEX IF NOT EXISTS idx_tile_metadata_course_id ON public.tile_metadata (course_id);
+CREATE INDEX IF NOT EXISTS idx_tile_metadata_zoom_level ON public.tile_metadata (zoom);
 
 -- RLS
 ALTER TABLE public.tile_metadata ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "tile_metadata_read_all" ON public.tile_metadata;
 CREATE POLICY "tile_metadata_read_all" ON public.tile_metadata
   FOR SELECT USING (true);
 
@@ -232,8 +241,6 @@ JOIN public.holes h ON h.id = s.hole_id
 GROUP BY r.id, r.course_id, r.start_time, s.player_id
 ORDER BY r.start_time DESC, total_strokes ASC;
 
--- RLS
-ALTER VIEW public.v_leaderboard OWNER TO postgres;
 
 -- ============================================================
 -- 8. 함수: updated_at 자동 업데이트
@@ -248,12 +255,15 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- 트리거
+DROP TRIGGER IF EXISTS update_courses_updated_at ON public.courses;
 CREATE TRIGGER update_courses_updated_at BEFORE UPDATE ON public.courses
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_rounds_updated_at ON public.rounds;
 CREATE TRIGGER update_rounds_updated_at BEFORE UPDATE ON public.rounds
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_scores_updated_at ON public.scores;
 CREATE TRIGGER update_scores_updated_at BEFORE UPDATE ON public.scores
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
@@ -273,8 +283,10 @@ CREATE TRIGGER update_scores_updated_at BEFORE UPDATE ON public.scores
 --       야디지는 OSM 경로 기반 계산값이므로 클럽 공식 스코어카드와 대조 필요.
 
 INSERT INTO public.courses (name, location, par, holes)
-VALUES ('Pelham Hills Golf Club', 'Pelham, Ontario, Canada', 71, 18)
-ON CONFLICT DO NOTHING;
+SELECT 'Pelham Hills Golf Club', 'Pelham, Ontario, Canada', 71, 18
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.courses WHERE name = 'Pelham Hills Golf Club'
+);
 
 INSERT INTO public.holes
   (course_id, hole_number, par, handicap, length, pin_gps_lat, pin_gps_lng)
@@ -314,6 +326,7 @@ GRANT SELECT ON public.courses TO anon;
 GRANT SELECT ON public.holes TO anon;
 GRANT SELECT ON public.rounds TO anon;
 GRANT SELECT ON public.scores TO anon;
+GRANT SELECT ON public.tile_metadata TO anon;
 GRANT SELECT ON public.v_leaderboard TO anon;
 
 -- authenticated 역할: CRUD 가능

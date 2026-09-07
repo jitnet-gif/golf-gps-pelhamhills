@@ -15,8 +15,7 @@ export interface UseMapTilesOptions {
 
 export const useMapTiles = ({
   courseId,
-  r2BucketUrl = import.meta.env.VITE_R2_BUCKET_URL ||
-    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile',
+  r2BucketUrl = import.meta.env.VITE_R2_BUCKET_URL || '',
   fallbackToCache = true,
 }: UseMapTilesOptions) => {
   /**

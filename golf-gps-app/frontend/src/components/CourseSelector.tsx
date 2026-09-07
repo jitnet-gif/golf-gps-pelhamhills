@@ -1,15 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
-import axios from 'axios';
-
-interface Course {
-  id: string;
-  name: string;
-  location: string;
-  holes: number;
-  par: number;
-}
+import { fetchCourses, type Course } from '@/lib/courseData';
 
 interface CourseSelectorProps {
   onCourseSelect?: (course: Course) => void;
@@ -27,31 +19,25 @@ export const CourseSelector: React.FC<CourseSelectorProps> = ({
   const { currentCourseId, setCurrentCourseId } = useAppStore();
 
   useEffect(() => {
-    const fetchCourses = async () => {
-      try {
-        setIsLoading(true);
-        const response = await axios.get('/api/courses');
-        setCourses(response.data.courses || []);
+    const ac = new AbortController();
+
+    // fetchCourses falls back to the bundled course on its own, so a network
+    // failure still leaves a selectable list rather than an empty dropdown.
+    fetchCourses(ac.signal)
+      .then((list) => {
+        setCourses(list);
         setError(null);
-      } catch (err) {
+      })
+      .catch((err) => {
+        if (ac.signal.aborted) return;
         console.error('Failed to fetch courses:', err);
         setError('Failed to load courses');
-        // Fallback courses for offline/demo
-        setCourses([
-          {
-            id: '1',
-            name: 'Example Golf Course',
-            location: 'Example City',
-            holes: 18,
-            par: 72,
-          },
-        ]);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+      })
+      .finally(() => {
+        if (!ac.signal.aborted) setIsLoading(false);
+      });
 
-    fetchCourses();
+    return () => ac.abort();
   }, []);
 
   const selectedCourse = courses.find((c) => c.id === currentCourseId);

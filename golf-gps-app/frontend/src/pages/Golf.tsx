@@ -1,52 +1,78 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'wouter';
 import { useGPS, useScorecard } from '@/hooks';
 import { useAppStore } from '@/store/appStore';
 import {
   HoleMap,
-  DistanceIndicator,
+  HoleGuide,
   ScoreCard,
   OnlineStatus,
   SyncStatus,
+  CourseIntro,
 } from '@/components';
-import { Menu, X, MapPin, TrendingUp } from 'lucide-react';
+import { Menu, X, TrendingUp } from 'lucide-react';
+import { PELHAM_HILLS, PELHAM_HILLS_HOLES } from '@/data/pelhamHills';
+import { fetchCourseData, type CourseData } from '@/lib/courseData';
 
-// Mock holes data - replace with API call
-const MOCK_HOLES = [
-  {
-    holeNumber: 1,
-    latitude: 40.0,
-    longitude: -74.0,
-    par: 4,
-    handicap: 5,
+// Render from the bundled copy immediately, then swap in Supabase's rows when
+// they land. The map is useful on the first frame and never blanks out if the
+// network is gone - which, on a fairway, it often is.
+const BUNDLED: CourseData = {
+  course: {
+    id: PELHAM_HILLS.id,
+    name: PELHAM_HILLS.name,
+    location: PELHAM_HILLS.location,
+    par: PELHAM_HILLS.par,
+    holes: PELHAM_HILLS.holes,
   },
-  {
-    holeNumber: 2,
-    latitude: 40.001,
-    longitude: -74.001,
-    par: 3,
-    handicap: 15,
-  },
-  {
-    holeNumber: 3,
-    latitude: 40.002,
-    longitude: -74.002,
-    par: 5,
-    handicap: 1,
-  },
-];
+  holes: PELHAM_HILLS_HOLES,
+  offline: true,
+};
 
 export default function Golf() {
   const { courseId } = useParams<{ courseId: string }>();
   const [showSideMenu, setShowSideMenu] = useState(false);
   const [viewMode, setViewMode] = useState<'map' | 'scorecard'>('map');
-  const [selectedHole, setSelectedHole] = useState<
-    (typeof MOCK_HOLES)[0] | null
-  >(MOCK_HOLES[0]);
+  // Start out tracking the player; picking a hole hands the frame to that hole.
+  const [followGps, setFollowGps] = useState(true);
+
+  const [{ course, holes }, setCourseData] = useState<CourseData>(BUNDLED);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    fetchCourseData(undefined, ac.signal)
+      .then((d) => {
+        if (!ac.signal.aborted) setCourseData(d);
+      })
+      .catch(() => {
+        /* fetchCourseData already falls back; keep the bundled copy */
+      });
+    return () => ac.abort();
+  }, []);
 
   const { isTracking, startTracking, stopTracking } = useGPS();
   const { createRound, currentRound } = useScorecard();
-  const { setCurrentCourseId, setSelectedHole: selectHole } = useAppStore();
+  const setCurrentCourseId = useAppStore((s) => s.setCurrentCourseId);
+  const selectHole = useAppStore((s) => s.setSelectedHole);
+
+  // The map reads the selection straight from the store, so this page keeps no
+  // copy of its own - two sources would let the two views drift apart.
+  const selectedHoleNumber = useAppStore((s) => s.uiState.selectedHole);
+  const selectedHole = useMemo(
+    () => holes.find((h) => h.holeNumber === selectedHoleNumber) ?? holes[0],
+    [holes, selectedHoleNumber]
+  );
+
+  // Frame the whole course on entry. Derived from the holes themselves so this
+  // page carries no course-specific coordinates of its own.
+  const center = useMemo(() => {
+    const lats = holes.flatMap((h) => [h.latitude, h.teeLatitude]);
+    const lngs = holes.flatMap((h) => [h.longitude, h.teeLongitude]);
+    return {
+      lat: (Math.min(...lats) + Math.max(...lats)) / 2,
+      lng: (Math.min(...lngs) + Math.max(...lngs)) / 2,
+    };
+  }, [holes]);
 
   useEffect(() => {
     if (courseId) {
@@ -57,6 +83,16 @@ export default function Golf() {
       }
     }
   }, [courseId, setCurrentCourseId, currentRound, createRound]);
+
+  // Seed the store so the map draws hole 1 - the panel below already shows it,
+  // and MapContent reads the selection from the store, not from this page.
+  useEffect(() => {
+    if (selectedHoleNumber === null) {
+      selectHole(holes[0].holeNumber);
+    }
+    // Once, on entry - later changes are the user's own hole picks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     // Auto-start GPS tracking
@@ -70,10 +106,9 @@ export default function Golf() {
   }, [isTracking, startTracking]);
 
   const handleHoleSelect = (hole: number) => {
-    const found = MOCK_HOLES.find((h) => h.holeNumber === hole);
-    if (found) {
-      setSelectedHole(found);
+    if (holes.some((h) => h.holeNumber === hole)) {
       selectHole(hole);
+      setFollowGps(false);
     }
   };
 
@@ -82,8 +117,10 @@ export default function Golf() {
       {/* Header */}
       <header className="border-b border-border bg-card px-4 py-3 flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-bold">Golf GPS</h1>
-          <p className="text-xs text-muted-foreground">Course {courseId}</p>
+          <h1 className="text-lg font-bold">{course.name}</h1>
+          <p className="text-xs text-muted-foreground">
+            {course.location} · Par {course.par} · {course.holes} holes
+          </p>
         </div>
 
         <div className="flex items-center gap-2">
@@ -111,40 +148,23 @@ export default function Golf() {
               {/* Map view */}
               <div className="flex-1 overflow-hidden">
                 <HoleMap
-                  courseId={courseId || '1'}
-                  holes={MOCK_HOLES}
-                  center={{ lat: 40.0, lng: -74.0 }}
+                  courseId={courseId || course.id}
+                  holes={holes}
+                  center={center}
                   zoom={16}
+                  followGps={followGps}
                   onHoleClick={handleHoleSelect}
                 />
               </div>
 
-              {/* Bottom info bar with distance */}
-              {selectedHole && (
-                <div className="border-t border-border bg-card p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <MapPin className="w-5 h-5 text-primary" />
-                      <div>
-                        <div className="text-sm font-semibold">
-                          Hole {selectedHole.holeNumber}
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          Par {selectedHole.par}
-                        </div>
-                      </div>
-                    </div>
-                    <DistanceIndicator
-                      pin={{
-                        latitude: selectedHole.latitude,
-                        longitude: selectedHole.longitude,
-                        holeNumber: selectedHole.holeNumber,
-                      }}
-                      className="text-right"
-                    />
-                  </div>
-                </div>
-              )}
+              {/* Hole-by-hole guide */}
+              <HoleGuide
+                hole={selectedHole}
+                holeCount={holes.length}
+                followGps={followGps}
+                onSelectHole={handleHoleSelect}
+                onToggleFollow={() => setFollowGps((on) => !on)}
+              />
             </>
           ) : (
             <>
@@ -184,6 +204,9 @@ export default function Golf() {
         {showSideMenu && (
           <div className="w-80 border-l border-border bg-card overflow-y-auto flex flex-col">
             <div className="flex-1 p-4 space-y-6">
+              {/* Spoken course introduction */}
+              <CourseIntro />
+
               {/* Scorecard in sidebar */}
               <div>
                 <h2 className="text-sm font-semibold mb-3">Progress</h2>
@@ -194,7 +217,7 @@ export default function Golf() {
               <div>
                 <h2 className="text-sm font-semibold mb-3">Holes</h2>
                 <div className="space-y-2">
-                  {MOCK_HOLES.map((hole) => (
+                  {holes.map((hole) => (
                     <button
                       key={hole.holeNumber}
                       onClick={() => {
@@ -226,7 +249,7 @@ export default function Golf() {
                   <div className="p-2 rounded-lg bg-accent text-center">
                     <div className="text-xs text-muted-foreground">Holes</div>
                     <div className="text-lg font-bold">
-                      {MOCK_HOLES.length}/18
+                      {holes.length}/18
                     </div>
                   </div>
                   <div className="p-2 rounded-lg bg-accent text-center">
