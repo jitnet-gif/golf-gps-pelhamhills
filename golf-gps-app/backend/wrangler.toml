@@ -1,0 +1,66 @@
+# Cloudflare Workers Configuration
+# Reference: https://developers.cloudflare.com/workers/wrangler/configuration/
+
+name = "golf-gps-backend"
+main = "src/index.ts"
+compatibility_date = "2024-12-16"
+compatibility_flags = ["nodejs_compat"]
+minify = true
+
+# Environment Variables (Production)
+[vars]
+API_VERSION = "v1"
+LOG_LEVEL = "info"
+ENVIRONMENT = "production"
+
+# Supabase 환경변수 (Secrets에서 관리)
+# wrangler secret put SUPABASE_URL
+# wrangler secret put SUPABASE_ANON_KEY
+# wrangler secret put SUPABASE_SERVICE_ROLE_KEY (선택사항)
+
+# R2 Object Storage Configuration (선택사항 - 타일 저장용)
+# 1. Cloudflare Dashboard에서 R2 버킷 생성
+# 2. 버킷 이름 설정
+# 3. 아래 주석 해제 및 bucket_name 입력
+# [[r2_buckets]]
+# binding = "PHOTOS"
+# bucket_name = "golf-gps-photos"
+# [[r2_buckets]]
+# binding = "TILES"
+# bucket_name = "golf-gps-tiles"
+
+# KV Namespace Configuration (선택사항 - 캐싱용)
+# 1. Cloudflare Dashboard에서 KV 네임스페이스 생성
+# 2. ID와 preview_id 복사
+# 3. 아래 주석 해제 및 입력
+# [[kv_namespaces]]
+# binding = "CACHE"
+# id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+# preview_id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# 스케줄된 작업 (크론 잡)
+# 예: 매일 UTC 2:00 AM에 데이터 동기화
+# [triggers]
+# crons = ["0 2 * * *"]
+
+# ============================================================
+# Staging 환경
+# ============================================================
+[env.staging]
+name = "golf-gps-backend-staging"
+vars = { API_VERSION = "v1", LOG_LEVEL = "debug", ENVIRONMENT = "staging" }
+# Staging Supabase 프로젝트 사용:
+# wrangler secret put SUPABASE_URL --env staging
+# wrangler secret put SUPABASE_ANON_KEY --env staging
+# wrangler secret put SUPABASE_SERVICE_ROLE_KEY --env staging
+
+# ============================================================
+# Production 환경
+# ============================================================
+[env.production]
+name = "golf-gps-backend-prod"
+vars = { API_VERSION = "v1", LOG_LEVEL = "warn", ENVIRONMENT = "production" }
+# Production Supabase 프로젝트 사용:
+# wrangler secret put SUPABASE_URL --env production
+# wrangler secret put SUPABASE_ANON_KEY --env production
+# wrangler secret put SUPABASE_SERVICE_ROLE_KEY --env production

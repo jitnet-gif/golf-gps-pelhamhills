@@ -1,0 +1,16 @@
+{
+  // Backend package TypeScript configuration for Cloudflare Workers
+  // Extends root tsconfig and adds Workers-specific settings
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "WebWorker"],
+    "outDir": "./dist",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@golf-gps/shared": ["../../shared/src"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

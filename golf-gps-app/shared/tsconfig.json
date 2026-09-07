@@ -1,0 +1,10 @@
+{
+  // Shared package TypeScript configuration
+  // Extends root tsconfig for consistent settings across monorepo
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

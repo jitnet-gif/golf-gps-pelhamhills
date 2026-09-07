@@ -1,0 +1,29 @@
+{
+  "name": "@golf-gps/backend",
+  "version": "1.0.0",
+  "description": "Golf GPS backend API using Cloudflare Workers + Hono + TypeScript",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:prod": "wrangler deploy --env production",
+    "deploy:staging": "wrangler deploy --env staging",
+    "build": "wrangler deploy --dry-run",
+    "check": "tsc --noEmit",
+    "format": "prettier --write 'src/**/*.ts'",
+    "lint": "tsc --noEmit && prettier --check 'src/**/*.ts'"
+  },
+  "dependencies": {
+    "@golf-gps/shared": "*",
+    "@supabase/supabase-js": "^2.38.0",
+    "hono": "^4.11.10",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260219.0",
+    "@types/node": "^20.0.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.3.0",
+    "wrangler": "^4.66.0"
+  }
+}

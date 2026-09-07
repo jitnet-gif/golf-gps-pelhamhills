@@ -1,0 +1,33 @@
+{
+  "name": "golf-gps-app",
+  "version": "1.0.0",
+  "description": "Golf GPS app with course data and scoring features",
+  "type": "module",
+  "license": "MIT",
+  "workspaces": [
+    "backend",
+    "frontend",
+    "shared"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=frontend & npm run dev --workspace=backend",
+    "build": "npm run build --workspace=shared && npm run build --workspace=backend && npm run build --workspace=frontend",
+    "build:backend": "npm run build --workspace=backend",
+    "build:frontend": "npm run build --workspace=frontend",
+    "deploy": "npm run build && npm run deploy --workspace=backend",
+    "deploy:prod": "npm run build && npm run deploy:prod --workspace=backend",
+    "check": "npm run check --workspace=backend && npm run check --workspace=frontend",
+    "lint": "npm run lint --workspaces",
+    "test": "npm run test --workspaces",
+    "clean": "rm -rf node_modules backend/dist frontend/dist shared/dist"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.11",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.6.3"
+  }
+}

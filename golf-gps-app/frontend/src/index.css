@@ -1,0 +1,184 @@
+/* Import Tailwind CSS layers */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* CSS custom properties for theming
+   Configure these to match your brand colors
+   Light mode defaults, override in dark mode below */
+:root {
+  /* Background and text colors */
+  --background: 0 0% 100%;
+  --foreground: 0 0% 3.6%;
+  --border: 0 0% 88.6%;
+
+  /* Primary colors (main action color - golf green theme) */
+  --primary: 142 71.8% 29.2%;
+  --primary-foreground: 0 0% 100%;
+
+  /* Secondary colors (alternate actions) */
+  --secondary: 46 87.1% 47.1%;
+  --secondary-foreground: 0 0% 100%;
+
+  /* Accent colors (highlights and focus states) */
+  --accent: 217 91.2% 59.8%;
+  --accent-foreground: 0 0% 100%;
+
+  /* Muted colors (disabled states, secondary text) */
+  --muted: 0 0% 96.1%;
+  --muted-foreground: 0 0% 45.1%;
+}
+
+/* Dark mode overrides */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: 0 0% 3.6%;
+    --foreground: 0 0% 98.2%;
+    --border: 0 0% 14.3%;
+
+    --primary: 142 71.8% 29.2%;
+    --primary-foreground: 0 0% 98.2%;
+
+    --secondary: 46 87.1% 47.1%;
+    --secondary-foreground: 0 0% 3.6%;
+
+    --accent: 217 91.2% 59.8%;
+    --accent-foreground: 0 0% 3.6%;
+
+    --muted: 0 0% 14.3%;
+    --muted-foreground: 0 0% 63.9%;
+  }
+}
+
+/* Global styles */
+body {
+  @apply bg-background text-foreground;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Focus styles for accessibility */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible {
+  @apply outline-2 outline-offset-2 outline-accent;
+}
+
+/* Leaflet map customization */
+.leaflet-container {
+  @apply bg-background;
+  font-family: inherit;
+}
+
+.leaflet-control-container .leaflet-top,
+.leaflet-control-container .leaflet-bottom {
+  @apply pointer-events-none;
+}
+
+.leaflet-control {
+  @apply pointer-events-auto;
+}
+
+.leaflet-popup-content-wrapper {
+  @apply bg-card text-foreground border border-border rounded-lg shadow-lg;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.leaflet-popup-tip {
+  @apply bg-card border-b border-r border-border;
+}
+
+.leaflet-control-zoom-in,
+.leaflet-control-zoom-out {
+  @apply bg-card text-foreground border border-border hover:bg-accent;
+  font-size: 16px !important;
+  font-weight: bold;
+}
+
+.leaflet-control-zoom-in:hover,
+.leaflet-control-zoom-out:hover {
+  @apply bg-accent;
+}
+
+.leaflet-control-attribution {
+  @apply bg-card text-xs text-muted-foreground;
+}
+
+.leaflet-marker-icon {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
+}
+
+/* Utility classes */
+@layer components {
+  .btn-primary {
+    @apply px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity;
+  }
+
+  .btn-secondary {
+    @apply px-4 py-2 bg-secondary text-secondary-foreground rounded-lg font-medium hover:opacity-90 transition-opacity;
+  }
+
+  .card {
+    @apply bg-white dark:bg-slate-900 border border-border rounded-lg p-4;
+  }
+
+  .input-field {
+    @apply px-3 py-2 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full bg-accent text-accent-foreground;
+  }
+
+  .badge-primary {
+    @apply inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full bg-primary/10 text-primary;
+  }
+}
+
+/* Animations */
+@keyframes slideUp {
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@layer utilities {
+  .animate-slide-up {
+    animation: slideUp 0.3s ease-out;
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.2s ease-in-out;
+  }
+}
+
+/* Mobile optimizations */
+@media (max-width: 640px) {
+  body {
+    font-size: 14px;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}

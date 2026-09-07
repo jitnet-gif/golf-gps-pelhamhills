@@ -1,0 +1,51 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Node dependencies
+node_modules/
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# Build outputs
+dist/
+dist-server/
+dist-worker/
+build/
+.turbo/
+
+# Development
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Wrangler/Cloudflare
+.wrangler/
+.env.*.vars
+
+# TypeScript
+*.tsbuildinfo
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Temporary files
+*.tmp
+temp/
+cache/
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# IDE
+.vscode/settings.json
+.idea/workspace.xml
