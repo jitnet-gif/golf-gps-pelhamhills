@@ -87,8 +87,8 @@ const MapContent: React.FC<{
   return (
     <>
       <TileLayer
-        url={tileUrl}
-        attribution="© Golf GPS"
+        url={tileUrl || 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'}
+        attribution="© Esri"
         maxZoom={20}
         crossOrigin="anonymous"
       />
