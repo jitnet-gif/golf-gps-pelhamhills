@@ -1,6 +1,8 @@
 {
-  "buildCommand": "npm run build",
-  "outputDirectory": "frontend/dist",
+  "buildCommand": "npm install && npm run build",
+  "outputDirectory": "golf-gps-app/frontend/dist",
+  "installCommand": "npm install --legacy-peer-deps",
+  "public": "golf-gps-app/frontend",
   "rewrites": [
     {
       "source": "/(.*)",
