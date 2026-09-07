@@ -1,0 +1,73 @@
+{
+  "projectName": "pelham-hills-golf",
+  "framework": "nextjs",
+  "regions": ["sfo1", "iad1", "lhr1"],
+  "public": false,
+  "buildCommand": "npm run build",
+  "outputDirectory": ".next",
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "env": {
+    "NEXT_PUBLIC_API_URL": {
+      "description": "Backend API base URL",
+      "required": false
+    },
+    "NEXT_PUBLIC_SUPABASE_URL": {
+      "description": "Supabase project URL",
+      "required": true
+    },
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY": {
+      "description": "Supabase anonymous key",
+      "required": true
+    },
+    "NEXT_PUBLIC_CDN_DOMAIN": {
+      "description": "Cloudflare R2 CDN domain for tiles",
+      "required": false
+    },
+    "ANTHROPIC_API_KEY": {
+      "description": "Anthropic API key for Claude",
+      "required": true
+    }
+  },
+  "headers": [
+    {
+      "source": "/api/:path*",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, no-store, must-revalidate"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        }
+      ]
+    },
+    {
+      "source": "/tiles/:path*",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        },
+        {
+          "key": "Content-Type",
+          "value": "image/webp"
+        }
+      ]
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "/courses",
+      "permanent": false
+    }
+  ],
+  "functions": {
+    "api/**: {
+      "maxDuration": 60,
+      "memory": 1024
+    }
+  }
+}

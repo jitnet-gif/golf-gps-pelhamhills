@@ -83,17 +83,17 @@ input:focus-visible {
 }
 
 .leaflet-popup-content-wrapper {
-  @apply bg-card text-foreground border border-border rounded-lg shadow-lg;
+  @apply bg-background text-foreground border border-border rounded-lg shadow-lg;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
 .leaflet-popup-tip {
-  @apply bg-card border-b border-r border-border;
+  @apply bg-background border-b border-r border-border;
 }
 
 .leaflet-control-zoom-in,
 .leaflet-control-zoom-out {
-  @apply bg-card text-foreground border border-border hover:bg-accent;
+  @apply bg-background text-foreground border border-border hover:bg-accent;
   font-size: 16px !important;
   font-weight: bold;
 }
@@ -104,7 +104,7 @@ input:focus-visible {
 }
 
 .leaflet-control-attribution {
-  @apply bg-card text-xs text-muted-foreground;
+  @apply bg-background text-xs text-muted-foreground;
 }
 
 .leaflet-marker-icon {

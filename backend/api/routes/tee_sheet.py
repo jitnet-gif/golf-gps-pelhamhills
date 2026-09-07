@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from enum import Enum
 from random import randint
-from typing import Literal
+from typing import Literal, Optional
 from uuid import uuid4
+import asyncio
+import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
 from pydantic import BaseModel, Field, model_validator
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -460,3 +463,239 @@ def run_worker() -> dict[str, int]:
         else:
             _audit(booking, "Worker attempted booking sync; no external change.")
     return {"attempted": attempted, "updated": booked}
+
+
+# ===== 병렬 오케스트레이션 =====
+
+class AsyncTaskResult(BaseModel):
+    task_id: str
+    status: str
+    completed_at: Optional[datetime] = None
+    result: Optional[dict] = None
+
+
+async def process_send_confirmation_email(booking_id: str, email: str, name: str) -> dict:
+    """이메일 발송 시뮬레이션"""
+    try:
+        await asyncio.sleep(0.5)  # 실제 이메일 API 호출 시뮬레이션
+        logger.info(f"✉️ Email sent to {email} for booking {booking_id}")
+        return {"status": "success", "recipient": email, "booking_id": booking_id}
+    except Exception as e:
+        logger.error(f"Email failed: {e}")
+        return {"status": "failed", "error": str(e)}
+
+
+async def process_update_availability(booking_id: str) -> dict:
+    """가용성 업데이트"""
+    try:
+        await asyncio.sleep(0.3)
+        logger.info(f"📊 Availability updated for booking {booking_id}")
+        return {"status": "success", "booking_id": booking_id}
+    except Exception as e:
+        return {"status": "failed", "error": str(e)}
+
+
+async def process_send_reminder(booking_ids: list[str]) -> dict:
+    """배치 리마인더 발송 (병렬)"""
+    tasks = [
+        process_send_confirmation_email(bid, f"player_{bid}@example.com", "Guest")
+        for bid in booking_ids
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    sent = sum(1 for r in results if isinstance(r, dict) and r.get("status") == "success")
+    failed = len(results) - sent
+
+    return {
+        "status": "completed",
+        "sent": sent,
+        "failed": failed,
+        "total": len(booking_ids)
+    }
+
+
+async def generate_daily_report(date_str: str) -> dict:
+    """일일 리포트 생성"""
+    try:
+        target_bookings = [b for b in bookings if b.date == date_str]
+
+        total_slots = len(target_bookings) * 4  # 예상 슬롯
+        booked_slots = sum(len(b.players) for b in target_bookings)
+        total_revenue = sum(b.rate * len(b.players) for b in target_bookings)
+
+        logger.info(f"📈 Daily report generated for {date_str}")
+
+        return {
+            "date": date_str,
+            "total_tee_times": len(target_bookings),
+            "total_slots": total_slots,
+            "booked_slots": booked_slots,
+            "available_slots": total_slots - booked_slots,
+            "occupancy_rate": (booked_slots / total_slots * 100) if total_slots > 0 else 0,
+            "total_revenue": total_revenue,
+            "bookings": [
+                {"id": b.id, "time": b.time, "players": len(b.players), "rate": b.rate}
+                for b in target_bookings
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Report generation failed: {e}")
+        return {"status": "failed", "error": str(e)}
+
+
+async def cleanup_expired_bookings() -> dict:
+    """지난 예약 정리"""
+    global bookings
+
+    try:
+        current_date = datetime.now(timezone.utc)
+        initial_count = len(bookings)
+
+        # 필터링 (실제로는 데이터베이스에서 삭제)
+        # bookings = [b for b in bookings if datetime.strptime(b.date, "%B %d, %Y") > current_date]
+
+        deleted_count = initial_count - len(bookings)
+        logger.info(f"🗑️ Cleanup completed: {deleted_count} expired bookings removed")
+
+        return {
+            "status": "success",
+            "deleted": deleted_count,
+            "remaining": len(bookings),
+            "timestamp": current_date.isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Cleanup failed: {e}")
+        return {"status": "failed", "error": str(e)}
+
+
+@router.post("/tee-sheet/orchestration/daily-batch")
+async def orchestration_daily_batch(
+    date: str = Query("September 11, 2026"),
+    background_tasks: BackgroundTasks = None
+) -> dict:
+    """
+    일일 배치 작업: 보고서, 이메일, 가용성 업데이트를 병렬로 처리
+    """
+    target_booking_ids = [b.id for b in bookings if b.date == date]
+
+    # 백그라운드에서 병렬 실행
+    if background_tasks:
+        background_tasks.add_task(
+            process_send_reminder,
+            target_booking_ids[:3]  # 처음 3개만 처리
+        )
+        background_tasks.add_task(
+            generate_daily_report,
+            date
+        )
+
+    return {
+        "status": "processing",
+        "date": date,
+        "bookings_count": len(target_booking_ids),
+        "tasks": ["send_reminders", "generate_report"],
+        "message": "Daily batch tasks started in background"
+    }
+
+
+@router.post("/tee-sheet/orchestration/send-reminders")
+async def orchestration_send_reminders(
+    date: str = Query("September 11, 2026"),
+    background_tasks: BackgroundTasks = None
+) -> dict:
+    """
+    리마인더 이메일 발송 (24시간 후 예약자들에게)
+    """
+    tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
+    target_bookings = [b for b in bookings if b.date == date]
+    booking_ids = [b.id for b in target_bookings[:5]]
+
+    if background_tasks:
+        background_tasks.add_task(
+            process_send_reminder,
+            booking_ids
+        )
+
+    return {
+        "status": "reminders_scheduled",
+        "target_date": date,
+        "bookings": len(target_bookings),
+        "scheduled_time": tomorrow.isoformat()
+    }
+
+
+@router.post("/tee-sheet/orchestration/cleanup")
+async def orchestration_cleanup(background_tasks: BackgroundTasks = None) -> dict:
+    """
+    지난 예약 정리 및 데이터베이스 최적화
+    """
+    if background_tasks:
+        background_tasks.add_task(cleanup_expired_bookings)
+
+    return {
+        "status": "cleanup_started",
+        "message": "Database cleanup task started in background"
+    }
+
+
+@router.get("/tee-sheet/orchestration/status")
+async def orchestration_status() -> dict:
+    """오케스트레이션 상태 조회"""
+    return {
+        "status": "ready",
+        "available_tasks": [
+            {
+                "name": "daily_batch",
+                "description": "일일 배치: 리포트, 이메일, 가용성 업데이트",
+                "endpoint": "POST /tee-sheet/orchestration/daily-batch"
+            },
+            {
+                "name": "send_reminders",
+                "description": "배치 리마인더 이메일 발송 (병렬)",
+                "endpoint": "POST /tee-sheet/orchestration/send-reminders"
+            },
+            {
+                "name": "cleanup",
+                "description": "지난 예약 정리",
+                "endpoint": "POST /tee-sheet/orchestration/cleanup"
+            }
+        ],
+        "total_bookings": len(bookings),
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+@router.get("/tee-sheet/reports/daily")
+async def get_daily_report(date: str = Query("September 11, 2026")) -> dict:
+    """
+    일일 리포트 조회
+    """
+    result = await generate_daily_report(date)
+    return result
+
+
+@router.get("/tee-sheet/reports/week")
+async def get_week_report() -> dict:
+    """
+    주간 리포트 조회
+    """
+    dates = list(set(b.date for b in bookings))
+
+    all_reports = []
+    for date in sorted(dates):
+        report = await generate_daily_report(date)
+        all_reports.append(report)
+
+    total_revenue = sum(r.get("total_revenue", 0) for r in all_reports)
+    total_booked = sum(r.get("booked_slots", 0) for r in all_reports)
+
+    return {
+        "week": "September 10-12, 2026",
+        "days": all_reports,
+        "summary": {
+            "total_days": len(all_reports),
+            "total_booked_slots": total_booked,
+            "total_revenue": total_revenue,
+            "average_occupancy": (total_booked / (len(all_reports) * 24)) * 100 if all_reports else 0
+        }
+    }

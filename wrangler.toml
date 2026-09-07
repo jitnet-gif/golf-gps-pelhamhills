@@ -1,0 +1,128 @@
+# Cloudflare Workers & Pages Configuration
+# Deployment: wrangler deploy or wrangler pages deploy
+
+name = "pelham-hills-golf"
+type = "javascript"
+account_id = ""  # Set via CLOUDFLARE_ACCOUNT_ID env var
+workers_dev = true
+route = ""  # Optional: specific route pattern
+zone_id = ""  # Set if deploying to a zone
+
+# Build configuration
+[build]
+command = "npm install && npm run build"
+cwd = "./"
+watch_paths = ["src/**/*.ts"]
+
+# Development server
+[dev]
+ip = "0.0.0.0"
+port = 8787
+local_protocol = "http"
+
+# Environment configurations
+[env.development]
+name = "pelham-hills-golf-dev"
+routes = [
+  { pattern = "dev.golf.example.com/*", zone_name = "example.com" }
+]
+vars = { ENVIRONMENT = "development", DEBUG = "true" }
+kv_namespaces = [
+  { binding = "CACHE", id = "", preview_id = "" },
+  { binding = "TILES", id = "", preview_id = "" }
+]
+
+[env.production]
+name = "pelham-hills-golf"
+routes = [
+  { pattern = "golf.example.com/*", zone_name = "example.com" }
+]
+vars = { ENVIRONMENT = "production", DEBUG = "false" }
+kv_namespaces = [
+  { binding = "CACHE", id = "", preview_id = "" },
+  { binding = "TILES", id = "", preview_id = "" }
+]
+r2_buckets = [
+  { binding = "GOLF_TILES", bucket_name = "golf-tiles" }
+]
+
+# Cloudflare Pages configuration (if using Pages instead of Workers)
+[pages]
+build_output_dir = "out"
+
+# Analytics Engine configuration
+[[analytics_engine_bindings]]
+binding = "ANALYTICS"
+dataset = "golf_analytics"
+
+# Environment-specific analytics
+[env.production.analytics_engine_bindings]
+binding = "ANALYTICS"
+dataset = "golf_analytics_prod"
+
+# Durable Objects configuration (optional: for state management)
+[[durable_objects.bindings]]
+name = "GAME_STATE"
+class_name = "GameState"
+script_name = "game-worker"
+
+# Environment-specific Durable Objects
+[env.production.durable_objects.bindings]
+name = "GAME_STATE"
+class_name = "GameState"
+script_name = "game-worker"
+environment = "production"
+
+# Observability & Logging
+[observability]
+enabled = true
+
+# Tail consumers for structured logging
+[[tail_consumers]]
+service = "pelham-hills-golf-logging"
+namespace_id = ""  # Durable Objects namespace ID
+
+# Build watch paths
+[build.watch_paths]
+"./src/**/*.ts" = "ts"
+"./src/**/*.js" = "js"
+
+# Migrations (for Durable Objects)
+[[migrations]]
+tag = "v1"
+new_classes = ["GameState"]
+
+[[migrations]]
+tag = "v2"
+new_classes = ["CourseManager"]
+deleted_classes = []
+
+# Custom build steps
+[build.upload]
+format = "service-worker"
+
+# Triggers for scheduled tasks (cron)
+[[triggers.crons]]
+cron = "0 */6 * * *"  # Every 6 hours
+
+[[triggers.crons]]
+cron = "0 2 * * 0"  # Weekly at 2 AM Sunday
+
+# Limits and quotas
+[limits]
+cpu_ms = 50000  # 50 second CPU time limit
+
+# Bindings summary
+[env.production.vars]
+ENVIRONMENT = "production"
+DEBUG = "false"
+BACKEND_URL = "https://api.example.com"
+SUPABASE_URL = "https://xxxx.supabase.co"
+API_VERSION = "v1"
+
+[env.development.vars]
+ENVIRONMENT = "development"
+DEBUG = "true"
+BACKEND_URL = "http://localhost:8000"
+SUPABASE_URL = "http://localhost:54321"
+API_VERSION = "v1"

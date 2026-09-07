@@ -1,0 +1,63 @@
+{
+  "name": "pelham-hills-golf",
+  "version": "1.0.0",
+  "description": "Pelham Hills Golf Club - GPS Course Management & Live Scoring",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm:dev:*\"",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "dev:backend": "cd backend && python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000",
+    "dev:docker": "docker-compose -f docker-compose.yml up",
+    "build": "npm run build:frontend && npm run build:backend",
+    "build:frontend": "npm run build --workspace=frontend",
+    "build:backend": "echo 'Backend is Python-based, no build step required'",
+    "start": "npm run start:frontend",
+    "start:frontend": "npm run start --workspace=frontend",
+    "lint": "npm run lint --workspace=frontend && python -m flake8 backend/",
+    "format": "npm run format:frontend && python -m black backend/",
+    "format:frontend": "prettier --write \"frontend/**/*.{js,jsx,ts,tsx,json,css,md}\"",
+    "test": "npm run test:frontend && npm run test:backend",
+    "test:frontend": "npm run test --workspace=frontend",
+    "test:backend": "cd backend && python -m pytest tests/ -v --cov=backend --cov-report=html",
+    "type-check": "npm run type-check --workspace=frontend && cd backend && python -m mypy backend/",
+    "deploy": "npm run deploy:frontend && npm run deploy:backend",
+    "deploy:frontend": "npm run deploy --workspace=frontend",
+    "deploy:backend": "flyctl deploy",
+    "deploy:tiles": "npm run generate-tiles && npm run upload-r2",
+    "seed-db": "cd backend && python scripts/seed-courses.ts",
+    "generate-tiles": "cd scripts && ts-node generate-tiles.ts",
+    "upload-r2": "cd scripts && ts-node upload-to-r2.ts",
+    "db:migrate": "cd backend && alembic upgrade head",
+    "db:seed": "cd backend && python scripts/seed_db.py",
+    "docker:up": "docker-compose -f docker-compose.yml up -d",
+    "docker:down": "docker-compose -f docker-compose.yml down",
+    "docker:logs": "docker-compose -f docker-compose.yml logs -f",
+    "docker:clean": "docker-compose -f docker-compose.yml down -v",
+    "clean": "rm -rf node_modules frontend/node_modules backend/.venv .next dist build *.log",
+    "clean:cache": "rm -rf .next backend/__pycache__ **/.pytest_cache **.pyc",
+    "install:all": "npm install && npm install --workspace=frontend && pip install -r backend/requirements.txt"
+  },
+  "workspaces": [
+    "frontend",
+    "golf-gps-app/backend",
+    "shared"
+  ],
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "prettier": "^3.1.0",
+    "typescript": "^5.3.3"
+  },
+  "keywords": [
+    "golf",
+    "gps",
+    "course-management",
+    "scoring",
+    "leaderboard"
+  ],
+  "author": "Pelham Hills Golf Club",
+  "license": "MIT"
+}

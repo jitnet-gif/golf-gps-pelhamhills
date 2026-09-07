@@ -118,7 +118,7 @@ export const supportsTouchEvent = (): boolean => {
   return typeof window !== 'undefined' &&
     (('ontouchstart' in window) ||
       (navigator.maxTouchPoints > 0) ||
-      ('msMaxTouchPoints' in navigator && navigator.msMaxTouchPoints > 0));
+      ('msMaxTouchPoints' in navigator && (navigator as any).msMaxTouchPoints > 0));
 };
 
 /**

@@ -36,7 +36,7 @@ export const useScorecard = () => {
         // Add to sync queue
         await db.syncQueue.add({
           type: 'round',
-          payload: newRound,
+          payload: newRound as any,
           timestamp: new Date().toISOString(),
           attempts: 0,
         });
@@ -117,7 +117,7 @@ export const useScorecard = () => {
         // Add to sync queue
         await db.syncQueue.add({
           type: 'score',
-          payload: scoreRecord,
+          payload: scoreRecord as any,
           timestamp: new Date().toISOString(),
           attempts: 0,
         });
