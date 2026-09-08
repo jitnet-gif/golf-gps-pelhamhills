@@ -149,11 +149,11 @@ function DesktopSidebar({ pathname }: { pathname: string | null }) {
     // 두면 메뉴 12개 바로 밑에 노트가 붙어서 화면 중간에 뜬다.
     <aside className="hidden min-h-0 flex-col bg-[#111315] text-white lg:flex">
       <div className="flex shrink-0 items-center gap-2 border-b border-white/10 px-4 py-4 text-sm font-bold">
-        {/* 워드마크 앞의 마름모는 Lightspeed 로고 자리. */}
+        {/* 워드마크 앞의 마름모는 클럽 로고 자리 (Lightspeed 워드마크 앞 마름모를 그대로 따랐다). */}
         <span aria-hidden className="text-base leading-none">
           &#9670;
         </span>
-        lightspeed
+        pelhamhills
       </div>
 
       {/* 제품군 표시. Lightspeed 는 여기에 드롭다운을 두지만 우리는 골프 하나뿐이라
@@ -175,7 +175,7 @@ function DesktopSidebar({ pathname }: { pathname: string | null }) {
       </Link>
 
       <div className="flex shrink-0 items-baseline justify-between border-b border-white/10 px-4 py-2.5 text-[11px]">
-        <span className="font-semibold">John Najev</span>
+        <span className="font-semibold">Pro Shop</span>
         <span className="flex items-baseline gap-1 text-white/50">
           Owner
           <span aria-hidden className="text-[9px] leading-none">
@@ -387,7 +387,7 @@ function MobileDrawer({
       />
       <div className="absolute inset-y-0 left-0 flex w-[82vw] max-w-[300px] flex-col bg-[#111315] text-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-          <span className="text-sm font-bold">lightspeed</span>
+          <span className="text-sm font-bold">pelhamhills</span>
           <button
             aria-label="Close admin menu"
             className="-mr-2 flex h-10 w-10 items-center justify-center text-xl"
@@ -417,7 +417,7 @@ function MobileDrawer({
         </nav>
 
         <div className="border-t border-white/10 px-4 py-3 text-[11px] text-white/60">
-          John Najev · Owner
+          Pro Shop · Owner
         </div>
       </div>
     </div>

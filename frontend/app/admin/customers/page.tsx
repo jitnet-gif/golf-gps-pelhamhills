@@ -25,7 +25,7 @@ type Customer = {
 const customers: Customer[] = [
   {
     id: "c-0910-01",
-    name: "Marie Predote",
+    name: "Avery Sample",
     phone: "",
     email: "",
     status: "active",
@@ -38,7 +38,7 @@ const customers: Customer[] = [
   },
   {
     id: "c-0910-02",
-    name: "Bryan Wheeland",
+    name: "Blake Sample",
     phone: "",
     email: "",
     status: "vip",
@@ -51,7 +51,7 @@ const customers: Customer[] = [
   },
   {
     id: "c-0910-03",
-    name: "Dan Marshall",
+    name: "Casey Sample",
     phone: "",
     email: "",
     status: "active",
@@ -64,7 +64,7 @@ const customers: Customer[] = [
   },
   {
     id: "c-0910-04",
-    name: "Chris Nicalou",
+    name: "Devon Sample",
     phone: "",
     email: "",
     status: "active",
@@ -77,7 +77,7 @@ const customers: Customer[] = [
   },
   {
     id: "c-0910-05",
-    name: "James Carlsson",
+    name: "Ellis Sample",
     phone: "",
     email: "",
     status: "active",
@@ -90,7 +90,7 @@ const customers: Customer[] = [
   },
   {
     id: "c-0910-06",
-    name: "Rick Costea",
+    name: "Finley Sample",
     phone: "",
     email: "",
     status: "active",
@@ -103,7 +103,7 @@ const customers: Customer[] = [
   },
   {
     id: "c-0911-01",
-    name: "Marty Kicul",
+    name: "Gray Sample",
     phone: "",
     email: "",
     status: "active",
@@ -116,7 +116,7 @@ const customers: Customer[] = [
   },
   {
     id: "c-0911-02",
-    name: "Jami Buckley",
+    name: "Harper Sample",
     phone: "",
     email: "",
     status: "watch",
@@ -129,7 +129,7 @@ const customers: Customer[] = [
   },
   {
     id: "c-0911-03",
-    name: "Ruth Unrau",
+    name: "Indigo Sample",
     phone: "",
     email: "",
     status: "active",

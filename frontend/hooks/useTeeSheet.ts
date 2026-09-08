@@ -140,9 +140,15 @@ const FALLBACK_TODAY = todayIso();
 const FALLBACK_OTHER_DAY = FALLBACK_WEEK[2] ?? FALLBACK_TODAY;
 
 /**
- * 마지막 성공 응답이 없을 때 사용하는 번들 시드 — 서버 시드(Chronogolf 스크린샷 날)의
- * **부분집합**이다. 이름·요금제·요금(47.79)을 서버와 맞춰 두는 이유: 오프라인 화면이
- * 온라인 화면과 다른 사실을 주장하면 프런트 데스크가 어느 쪽을 믿어야 할지 모른다.
+ * 마지막 성공 응답도 비식별화 스냅샷도 없을 때 쓰는 **최후** 시드다.
+ *
+ * ⚠️ 이름은 전부 자리표시자여야 한다. 이 파일은 git 에 추적되고 정적 번들에 그대로
+ * 실려 공개 사이트로 나간다 — 예전에는 여기에 실제 회원 이름이 8명 박혀 있었고,
+ * 그대로 배포돼 있었다. 실데이터는 `public/data/teesheet-public.json` 경로로만
+ * 들어오고, 그 파일은 이미 이름·연락처가 제거된 것이다.
+ *
+ * 요금제와 요금(47.79)은 실제 값을 유지한다 — 가격 카테고리는 개인정보가 아니고,
+ * 오프라인 화면이 요금을 다르게 말하면 프런트 데스크가 혼란스럽다.
  *
  * `color` 는 여기서 **판매 채널**을 뜻한다. tone.ts 의 1순위 규칙이
  * `booking.color === "blue"` → "online" 이고 이게 플레이어 단위 규칙보다 위에 있으므로,
@@ -156,59 +162,59 @@ const FALLBACK_BOOKINGS: TeeBooking[] = [
   makeFallbackBooking({
     date: FALLBACK_TODAY,
     time: "6:58 AM",
-    title: "Predote, Marie",
+    title: "Party A",
     color: "gold",
     cartCount: 2,
     players: [
-      { name: "Marie Predote", type: "Existing Customer", ratePlan: "Weekday Member - Single with Weekday Cart" },
-      { name: "Betty Lou DiMattio", type: "Existing Customer", ratePlan: "Weekday Member - Single with Weekday Cart" },
-      { name: "Roseann Norton", type: "Existing Customer", ratePlan: "Weekday Member - Single with Weekday Cart" },
-      { name: "Steve Murphy", type: "Existing Customer", ratePlan: "Full Member - Single with 7 Day Cart" },
+      { name: "Golfer A1", type: "Existing Customer", ratePlan: "Weekday Member - Single with Weekday Cart" },
+      { name: "Golfer A2", type: "Existing Customer", ratePlan: "Weekday Member - Single with Weekday Cart" },
+      { name: "Golfer A3", type: "Existing Customer", ratePlan: "Weekday Member - Single with Weekday Cart" },
+      { name: "Golfer A4", type: "Existing Customer", ratePlan: "Full Member - Single with 7 Day Cart" },
     ],
   }),
   makeFallbackBooking({
     date: FALLBACK_TODAY,
     time: "7:07 AM",
-    title: "Wheeland, Alf",
+    title: "Party B",
     color: "gold",
     cartCount: 1,
     players: [
-      { name: "Alf Wheeland", type: "Existing Customer", ratePlan: "Weekday Member - Single with Weekday Cart" },
-      { name: "Colin Scott", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
-      { name: "David Neville", type: "Existing Customer", ratePlan: "Weekday Member - Single with Weekday Cart" },
+      { name: "Golfer B1", type: "Existing Customer", ratePlan: "Weekday Member - Single with Weekday Cart" },
+      { name: "Golfer B2", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
+      { name: "Golfer B3", type: "Existing Customer", ratePlan: "Weekday Member - Single with Weekday Cart" },
     ],
   }),
   makeFallbackBooking({
     date: FALLBACK_TODAY,
     time: "7:25 AM",
-    title: "Nicalou, Chris",
+    title: "Party C",
     color: "gold",
     cartCount: 1,
     players: [
-      { name: "Chris Nicalou", type: "Existing Customer", ratePlan: "Full Member - Single with 7 Day Cart" },
-      { name: "Triada Nicolou", type: "Existing Customer", ratePlan: "Full Member - Single with 7 Day Cart" },
+      { name: "Golfer C1", type: "Existing Customer", ratePlan: "Full Member - Single with 7 Day Cart" },
+      { name: "Golfer C2", type: "Existing Customer", ratePlan: "Full Member - Single with 7 Day Cart" },
     ],
   }),
   // ---- 7:43 AM: 티타임 하나를 예약 둘이 나눠 쓴다 (2 + 2 = 정원 4) ----
   makeFallbackBooking({
     date: FALLBACK_TODAY,
     time: "7:43 AM",
-    title: "Unrau, Ruth",
+    title: "Party D",
     color: "gold",
     cartCount: 1,
     players: [
-      { name: "Ruth Unrau", type: "Existing Customer", ratePlan: "Public Senior" },
+      { name: "Golfer D1", type: "Existing Customer", ratePlan: "Public Senior" },
       { name: "Guest", type: "Guest", ratePlan: "Public Senior" },
     ],
   }),
   makeFallbackBooking({
     date: FALLBACK_TODAY,
     time: "7:43 AM",
-    title: "Carlsson, James",
+    title: "Party E",
     color: "blue", // GolfNow — 이 시드에서 blue 가 붙는 유일한 이유.
     cartCount: 0,
     players: [
-      { name: "James Carlsson", type: "Existing Customer", ratePlan: "GolfNow" },
+      { name: "Golfer E1", type: "Existing Customer", ratePlan: "GolfNow" },
       { name: "Guest", type: "Guest", ratePlan: "GolfNow" },
     ],
   }),
@@ -216,35 +222,35 @@ const FALLBACK_BOOKINGS: TeeBooking[] = [
   makeFallbackBooking({
     date: FALLBACK_TODAY,
     time: "7:52 AM",
-    title: "Costea, Rick",
+    title: "Party F",
     color: "gold",
     cartCount: 1,
     players: [
-      { name: "Rick Costea", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
-      { name: "Rudy Videchak", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
-      { name: "Roger Denis", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
+      { name: "Golfer F1", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
+      { name: "Golfer F2", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
+      { name: "Golfer F3", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
     ],
   }),
   makeFallbackBooking({
     date: FALLBACK_TODAY,
     time: "7:52 AM",
-    title: "Pattemore, Gregory",
+    title: "Party G",
     color: "blue", // GolfNow.
     cartCount: 0,
-    players: [{ name: "Gregory Pattemore", type: "Existing Customer", ratePlan: "GolfNow" }],
+    players: [{ name: "Golfer G1", type: "Existing Customer", ratePlan: "GolfNow" }],
   }),
   // 다른 날 한 건 — 일간 뷰의 "Other days this week" 스트립 경로를 살려 둔다.
   makeFallbackBooking({
     date: FALLBACK_OTHER_DAY,
     time: "7:16 AM",
-    title: "Marshall, Dan",
+    title: "Party H",
     color: "gold",
     cartCount: 1,
     players: [
-      { name: "Dan Marshall", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
-      { name: "Peter Catti", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
-      { name: "Joe Grdovich", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
-      { name: "Leslie Reid", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
+      { name: "Golfer H1", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
+      { name: "Golfer H2", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
+      { name: "Golfer H3", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
+      { name: "Golfer H4", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
     ],
   }),
 ];
@@ -341,6 +347,13 @@ export function useTeeSheet(): TeeSheetController {
   const focusedDateRef = useRef<string>(focusedDate);
   const weekStartRef = useRef<string>(startOfWeek(focusedDate));
   const lastGoodRef = useRef<TeeBooking[] | null>(null);
+  /**
+   * `public/data/teesheet-public.json` — `scripts/build_public_snapshot.py` 가 굽는
+   * **비식별화** 스냅샷. 배포된 정적 사이트에는 백엔드가 없어서 이게 실제 시트에
+   * 가장 가까운 자료다. 이름·연락처는 이미 제거돼 있다 (그 스크립트의 허용 목록
+   * 방식과 방출 직전 검사 참고).
+   */
+  const snapshotRef = useRef<TeeBooking[] | null>(null);
   /** 예약별 요청 시퀀스 — 늦게 도착한 응답이 최신 상태를 덮어쓰지 못하게 한다. */
   const seqRef = useRef<Map<string, number>>(new Map());
   const toastTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -353,6 +366,7 @@ export function useTeeSheet(): TeeSheetController {
       mountedRef.current = false;
     };
   }, []);
+
 
   // --- derived dates ---
   const weekStart = useMemo(() => startOfWeek(focusedDate), [focusedDate]);
@@ -449,6 +463,32 @@ export function useTeeSheet(): TeeSheetController {
   );
 
   // --- offline handling ---
+  // 비식별화 스냅샷을 한 번 읽어 둔다. 없으면(로컬 개발, 아직 안 구운 빌드) 조용히
+  // 넘어가고 번들 시드로 떨어진다 — 이것 때문에 화면이 막히면 안 된다.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/data/teesheet-public.json", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload: unknown = await response.json();
+        const rows = (payload as { bookings?: unknown })?.bookings;
+        if (cancelled || !mountedRef.current || !Array.isArray(rows) || rows.length === 0) return;
+        snapshotRef.current = rows as TeeBooking[];
+        // 이미 오프라인으로 떨어진 뒤에 스냅샷이 도착했다면 지금 반영한다.
+        if (connectionRef.current === "offline" && !lastGoodRef.current) {
+          commitBookings(() => rows as TeeBooking[]);
+          reconcileSelection(rows as TeeBooking[]);
+        }
+      } catch {
+        // 스냅샷이 없는 것은 정상이다. 시드로 계속한다.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [commitBookings, reconcileSelection]);
+
   const enterOffline = useCallback(
     (detail: string, reseed: boolean) => {
       const wasOffline = connectionRef.current === "offline";
@@ -456,9 +496,10 @@ export function useTeeSheet(): TeeSheetController {
 
       commitConnection("offline");
       if (reseed) {
-        // 마지막으로 성공한 응답을 우선 사용하고, 없으면 번들 시드를 쓴다.
-        commitBookings(() => lastGoodRef.current ?? FALLBACK_BOOKINGS);
-        reconcileSelection(lastGoodRef.current ?? FALLBACK_BOOKINGS);
+        // 마지막으로 성공한 응답 > 비식별화 스냅샷 > 번들 시드 순으로 쓴다.
+        const seed = lastGoodRef.current ?? snapshotRef.current ?? FALLBACK_BOOKINGS;
+        commitBookings(() => seed);
+        reconcileSelection(seed);
         if (slotsRef.current.length === 0) commitSlots(FALLBACK_SLOTS);
       }
       pushToast("error", `Server unreachable — working offline. ${detail}`);
