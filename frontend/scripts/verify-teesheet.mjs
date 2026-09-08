@@ -416,12 +416,45 @@ try {
       if (pane) pane.scrollTop = 0;
     });
     await page.waitForTimeout(300);
+    // 선택 전: 상세 패널이 없고 티 시트가 화면 전체를 쓴다.
+    // 앞 단계에서 펼쳐둔 Operations 는 접어서 기본 상태로 되돌린다.
+    await page.getByRole("button", { name: /^Close/ }).click().catch(() => {});
+    await page.waitForTimeout(400);
+    const opsToggle = page.getByRole("button", { name: /Operations/ });
+    if ((await opsToggle.getAttribute("aria-expanded")) === "true") {
+      await opsToggle.click();
+      await page.waitForTimeout(500);
+    }
+    const measure = () =>
+      page.evaluate(() => {
+        const pane = document.querySelector("main section section .overflow-auto");
+        const detail = [...document.querySelectorAll("section")].find((e) =>
+          e.className.includes("bg-[#dedee2]"),
+        );
+        return {
+          grid: pane ? Math.round(pane.getBoundingClientRect().height) : 0,
+          hasDetail: Boolean(detail),
+        };
+      });
+    const unselected = await measure();
+    check(!unselected.hasDetail, "예약 선택 전에는 상세 패널이 렌더되지 않음");
+
     await page.getByRole("button", { name: /Predote, Marie/ }).last().click();
     await page.waitForTimeout(700);
+    const selectedLayout = await measure();
+    check(
+      unselected.grid > selectedLayout.grid,
+      `선택 전 티 시트가 더 크게 확장됨 (${unselected.grid}px -> ${selectedLayout.grid}px)`,
+    );
+    check(
+      selectedLayout.grid >= unselected.grid * 0.4,
+      `선택 후에도 티 시트가 절반 가까이 유지됨 (${selectedLayout.grid}px)`,
+    );
+
     const layout = await page.evaluate(() => {
       const pane = document.querySelector("main section section .overflow-auto");
-      const detail = [...document.querySelectorAll("main section > div")].find((el) =>
-        el.querySelector("button")?.textContent?.includes("Cancel Reservation"),
+      const detail = [...document.querySelectorAll("section")].find((el) =>
+        el.className.includes("bg-[#dedee2]"),
       );
       const seen = (el) => {
         if (!el) return null;
@@ -439,6 +472,17 @@ try {
       "예약 클릭 시 티 시트와 상세 패널이 동시에 한 화면에 보임",
     );
     check(layout.gridScrolls, "티 시트가 페이지가 아니라 자기 영역 안에서만 스크롤됨");
+
+    // 닫으면 다시 티 시트가 화면 전체로 돌아온다.
+    await page.getByRole("button", { name: /^Close/ }).click();
+    await page.waitForTimeout(700);
+    const reclosed = await measure();
+    check(
+      !reclosed.hasDetail && reclosed.grid === unselected.grid,
+      `Close 로 상세를 닫으면 티 시트가 다시 전체 화면으로 확장됨 (${reclosed.grid}px)`,
+    );
+    await page.getByRole("button", { name: /Predote, Marie/ }).last().click();
+    await page.waitForTimeout(600);
 
     // 격자를 스크롤해도 헤더 행과 Time 열이 고정("프리즈")되는가
     const freeze = await page.evaluate(async () => {

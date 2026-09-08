@@ -413,6 +413,15 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
           >
             {saveLabel}
           </span>
+          {/* 선택 해제 — 상세를 닫으면 티 시트가 다시 화면 전체를 쓴다. */}
+          <button
+            className="border border-[#c7c7cc] bg-white px-3 py-2 font-bold text-[#4e5560] hover:border-[#4533ff]"
+            onClick={() => controller.select(null)}
+            title="Close and expand the tee sheet"
+            type="button"
+          >
+            Close <span aria-hidden>×</span>
+          </button>
           <button
             className="border border-[#c47a63] bg-white px-3 py-2 font-bold text-[#8a3f26] disabled:opacity-40"
             disabled={busy || booking.status === "cancelled"}

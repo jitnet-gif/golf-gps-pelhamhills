@@ -74,7 +74,16 @@ export default function TeeSheetPage() {
         {/* 암시적 컬럼 트랙도 minmax(0,1fr) 로 못박는다 (위와 같은 이유).
             행: 헤더(auto) / 티 시트(남는 높이 전부) / Operations(auto) / 상세(auto).
             minmax(0,1fr) 이어야 티 시트 칸이 내용 높이만큼 부풀지 않고 내부 스크롤한다. */}
-        <section className="grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto]">
+        {/* 예약을 고르면 헤더 아래 공간을 티 시트와 상세가 반씩 나눠 갖는다(둘 다 1fr).
+            고정 vh 상한을 쓰면 화면이 낮을 때 티 시트가 4행까지 눌린다.
+            고르기 전에는 하단이 auto 라서 티 시트가 화면 전체를 쓴다. */}
+        <section
+          className={`grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] ${
+            controller.selected
+              ? "grid-rows-[auto_minmax(0,1fr)_minmax(0,1fr)]"
+              : "grid-rows-[auto_minmax(0,1fr)_auto]"
+          }`}
+        >
           {/* DateNav 은 Fragment 로 header + 툴바 + 토스트를 반환한다. 감싸지 않으면
               각각이 별도 grid 아이템이 되어 행 배정이 밀리고, minmax(0,1fr) 트랙에
               걸린 툴바가 0 높이로 눌려 사라진다. */}
@@ -88,12 +97,16 @@ export default function TeeSheetPage() {
 
           {/* Operations 와 상세 패널은 하나의 하단 영역을 공유하고 그 안에서만 스크롤한다.
               따로 두면 Operations 를 펼쳤을 때(펼침 상태가 localStorage 에 남는다)
-              티 시트가 100px 남짓까지 짓눌린다. 이 상한이 티 시트의 최소 높이를 보장한다. */}
-          <div className="max-h-[52vh] min-h-0 overflow-y-auto">
+              티 시트가 100px 남짓까지 짓눌린다. 이 상한이 티 시트의 최소 높이를 보장하므로,
+              예약을 선택해도 위의 티 시트는 항상 보인다.
+              예약을 고르기 전에는 상세 패널을 아예 렌더하지 않아 티 시트가 화면 전체를 쓴다. */}
+          {/* max-h-1/2: 예약을 고르지 않았는데 Operations 를 펼쳐둔 경우에도
+              하단이 티 시트를 절반 밑으로 밀어내지 못하게 막는다. */}
+          <div className="max-h-1/2 min-h-0 overflow-y-auto">
             <div className="px-4 pb-2">
               <OrchestrationPanel controller={controller} />
             </div>
-            <ReservationDetail controller={controller} />
+            {controller.selected ? <ReservationDetail controller={controller} /> : null}
           </div>
         </section>
       </div>
