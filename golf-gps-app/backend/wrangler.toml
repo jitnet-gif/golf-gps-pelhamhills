@@ -16,7 +16,19 @@ ENVIRONMENT = "production"
 # Supabase 환경변수 (Secrets에서 관리)
 # wrangler secret put SUPABASE_URL
 # wrangler secret put SUPABASE_ANON_KEY
-# wrangler secret put SUPABASE_SERVICE_ROLE_KEY (선택사항)
+# wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+#   푸시 구독 테이블(push_subscriptions)에는 공개 RLS 정책이 없으므로,
+#   푸시를 쓰려면 service_role 키가 더 이상 선택사항이 아닙니다.
+
+# 웹 푸시 VAPID 키 (필수 - 없으면 /api/push/*가 503)
+#   키 생성: node scripts/generate-vapid-keys.mjs
+# wrangler secret put VAPID_PUBLIC_KEY
+# wrangler secret put VAPID_PRIVATE_KEY
+# wrangler secret put VAPID_SUBJECT      # 예: mailto:ops@pelhamhills.co.kr
+
+# 관리자 발송 키 (POST /api/push/send의 X-Admin-Key)
+#   키 생성: node -e "console.log(crypto.randomUUID().replace(/-/g,''))"
+# wrangler secret put ADMIN_API_KEY
 
 # R2 Object Storage Configuration (선택사항 - 타일 저장용)
 # 1. Cloudflare Dashboard에서 R2 버킷 생성

@@ -16,6 +16,8 @@ import coursesRouter from './routes/courses'
 import roundsRouter from './routes/rounds'
 import scoresRouter from './routes/scores'
 import leaderboardRouter from './routes/leaderboard'
+import promotionsRouter from './routes/promotions'
+import pushRouter from './routes/push'
 
 // TypeScript 타입 지정: Bindings 타입 사용
 type HonoEnv = {
@@ -54,6 +56,11 @@ app.get('/api/health', (c) => {
 // 공개 라우트 (인증 불필요)
 app.route('/', coursesRouter)
 app.route('/', leaderboardRouter)
+app.route('/', promotionsRouter)
+
+// 푸시: 로그인 없는 앱이라 구독/해지는 공개이고,
+// 발송만 라우트 안에서 X-Admin-Key로 막습니다.
+app.route('/', pushRouter)
 
 // 인증 필요 라우트
 app.route('/', roundsRouter)
