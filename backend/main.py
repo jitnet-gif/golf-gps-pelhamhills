@@ -45,6 +45,7 @@ include_route_module("backend.api.routes.chat", f"{settings.API_V1_STR}/chat", [
 include_route_module("backend.api.routes.agents", f"{settings.API_V1_STR}/agents", ["Agents"])
 include_route_module("backend.api.routes.onboarding", f"{settings.API_V1_STR}/onboarding", ["Onboarding"])
 include_route_module("backend.api.routes.simulator", f"{settings.API_V1_STR}", ["Simulator"])
+include_route_module("backend.api.routes.retail", f"{settings.API_V1_STR}", ["Retail"])
 
 @app.get("/")
 def read_root():
