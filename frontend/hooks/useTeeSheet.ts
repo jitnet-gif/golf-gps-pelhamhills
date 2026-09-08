@@ -410,7 +410,7 @@ export function useTeeSheet(): TeeSheetController {
       }
       pushToast("error", `Server unreachable — working offline. ${detail}`);
       setMessage(
-        "서버에 연결할 수 없습니다 — 로컬 사본으로 계속 작업합니다. Offline: local changes are not saved and will be replaced when the server comes back.",
+        "서버에 연결할 수 없습니다. 로컬 샘플 데이터로 계속 볼 수 있지만, 여기서 수정한 내용은 저장되지 않고 서버 복구 시 사라집니다.",
       );
     },
     [commitBookings, commitConnection, commitSlots, pushToast, reconcileSelection],
@@ -883,7 +883,7 @@ export function useTeeSheet(): TeeSheetController {
         if (connectionRef.current === "offline") {
           // 이미 오프라인이면 enterOffline 이 조용히 빠져나가므로 여기서 직접 알린다.
           pushToast("error", `Still offline — ${detail}`);
-          setMessage("여전히 서버에 연결할 수 없습니다 — still offline; showing the local copy.");
+          setMessage("여전히 서버에 연결할 수 없습니다. 로컬 사본을 보여주는 중입니다.");
         } else {
           enterOffline(detail, true);
         }
