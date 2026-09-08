@@ -15,3 +15,11 @@ venv/
 desktop.ini
 
 /backend/data/
+
+# 임시 검증 스크립트와 그 산출물. 저장소에 남길 것이 아니다.
+.tmp-*.mjs
+shots/
+*.png.tmp
+/frontend/tsconfig*.tsbuildinfo
+/frontend/out/
+/frontend/.vercel/
