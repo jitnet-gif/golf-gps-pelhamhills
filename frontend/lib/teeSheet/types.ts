@@ -14,6 +14,14 @@ export type PlayerType = "Existing Customer" | "Guest";
 
 export type BookingColor = "blue" | "gold" | "gray";
 
+/**
+ * 이 예약을 누가 만들었나. 서버 `tee_sheet.py` 의 `BookingSource` 와 같은 값.
+ *
+ * `voice_hold` 는 음성 에이전트가 통화 중 자리를 잠가 둔 임시 레코드다. 확정되면
+ * `voice` 로 바뀌고, 확정되지 않으면 `holdExpiresAt` 이 지난 뒤 사라진다.
+ */
+export type BookingSource = "staff" | "web" | "voice" | "voice_hold";
+
 export type Player = {
   id: string;
   name: string;
@@ -52,6 +60,9 @@ export type TeeBooking = {
   players: Player[];
   audit: AuditEntry[];
   cancelReason: string | null;
+  source: BookingSource;
+  /** 음성 홀드에만 채워진다 (ISO 타임스탬프). 확정된 예약은 언제나 null. */
+  holdExpiresAt: string | null;
   createdAt: string;
   updatedAt: string;
 };

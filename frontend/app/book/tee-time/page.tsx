@@ -16,6 +16,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import BookingShell from "@/components/booking/BookingShell";
+import VoiceBooking from "@/components/booking/VoiceBooking";
 import {
   DAY_PART_LABEL,
   type DayPartFilter,
@@ -157,6 +158,15 @@ export default function TeeTimeBookingPage() {
       subtitle="Pick a day, tell us how many are playing, and choose a time."
       title="Tee Times"
     >
+      {/* 말로 하는 입구. 폼을 대신하는 게 아니라 **옆에** 둔다 — 마이크를 못 쓰거나
+          조용한 곳에 있는 손님에게는 아래 폼이 여전히 유일한 길이다.
+          예약 서버가 없는 배포에서는 음성도 어차피 불가능하므로 아예 그리지 않는다. */}
+      {apiReady === true ? (
+        <div className="mb-6">
+          <VoiceBooking onFinished={refresh} />
+        </div>
+      ) : null}
+
       <DateStrip dates={dates} onChange={setDate} value={date} />
 
       <div className="mt-6 grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">

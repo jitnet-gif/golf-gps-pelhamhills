@@ -41,6 +41,11 @@ CARTS_PER_SLOT = 4
 # (예: 7:43 AM 에 회원 2인 예약 + GolfNow 온라인 2인 예약). Chronogolf 와 동일한 규칙.
 PLAYERS_PER_TEE_TIME = 4
 
+# 음성 에이전트가 손님 이름과 전화번호를 받아 적는 동안 자리를 잠가 두는 시간.
+# 통화 한 건이 "3시에 두 명" 에서 확정까지 가는 데 보통 40~60초 걸린다. 3분이면
+# 넉넉하고, 손님이 중간에 끊어도 자리가 오래 죽어 있지 않다.
+HOLD_TTL_SECONDS = 180
+
 WEEKDAY_RATE = 47.79
 WEEKEND_RATE = 58.41
 
@@ -68,6 +73,15 @@ class BookingStatus(str, Enum):
 class PlayerType(str, Enum):
     EXISTING = "Existing Customer"
     GUEST = "Guest"
+
+
+class BookingSource(str, Enum):
+    """이 예약을 누가 만들었나. 통화로 들어온 건을 티 시트에서 구분하기 위한 것."""
+
+    STAFF = "staff"          # 프로 샵 직원이 어드민에서 직접
+    WEB = "web"              # 손님이 /book/tee-time 에서
+    VOICE = "voice"          # 음성 에이전트가 확정한 예약
+    VOICE_HOLD = "voice_hold"  # 통화 중 임시 홀드. 확정되면 VOICE 로 바뀐다.
 
 
 class TaskState(str, Enum):
@@ -150,6 +164,10 @@ class TeeBooking(BaseModel):
     players: list[Player] = Field(default_factory=list, max_length=4)
     audit: list[AuditEntry] = Field(default_factory=list)
     cancelReason: str | None = None
+    source: BookingSource = BookingSource.STAFF
+    # 음성 홀드에만 채워진다. 이 시각이 지나면 정원 계산에서 빠지고, 다음
+    # 정리 패스가 레코드를 실제로 지운다. 확정된 예약은 항상 None.
+    holdExpiresAt: datetime | None = None
     createdAt: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updatedAt: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -413,20 +431,69 @@ def _audit(booking: TeeBooking, message: str) -> None:
     booking.updatedAt = datetime.now(timezone.utc)
 
 
+def _as_utc(value: datetime) -> datetime:
+    """JSON 을 오가며 tzinfo 가 떨어진 값을 UTC 로 되돌린다.
+
+    naive datetime 과 aware datetime 을 비교하면 TypeError 가 난다. 홀드 만료
+    판정은 예약 경로 전체가 지나가는 길목이라 여기서 한 번 정규화한다.
+    """
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def hold_expired(booking: TeeBooking, now: datetime) -> bool:
+    """만료된 음성 홀드인가. 홀드가 아닌 예약(`holdExpiresAt is None`)은 언제나 False."""
+    if booking.holdExpiresAt is None:
+        return False
+    return _as_utc(booking.holdExpiresAt) <= now
+
+
+def occupies_seat(booking: TeeBooking, now: datetime) -> bool:
+    """이 예약이 티 타임 정원을 실제로 잡아먹고 있는가.
+
+    - 취소된 예약은 자리를 반납한다 (그 자리는 다시 팔 수 있어야 한다).
+    - 만료된 음성 홀드도 마찬가지다. **레코드가 아직 디스크에 남아 있어도**
+      정원 계산에서는 즉시 빠진다 — 자리를 되찾는 데 정리 패스를 기다리게
+      하면, 손님이 전화를 끊은 뒤 3분 동안 팔 수 있는 자리가 죽어 있게 된다.
+    """
+    if booking.status == BookingStatus.CANCELLED:
+        return False
+    return not hold_expired(booking, now)
+
+
+def purge_expired_holds(bookings: list[TeeBooking], now: datetime | None = None) -> int:
+    """만료된 음성 홀드를 목록에서 실제로 지운다. 지운 개수를 돌려준다.
+
+    반드시 `bookings_tx()` 블록 안에서 부를 것. 정원 계산은 이미 만료 홀드를
+    무시하므로(`occupies_seat`) 이 정리는 순전히 위생 목적이다 — 티 시트 격자에
+    유령 예약이 쌓이지 않게 한다.
+    """
+    now = now or datetime.now(timezone.utc)
+    keep = [b for b in bookings if not hold_expired(b, now)]
+    removed = len(bookings) - len(keep)
+    if removed:
+        bookings[:] = keep
+    return removed
+
+
 def tee_time_players(
-    bookings: list[TeeBooking], iso_date: str, time_label: str, exclude_id: str | None = None
+    bookings: list[TeeBooking],
+    iso_date: str,
+    time_label: str,
+    exclude_id: str | None = None,
+    now: datetime | None = None,
 ) -> int:
     """해당 티 타임이 이미 잡아먹은 플레이어 자리 수.
 
-    취소된 예약은 자리를 잡지 않는다 (취소 후 그 자리는 다시 팔 수 있어야 한다).
+    무엇이 자리를 차지하는지의 판정은 `occupies_seat` 하나뿐이다.
     """
+    now = now or datetime.now(timezone.utc)
     return sum(
         len(other.players)
         for other in bookings
         if other.id != exclude_id
         and other.date == iso_date
         and other.time == time_label
-        and other.status != BookingStatus.CANCELLED
+        and occupies_seat(other, now)
     )
 
 
@@ -468,7 +535,10 @@ def list_bookings(
     from_: str | None = Query(None, alias="from"),
     to: str | None = Query(None),
 ) -> list[TeeBooking]:
-    bookings = read_bookings()
+    # 만료된 음성 홀드는 아무에게도 보여주지 않는다. 정리 패스가 레코드를 지우기
+    # 전이라도 티 시트 격자와 고객 예약 화면에는 존재하지 않는 것으로 취급한다.
+    now = datetime.now(timezone.utc)
+    bookings = [b for b in read_bookings() if not hold_expired(b, now)]
 
     if date:
         parse_iso_date(date)
@@ -634,7 +704,16 @@ def patch_booking(booking_id: str, body: PatchBookingRequest) -> TeeBooking:
         return booking
 
 
-@router.delete("/tee-sheet/bookings/{booking_id}", status_code=204)
+# `response_model=None` 이 반드시 있어야 한다. 없으면 FastAPI 가 `-> None` 반환
+# 주석을 **응답 본문 스키마**로 읽고, 204 는 본문을 가질 수 없으므로 라우터 등록이
+# 통째로 터진다 ("Status code 204 must not have a response body").
+#
+# 개발 머신(fastapi 0.136)은 이 경우를 특별 취급해서 그냥 넘어가지만 배포 이미지가
+# 고정한 0.109 는 예외를 던진다. `backend/main.py` 의 include_route_module 이 그
+# 예외를 잡아 로그만 남기고 넘어가기 때문에 **서버는 정상 기동한 것처럼 보이면서
+# 티 시트 API 전체가 404** 가 된다 — 실제로 첫 Fly 배포가 그렇게 나갔다.
+# voice 라우터도 이 모듈을 임포트해서 같이 사라졌다.
+@router.delete("/tee-sheet/bookings/{booking_id}", status_code=204, response_model=None)
 def delete_booking(booking_id: str) -> None:
     with bookings_tx() as bookings:
         booking = _find(bookings, booking_id)
@@ -994,6 +1073,8 @@ def cleanup_expired_bookings(before_iso: str) -> dict[str, Any]:
     """`before_iso` 보다 **엄격히 이전** 날짜의 예약을 실제로 삭제한다."""
     removed: list[dict[str, str]] = []
     with bookings_tx() as bookings:
+        # 지난 날짜 정리와 별개로, 아무 날짜의 만료 홀드는 항상 함께 걷어낸다.
+        holds_purged = purge_expired_holds(bookings)
         keep: list[TeeBooking] = []
         for booking in bookings:
             if booking.date < before_iso:
@@ -1009,6 +1090,7 @@ def cleanup_expired_bookings(before_iso: str) -> dict[str, Any]:
         "status": "success",
         "before": before_iso,
         "deleted": len(removed),
+        "expired_holds_purged": holds_purged,
         "remaining": remaining,
         "deleted_bookings": removed,
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -1046,6 +1128,9 @@ def run_sync_pass(iso_date: str) -> dict[str, Any]:
     updated = 0
 
     with bookings_tx() as bookings:
+        # 노쇼 스캔 전에 유령 홀드를 치운다. 안 그러면 통화 중 끊긴 홀드가
+        # "플레이어 없는 예약" 경고로 잡혀 리포트를 오염시킨다.
+        purged_holds = purge_expired_holds(bookings)
         day = [b for b in bookings if b.date == iso_date]
         day.sort(key=lambda b: label_to_minutes(b.time) or 0)
 
@@ -1096,6 +1181,7 @@ def run_sync_pass(iso_date: str) -> dict[str, Any]:
         "task": "worker_sync",
         "date": iso_date,
         "scanned": scanned,
+        "expired_holds_purged": purged_holds,
         "issues": len(findings),
         "updated": updated,
         "findings": findings,

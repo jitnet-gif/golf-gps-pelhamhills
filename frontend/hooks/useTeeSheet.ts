@@ -126,6 +126,10 @@ function makeFallbackBooking(seed: {
     players: seed.players.map((player) => makePlayer(player)),
     audit: [{ id: localId("fa"), ts: now, message: "Local sample record (offline seed)." }],
     cancelReason: null,
+    // 오프라인 샘플이든 직원이 만든 것이든, 어드민에서 나온 예약은 staff 다.
+    // 홀드는 음성 에이전트만 만들므로 여기서는 언제나 null.
+    source: "staff",
+    holdExpiresAt: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -667,6 +671,8 @@ export function useTeeSheet(): TeeSheetController {
           players: requested.map((player) => makePlayer(player as Partial<Player>)),
           audit: [{ id: localId("la"), ts: now, message: "Created offline (local copy)." }],
           cancelReason: null,
+          source: "staff",
+          holdExpiresAt: null,
           createdAt: now,
           updatedAt: now,
         };

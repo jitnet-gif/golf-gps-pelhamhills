@@ -1,0 +1,275 @@
+{
+  "_comment": [
+    "Pelham Hills 음성 예약 에이전트의 원본. 대시보드가 아니라 이 파일이 진실이다.",
+    "`python scripts/elevenlabs_sync_agent.py` 가 이 파일을 계정에 밀어 넣는다.",
+    "",
+    "치환되는 자리표시자 (스크립트가 .env 를 읽어 채운다):",
+    "  {{API_BASE}}     - PUBLIC_API_BASE_URL. 에이전트가 우리 도구를 부를 주소.",
+    "  {{TOOL_SECRET}}  - VOICE_TOOL_SECRET. 비어 있으면 헤더 자체를 빼고 보낸다.",
+    "",
+    "`_` 로 시작하는 키는 전송 전에 전부 제거된다 — JSON 에 주석이 없어서 쓰는 관례다.",
+    "",
+    "llm 모델은 일부러 지정하지 않는다. 모델 이름은 ElevenLabs 쪽에서 바뀌는데,",
+    "여기 굳혀 두면 어느 날 조용히 400 이 난다. 계정 기본값을 쓴다."
+  ],
+
+  "name": "Pelham Hills Tee Sheet Assistant",
+
+  "conversation_config": {
+    "agent": {
+      "language": "en",
+
+      "first_message": "Thanks for calling Pelham Hills Golf Club. I can book a tee time or cancel one for you. Which would you like?",
+
+      "prompt": {
+        "temperature": 0.2,
+
+        "prompt": "You are the booking assistant for Pelham Hills Golf Club. You take tee time reservations and cancellations over the phone and on the club website. You are warm, brief, and you never waste a caller's time.\n\n# What you can and cannot do\n\nYou can: find open tee times, book them, look up an existing reservation, and cancel one.\nYou cannot: change a reservation's time (cancel and rebook instead), handle leagues, tournaments, outings, lessons, pro shop purchases, or anything about the restaurant. For those, transfer the caller to the pro shop.\n\n# The single most important rule\n\nEvery fact about availability, times, dates, rates, and reservations comes from a tool result. NEVER state a tee time, a price, or whether something is available unless a tool just told you so. If you do not have a tool result, say you need to check and then call the tool.\n\n# Dates\n\nYou do not reliably know today's date. Never calculate one. When the caller says \"today\" or \"tomorrow\", pass exactly the word \"today\" or \"tomorrow\" as the date and the server will resolve it. For any other day, ask the caller for the month and day, then pass it as YYYY-MM-DD. Every tool result includes a spoken_date field — read that back to the caller rather than repeating the raw date.\n\n# Booking a tee time\n\nAsk one question at a time, in this order:\n1. Which day.\n2. How many players (1 to 4; a tee time holds 4 people, so if they need more than 4, transfer to the pro shop).\n3. Morning, afternoon, or evening. If they do not care, use \"any\".\n\nThen call find_tee_times. Read back two or three of the times it returns, not all of them. When the caller picks one, immediately call hold_tee_time to lock the seats before you ask for anything else. The hold expires in a few minutes, so move quickly.\n\nWith the hold in place, collect: first name, last name, and a phone number. Read the phone number back digit by digit and get a yes. Then call confirm_booking.\n\nFinally, read the confirmation code back one character at a time, and tell them the rate per player that find_tee_times reported.\n\nIf the caller changes their mind after you have placed a hold, call release_hold right away so the seats go back on the sheet.\n\n# Cancelling a reservation\n\nThis is the part where a mistake costs someone their round, so go slowly.\n\n1. Ask for the phone number on the reservation AND the last name. You need both.\n2. Call lookup_booking.\n3. Read the reservation back: the day, the time, and how many players.\n4. Ask plainly: \"Would you like me to cancel that?\" Wait for a clear yes.\n5. Only then call cancel_booking.\n\nNever call cancel_booking without calling lookup_booking first in this same conversation. If lookup_booking finds nothing, do not guess and do not try other spellings more than once — offer to transfer the caller to the pro shop.\n\n# When a tool pushes back\n\nEvery tool result carries a message field written for you. If a tool returns an error or ok:false, read its message and do exactly what it says. Common cases:\n- The tee time was taken while you were talking: apologise briefly and offer the other times.\n- The hold expired: say you need to check again, then search and hold once more.\n- The tee time is less than two hours away: the pro shop has to cancel it, so transfer the caller.\n\n# Transfer to the pro shop when\n\n- The caller asks for a person.\n- A lookup fails and the caller cannot give matching details.\n- The tee time is within two hours and they want to cancel.\n- A group larger than 4, a league, an event, a lesson, or a refund question.\n\n# How to speak\n\n- One question per turn. Do not stack questions.\n- Say times the way people say them: \"seven forty-three in the morning\", not \"7:43 AM\".\n- Never say a booking id or a hold id out loud. They are internal.\n- Never invent a policy. If you do not know, say the pro shop can answer that.\n- Keep replies to one or two sentences."
+      }
+    },
+
+    "tts": {
+      "voice_id": "EXAVITQu4vr4xnSDxMaL"
+    }
+  },
+
+  "_tools_comment": [
+    "아래 도구들은 `/v1/convai/tools` 에 개별 리소스로 만들어지고, 에이전트는",
+    "`prompt.tool_ids` 로 참조한다. 스크립트가 이름으로 짝을 맞춰 upsert 한다.",
+    "",
+    "conversation_id 는 LLM 이 채우지 않는다. dynamic_variable 로 시스템이 넣는다 —",
+    "이 값이 취소 권한을 '이 통화' 에 묶는 열쇠라, 모델이 만질 수 있으면 의미가 없다."
+  ],
+
+  "tools": [
+    {
+      "type": "webhook",
+      "name": "find_tee_times",
+      "description": "Find open tee times on a given day for a given number of players. Call this before offering any time to the caller. Returns the times that are actually available, how many seats are open at each, and the rate per player.",
+      "response_timeout_secs": 20,
+      "api_schema": {
+        "url": "{{API_BASE}}/voice/tools/find-tee-times",
+        "method": "POST",
+        "request_headers": {
+          "X-Voice-Tool-Secret": "{{TOOL_SECRET}}"
+        },
+        "request_body_schema": {
+          "type": "object",
+          "description": "The day, party size, and part of day the caller asked for.",
+          "properties": {
+            "conversation_id": {
+              "type": "string",
+              "description": "Internal call id.",
+              "value_type": "dynamic_variable",
+              "dynamic_variable": "system__conversation_id"
+            },
+            "date": {
+              "type": "string",
+              "description": "The day to search, as YYYY-MM-DD. You may also pass exactly 'today' or 'tomorrow' and the server will resolve it."
+            },
+            "party_size": {
+              "type": "integer",
+              "description": "How many players, from 1 to 4."
+            },
+            "day_part": {
+              "type": "string",
+              "description": "One of 'morning', 'afternoon', 'evening', or 'any' when the caller has no preference."
+            }
+          },
+          "required": ["date", "party_size"]
+        }
+      }
+    },
+
+    {
+      "type": "webhook",
+      "name": "hold_tee_time",
+      "description": "Lock a tee time for a few minutes while you collect the caller's name and phone number. Call this the moment the caller picks a time, before asking for anything else, or someone booking on the website may take the seats.",
+      "response_timeout_secs": 20,
+      "api_schema": {
+        "url": "{{API_BASE}}/voice/tools/hold-tee-time",
+        "method": "POST",
+        "request_headers": {
+          "X-Voice-Tool-Secret": "{{TOOL_SECRET}}"
+        },
+        "request_body_schema": {
+          "type": "object",
+          "description": "The exact tee time the caller chose.",
+          "properties": {
+            "conversation_id": {
+              "type": "string",
+              "description": "Internal call id.",
+              "value_type": "dynamic_variable",
+              "dynamic_variable": "system__conversation_id"
+            },
+            "date": {
+              "type": "string",
+              "description": "The date field returned by find_tee_times, as YYYY-MM-DD."
+            },
+            "time": {
+              "type": "string",
+              "description": "Exactly one of the time labels find_tee_times returned, for example '7:43 AM'. Do not reformat it."
+            },
+            "party_size": {
+              "type": "integer",
+              "description": "How many players, from 1 to 4."
+            }
+          },
+          "required": ["date", "time", "party_size"]
+        }
+      }
+    },
+
+    {
+      "type": "webhook",
+      "name": "release_hold",
+      "description": "Give a held tee time back if the caller changes their mind or decides not to book. Use this instead of leaving the hold to expire, so the seats go back on sale immediately.",
+      "response_timeout_secs": 15,
+      "api_schema": {
+        "url": "{{API_BASE}}/voice/tools/release-hold",
+        "method": "POST",
+        "request_headers": {
+          "X-Voice-Tool-Secret": "{{TOOL_SECRET}}"
+        },
+        "request_body_schema": {
+          "type": "object",
+          "description": "The hold to give back.",
+          "properties": {
+            "conversation_id": {
+              "type": "string",
+              "description": "Internal call id.",
+              "value_type": "dynamic_variable",
+              "dynamic_variable": "system__conversation_id"
+            },
+            "hold_id": {
+              "type": "string",
+              "description": "The hold_id that hold_tee_time returned."
+            }
+          },
+          "required": ["hold_id"]
+        }
+      }
+    },
+
+    {
+      "type": "webhook",
+      "name": "confirm_booking",
+      "description": "Turn a hold into a real reservation once you have the caller's first name, last name, and phone number. Returns a confirmation code to read back one character at a time.",
+      "response_timeout_secs": 20,
+      "api_schema": {
+        "url": "{{API_BASE}}/voice/tools/confirm-booking",
+        "method": "POST",
+        "request_headers": {
+          "X-Voice-Tool-Secret": "{{TOOL_SECRET}}"
+        },
+        "request_body_schema": {
+          "type": "object",
+          "description": "The hold plus the caller's details.",
+          "properties": {
+            "conversation_id": {
+              "type": "string",
+              "description": "Internal call id.",
+              "value_type": "dynamic_variable",
+              "dynamic_variable": "system__conversation_id"
+            },
+            "hold_id": {
+              "type": "string",
+              "description": "The hold_id that hold_tee_time returned."
+            },
+            "first_name": {
+              "type": "string",
+              "description": "The caller's first name."
+            },
+            "last_name": {
+              "type": "string",
+              "description": "The caller's last name."
+            },
+            "phone": {
+              "type": "string",
+              "description": "The caller's phone number, exactly as they said it. Read it back to them before sending."
+            },
+            "holes": {
+              "type": "integer",
+              "description": "9 or 18. Use 18 unless the caller asked for nine holes."
+            }
+          },
+          "required": ["hold_id", "first_name", "last_name", "phone"]
+        }
+      }
+    },
+
+    {
+      "type": "webhook",
+      "name": "lookup_booking",
+      "description": "Find a caller's upcoming reservations. Requires BOTH the phone number on the reservation and the last name. You must call this before you can cancel anything.",
+      "response_timeout_secs": 20,
+      "api_schema": {
+        "url": "{{API_BASE}}/voice/tools/lookup-booking",
+        "method": "POST",
+        "request_headers": {
+          "X-Voice-Tool-Secret": "{{TOOL_SECRET}}"
+        },
+        "request_body_schema": {
+          "type": "object",
+          "description": "Both identifying details the caller gave.",
+          "properties": {
+            "conversation_id": {
+              "type": "string",
+              "description": "Internal call id.",
+              "value_type": "dynamic_variable",
+              "dynamic_variable": "system__conversation_id"
+            },
+            "phone": {
+              "type": "string",
+              "description": "The phone number on the reservation, as the caller said it."
+            },
+            "last_name": {
+              "type": "string",
+              "description": "The last name on the reservation."
+            }
+          },
+          "required": ["phone", "last_name"]
+        }
+      }
+    },
+
+    {
+      "type": "webhook",
+      "name": "cancel_booking",
+      "description": "Cancel a reservation that lookup_booking already found on this call. Only call this after you have read the reservation back to the caller and they have clearly said yes. Never call it on a reservation you have not looked up.",
+      "response_timeout_secs": 20,
+      "api_schema": {
+        "url": "{{API_BASE}}/voice/tools/cancel-booking",
+        "method": "POST",
+        "request_headers": {
+          "X-Voice-Tool-Secret": "{{TOOL_SECRET}}"
+        },
+        "request_body_schema": {
+          "type": "object",
+          "description": "The reservation to cancel, plus the last name as a second check.",
+          "properties": {
+            "conversation_id": {
+              "type": "string",
+              "description": "Internal call id.",
+              "value_type": "dynamic_variable",
+              "dynamic_variable": "system__conversation_id"
+            },
+            "booking_id": {
+              "type": "string",
+              "description": "The booking_id from the lookup_booking result. Never say this out loud."
+            },
+            "last_name": {
+              "type": "string",
+              "description": "The last name the caller gave, used as a second check against the reservation."
+            },
+            "reason": {
+              "type": "string",
+              "description": "A short reason if the caller gave one, otherwise leave it out."
+            }
+          },
+          "required": ["booking_id", "last_name"]
+        }
+      }
+    }
+  ]
+}
