@@ -1,0 +1,493 @@
+"use client";
+
+// 새 예약 생성 다이얼로그. 쓰기는 전부 controller.createBooking을 통해서만 한다.
+// (fetch/teeSheetApi를 직접 호출하지 않는다.)
+
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+
+import { money } from "@/lib/teeSheet/dates";
+import type { PlayerType, TeeSheetController } from "@/lib/teeSheet/types";
+
+export type BookingDialogProps = {
+  open: boolean;
+  controller: TeeSheetController;
+  initial?: { date?: string; time?: string };
+  onClose: () => void;
+};
+
+type PlayerDraft = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  type: PlayerType;
+  ratePlan: string;
+};
+
+const PLAYER_TYPES: PlayerType[] = ["Existing Customer", "Guest"];
+
+const FOCUSABLE =
+  'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+const FIELD =
+  "w-full border border-[#d4d4d8] bg-white px-2 py-1.5 text-xs outline-none focus:border-[#4533ff] disabled:bg-[#f2f2f4] disabled:text-[#9aa0a6]";
+const LABEL = "block text-[11px] font-bold uppercase tracking-wide text-[#4e5560]";
+
+function emptyPlayer(): PlayerDraft {
+  return { firstName: "", lastName: "", email: "", phone: "", type: "Existing Customer", ratePlan: "" };
+}
+
+/** 해당 날짜에서 이미 잡혀 있는 슬롯 시각들. 취소된 예약은 슬롯을 막지 않는다. */
+function takenTimesFor(
+  bookings: TeeSheetController["bookings"],
+  date: string,
+): Set<string> {
+  const taken = new Set<string>();
+  for (const booking of bookings) {
+    if (booking.date !== date) continue;
+    if (booking.status === "cancelled") continue;
+    taken.add(booking.time);
+  }
+  return taken;
+}
+
+export default function BookingDialog({ open, controller, initial, onClose }: BookingDialogProps) {
+  const initialDate = initial?.date;
+  const initialTime = initial?.time;
+
+  const [date, setDate] = useState("");
+  const [time, setTime] = useState("");
+  const [holes, setHoles] = useState<9 | 18>(18);
+  const [rateInput, setRateInput] = useState("");
+  const [rateTouched, setRateTouched] = useState(false);
+  const [cartCount, setCartCount] = useState(0);
+  const [title, setTitle] = useState("");
+  const [titleTouched, setTitleTouched] = useState(false);
+  const [notes, setNotes] = useState("");
+  const [players, setPlayers] = useState<PlayerDraft[]>([emptyPlayer()]);
+
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const firstFieldRef = useRef<HTMLInputElement | null>(null);
+  const seededRef = useRef(false);
+  // onClose는 페이지에서 인라인 화살표로 넘어오기 쉬우므로 ref로 잡아 effect가 재실행되지 않게 한다.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
+
+  const { bookings, busy, focusedDate, slots } = controller;
+
+  // ----- open이 false -> true로 바뀌는 순간에만 폼을 시드한다 (실패 후 입력 보존) -----
+  useEffect(() => {
+    if (!open) {
+      seededRef.current = false;
+      return;
+    }
+    if (seededRef.current) return;
+    seededRef.current = true;
+
+    const seedDate = initialDate ?? focusedDate;
+    setDate(seedDate);
+    // WeekGrid가 이미 찬 슬롯을 넘겨줄 수도 있으므로 시드 단계에서 걸러낸다.
+    const taken = takenTimesFor(bookings, seedDate);
+    setTime(initialTime && !taken.has(initialTime) ? initialTime : "");
+    setHoles(18);
+    setRateInput("");
+    setRateTouched(false);
+    setCartCount(0);
+    setTitle("");
+    setTitleTouched(false);
+    setNotes("");
+    setPlayers([emptyPlayer()]);
+
+    // controller.slots는 focusedDate 기준으로 로드되므로, 요금/슬롯 목록이
+    // 다이얼로그의 날짜와 항상 같은 날을 가리키도록 시트를 그 날짜로 이동시킨다.
+    if (seedDate !== focusedDate) controller.setFocusedDate(seedDate);
+  }, [open, initialDate, initialTime, focusedDate, bookings, controller]);
+
+  // ----- 모달 동작: Escape, 포커스 이동/트랩, 포커스 복원, 배경 스크롤 잠금 -----
+  useEffect(() => {
+    if (!open) return;
+
+    const opener = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const focusTimer = window.setTimeout(() => firstFieldRef.current?.focus(), 0);
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const root = panelRef.current;
+      if (!root) return;
+      const focusable = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+        (element) => element.offsetParent !== null || element === document.activeElement,
+      );
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      const inside = active !== null && root.contains(active);
+
+      if (event.shiftKey && (!inside || active === first)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (!inside || active === last)) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown, true);
+      window.clearTimeout(focusTimer);
+      document.body.style.overflow = previousOverflow;
+      opener?.focus?.();
+    };
+  }, [open]);
+
+  const taken = useMemo(() => takenTimesFor(bookings, date), [bookings, date]);
+
+  const selectedSlot = useMemo(() => slots.find((slot) => slot.time === time) ?? null, [slots, time]);
+
+  // 요금은 선택한 슬롯에서 파생된다 — 사용자가 직접 고친 뒤에는 입력값을 그대로 쓴다.
+  const rate = rateTouched ? rateInput : selectedSlot ? String(selectedSlot.rate) : "";
+
+  const autoTitle = useMemo(() => {
+    const lead = players[0];
+    if (!lead) return "";
+    return [lead.lastName.trim(), lead.firstName.trim()].filter(Boolean).join(", ");
+  }, [players]);
+
+  const resolvedTitle = titleTouched ? title : autoTitle;
+
+  function updatePlayer(index: number, patch: Partial<PlayerDraft>) {
+    setPlayers((current) => current.map((player, i) => (i === index ? { ...player, ...patch } : player)));
+  }
+
+  function addPlayer() {
+    setPlayers((current) => (current.length >= 4 ? current : [...current, emptyPlayer()]));
+  }
+
+  function removePlayer(index: number) {
+    setPlayers((current) => (current.length <= 1 ? current : current.filter((_, i) => i !== index)));
+  }
+
+  function handleDateChange(next: string) {
+    if (!next) return;
+    setDate(next);
+    // 새 날짜의 슬롯을 다시 골라야 한다 (요금/중복 판정이 같은 날짜를 보게).
+    setTime("");
+    setRateTouched(false);
+    if (next !== focusedDate) controller.setFocusedDate(next);
+  }
+
+  const rateValue = Number(rate);
+  const playersValid =
+    players.length >= 1 &&
+    players.length <= 4 &&
+    players.every((player) => player.firstName.trim() !== "" || player.lastName.trim() !== "");
+  const timeValid = time !== "" && selectedSlot !== null && !taken.has(time);
+  const canSubmit =
+    !busy &&
+    date !== "" &&
+    timeValid &&
+    resolvedTitle.trim() !== "" &&
+    rate.trim() !== "" &&
+    Number.isFinite(rateValue) &&
+    rateValue >= 0 &&
+    playersValid;
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canSubmit) return;
+
+    const created = await controller.createBooking({
+      date,
+      time,
+      title: resolvedTitle.trim(),
+      holes,
+      rate: rateValue,
+      cartCount,
+      notes: notes.trim(),
+      players: players.map((player) => ({
+        firstName: player.firstName.trim(),
+        lastName: player.lastName.trim(),
+        email: player.email.trim(),
+        phone: player.phone.trim(),
+        type: player.type,
+        ratePlan: player.ratePlan.trim(),
+      })),
+    });
+
+    // controller는 절대 throw하지 않는다. null이면 자체 에러 토스트를 이미 띄웠고,
+    // 여기서는 입력을 그대로 둔 채 다이얼로그를 열어 둔다.
+    if (created) onClose();
+  }
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        aria-labelledby="booking-dialog-title"
+        aria-modal="true"
+        className="my-6 w-full max-w-3xl rounded border border-[#d4d4d8] bg-white shadow-lg"
+        ref={panelRef}
+        role="dialog"
+      >
+        <form onSubmit={handleSubmit}>
+          <div className="flex items-center justify-between border-b border-[#d4d4d8] px-4 py-3">
+            <h2 className="text-sm font-bold" id="booking-dialog-title">
+              New Reservation
+            </h2>
+            <button
+              aria-label="Close dialog"
+              className="px-2 text-lg leading-none text-[#6b7280] hover:text-[#1f2328]"
+              onClick={onClose}
+              type="button"
+            >
+              ×
+            </button>
+          </div>
+
+          <div className="grid gap-4 px-4 py-4">
+            {/* ===== 예약 정보 ===== */}
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <label className="grid gap-1">
+                <span className={LABEL}>Date</span>
+                <input
+                  className={FIELD}
+                  onChange={(event) => handleDateChange(event.target.value)}
+                  ref={firstFieldRef}
+                  required
+                  type="date"
+                  value={date}
+                />
+              </label>
+
+              <label className="grid gap-1">
+                <span className={LABEL}>Tee time</span>
+                <select
+                  className={FIELD}
+                  disabled={slots.length === 0}
+                  onChange={(event) => {
+                    setTime(event.target.value);
+                    setRateTouched(false);
+                  }}
+                  required
+                  value={time}
+                >
+                  {slots.length === 0 ? (
+                    <option value="">No tee times loaded</option>
+                  ) : (
+                    <>
+                      <option value="">Select a tee time…</option>
+                      {slots.map((slot) => {
+                        const isTaken = taken.has(slot.time);
+                        return (
+                          <option disabled={isTaken} key={slot.time} value={slot.time}>
+                            {slot.time} · {money(slot.rate)}
+                            {isTaken ? " · taken" : ""}
+                          </option>
+                        );
+                      })}
+                    </>
+                  )}
+                </select>
+              </label>
+
+              <label className="grid gap-1">
+                <span className={LABEL}>Holes</span>
+                <select
+                  className={FIELD}
+                  onChange={(event) => setHoles(Number(event.target.value) === 9 ? 9 : 18)}
+                  value={holes}
+                >
+                  <option value={9}>9 holes</option>
+                  <option value={18}>18 holes</option>
+                </select>
+              </label>
+
+              <label className="grid gap-1">
+                <span className={LABEL}>Rate</span>
+                <input
+                  className={FIELD}
+                  inputMode="decimal"
+                  min="0"
+                  onChange={(event) => {
+                    setRateInput(event.target.value);
+                    setRateTouched(true);
+                  }}
+                  step="0.01"
+                  type="number"
+                  value={rate}
+                />
+              </label>
+
+              <label className="grid gap-1">
+                <span className={LABEL}>Carts</span>
+                <select
+                  className={FIELD}
+                  onChange={(event) => setCartCount(Number(event.target.value))}
+                  value={cartCount}
+                >
+                  {[0, 1, 2, 3, 4].map((count) => (
+                    <option key={count} value={count}>
+                      {count}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="grid gap-1 sm:col-span-2 lg:col-span-3">
+                <span className={LABEL}>Title</span>
+                <input
+                  className={FIELD}
+                  onChange={(event) => {
+                    setTitle(event.target.value);
+                    setTitleTouched(true);
+                  }}
+                  placeholder="Last, First"
+                  type="text"
+                  value={resolvedTitle}
+                />
+              </label>
+            </div>
+
+            <label className="grid gap-1">
+              <span className={LABEL}>Notes</span>
+              <textarea
+                className={`${FIELD} min-h-[56px] resize-y`}
+                onChange={(event) => setNotes(event.target.value)}
+                value={notes}
+              />
+            </label>
+
+            {/* ===== 플레이어 (1–4명) ===== */}
+            <div className="grid gap-2">
+              <div className="flex items-center justify-between">
+                <span className={LABEL}>Players ({players.length}/4)</span>
+                <button
+                  className="border border-[#d4d4d8] bg-white px-2 py-1 text-xs font-bold hover:bg-[#f2f2f4] disabled:opacity-40"
+                  disabled={players.length >= 4}
+                  onClick={addPlayer}
+                  type="button"
+                >
+                  Add player +
+                </button>
+              </div>
+
+              {players.map((player, index) => (
+                <div className="grid gap-2 rounded border border-[#ececf0] p-2 lg:grid-cols-6" key={index}>
+                  <input
+                    aria-label={`Player ${index + 1} first name`}
+                    className={FIELD}
+                    onChange={(event) => updatePlayer(index, { firstName: event.target.value })}
+                    placeholder="First name"
+                    type="text"
+                    value={player.firstName}
+                  />
+                  <input
+                    aria-label={`Player ${index + 1} last name`}
+                    className={FIELD}
+                    onChange={(event) => updatePlayer(index, { lastName: event.target.value })}
+                    placeholder="Last name"
+                    type="text"
+                    value={player.lastName}
+                  />
+                  <input
+                    aria-label={`Player ${index + 1} email`}
+                    className={FIELD}
+                    onChange={(event) => updatePlayer(index, { email: event.target.value })}
+                    placeholder="Email"
+                    type="email"
+                    value={player.email}
+                  />
+                  <input
+                    aria-label={`Player ${index + 1} phone`}
+                    className={FIELD}
+                    onChange={(event) => updatePlayer(index, { phone: event.target.value })}
+                    placeholder="Phone"
+                    type="tel"
+                    value={player.phone}
+                  />
+                  <select
+                    aria-label={`Player ${index + 1} type`}
+                    className={FIELD}
+                    onChange={(event) =>
+                      updatePlayer(index, { type: event.target.value as PlayerType })
+                    }
+                    value={player.type}
+                  >
+                    {PLAYER_TYPES.map((type) => (
+                      <option key={type} value={type}>
+                        {type}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="flex gap-2">
+                    <input
+                      aria-label={`Player ${index + 1} rate plan`}
+                      className={FIELD}
+                      onChange={(event) => updatePlayer(index, { ratePlan: event.target.value })}
+                      placeholder="Rate plan"
+                      type="text"
+                      value={player.ratePlan}
+                    />
+                    <button
+                      aria-label={`Remove player ${index + 1}`}
+                      className="shrink-0 border border-[#d4d4d8] bg-white px-2 text-xs font-bold text-[#8a3f26] hover:bg-[#f2f2f4] disabled:opacity-30"
+                      disabled={players.length <= 1}
+                      onClick={() => removePlayer(index)}
+                      type="button"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {time !== "" && taken.has(time) ? (
+              <p className="text-xs font-semibold text-[#8a3f26]">
+                That tee time is already booked. Pick another slot.
+              </p>
+            ) : null}
+          </div>
+
+          <div className="flex items-center justify-end gap-2 border-t border-[#d4d4d8] px-4 py-3">
+            <button
+              className="border border-[#d7d7dc] bg-white px-4 py-1.5 text-xs font-bold hover:bg-[#f2f2f4]"
+              onClick={onClose}
+              type="button"
+            >
+              Cancel
+            </button>
+            <button
+              className="bg-[#4533ff] px-5 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+              disabled={!canSubmit}
+              type="submit"
+            >
+              {busy ? "Saving…" : "Create reservation"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}

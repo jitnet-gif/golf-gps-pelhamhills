@@ -65,7 +65,8 @@ class Settings(BaseSettings):
     PERPLEXITY_API_KEY: str = ""
     COPILOT_API_KEY: str = "" # GitHub 또는 Azure Copilot 용
 
-    ALLOWED_ORIGINS: str = "http://localhost:3000,https://bepu.app"
+    # localhost 와 127.0.0.1 은 브라우저가 서로 다른 오리진으로 취급하므로 둘 다 허용한다.
+    ALLOWED_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,https://bepu.app"
 
     @property
     def OPENAI_API_KEY_LIST(self) -> list[str]:

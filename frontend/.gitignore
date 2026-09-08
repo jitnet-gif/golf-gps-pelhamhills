@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# 검증 스크립트가 생성하는 스크린샷
+scripts/teesheet-verify.png

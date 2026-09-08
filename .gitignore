@@ -13,3 +13,5 @@ venv/
 .DS_Store
 .claude/
 desktop.ini
+
+/backend/data/
