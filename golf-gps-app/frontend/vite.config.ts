@@ -110,18 +110,11 @@ export default defineConfig({
     // Chunk size limit (warn if exceeded)
     chunkSizeWarningLimit: 1000,
 
-    // Rollup options for manual code splitting
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          // Vendor chunks to optimize caching
-          'vendor-react': ['react', 'react-dom', 'wouter'],
-          'vendor-map': ['leaflet', 'react-leaflet'],
-          'vendor-ui': ['lucide-react', '@radix-ui/react-dialog'],
-          'vendor-utils': ['zod', 'tailwind-merge', 'zustand', 'dexie'],
-        },
-      },
-    },
+    // No manualChunks. Pinning react/react-dom to their own chunk while
+    // react-leaflet and lucide-react sit in others let a consumer chunk
+    // evaluate first, so react-dom read React's internals before React had
+    // initialised and the page died with __SECRET_INTERNALS...undefined.
+    // Rollup's own splitting keeps shared dependencies ordered correctly.
   },
 
   // Development server configuration

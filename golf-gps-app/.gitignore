@@ -49,3 +49,5 @@ coverage/
 # IDE
 .vscode/settings.json
 .idea/workspace.xml
+
+.vercel
