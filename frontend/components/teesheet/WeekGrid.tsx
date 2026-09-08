@@ -20,7 +20,7 @@
 //     한 행에 예약이 둘일 수 있다 — 백엔드가 합계 4명 이하면 같은 티타임 공유를
 //     허용한다. 세그먼트는 좌→우로 깔리고 남는 칸은 기존 `+` 생성 버튼이 채운다.
 
-import { Fragment, useMemo, useSyncExternalStore } from "react";
+import { Fragment, useMemo } from "react";
 import type { CSSProperties } from "react";
 
 import {
@@ -165,25 +165,16 @@ function daySeats(booking: TeeBooking): number {
  * "blue" 만 의미가 있고 gold/gray 는 무시된다.)
  */
 function daySurfaceClass(booking: TeeBooking): string {
-  if (booking.status === "blocked") return "bg-[#ececf0] text-[#4e5560]";
+  // 잠긴 티타임은 레퍼런스에서 흰 줄이다 — 색이 붙으면 "예약이 들어찬 줄" 로 읽힌다.
+  if (booking.status === "blocked") return "bg-white text-[#4e5560]";
   const first = booking.players[0];
   return first ? TONE_CLASS[playerTone(booking, first)] : "bg-[#ececf0] text-[#4e5560]";
 }
-
-// 서버 렌더에서는 false, 하이드레이션 이후 true. DateNav 이 쓰는 것과 같은 장치를
-// 여기에도 둔다 — 정적 export 라 프리렌더된 HTML 은 **빌드 날짜**를 담고 있어서,
-// 다음 날 페이지를 열면 클라이언트 첫 렌더와 텍스트가 어긋나(hydration mismatch) 버린다.
-const subscribeNever = () => () => {};
-const getClient = () => true;
-const getServer = () => false;
 
 export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
   const { view, weekDates, focusedDate, weekStart, visibleBookings, slots, selectedId } = controller;
   const isDayView = view === "day";
   const today = todayIso();
-
-  // 일간 헤더의 날짜 텍스트는 마운트 이후에만 그린다 (아래 렌더 참고).
-  const mounted = useSyncExternalStore(subscribeNever, getClient, getServer);
 
   // ===== 컬럼: 실제 ISO 날짜. 하드코딩된 요일 배열은 쓰지 않는다. =====
   // useTeeSheet이 weekDates를 매 렌더 새로 만들 수도 있으므로 배열 identity가 아니라
@@ -271,16 +262,17 @@ export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
   }, [visibleBookings, colIndex]);
 
   // ===== 일간 시트: 시(hour) 밴드를 섞은 "라인" 목록 =====
-  // Chronogolf 는 매 시각의 첫 티타임 **앞에** 전폭 회색 밴드(7:00 AM …)를 깐다.
-  // 즉 6:58 은 6시대이므로 그 아래에 7:00 AM 밴드가 온다. 화면 맨 첫 행 위에는
-  // 밴드를 두지 않는다 (index > 0 조건).
+  // 매 시각의 첫 티타임 **앞에** 전폭 밴드(6:00 AM · 7:00 AM …)를 깐다.
+  // 즉 6:58 은 6시대이므로 그 아래에 7:00 AM 밴드가 온다.
+  // 첫 행 위에도 밴드가 온다 — 레퍼런스의 맨 윗줄이 "6:00 AM" 이다. 헤더 행을 없앤
+  // 지금은 이 밴드가 시트의 시작을 알리는 유일한 표시이기도 하다.
   const dayLines = useMemo<DayLine[]>(() => {
     if (!isDayView) return [];
     const lines: DayLine[] = [];
     let prevHour: number | null = null;
-    rows.forEach((slot, index) => {
+    rows.forEach((slot) => {
       const hour = slotHour(slot);
-      if (hour !== null && index > 0 && hour !== prevHour) {
+      if (hour !== null && hour !== prevHour) {
         lines.push({ kind: "band", key: `band-${slot.time}`, label: minutesToTime(hour * 60) });
       }
       if (hour !== null) prevHour = hour;
@@ -353,7 +345,9 @@ export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
   const cartCol = dayColStart + columns.length;
   const fullRowEnd = cartCol + 1; // 마지막 라인 (= 트랙 수 + 1)
   const bodyRowEnd = rows.length + 2;
-  const dayBodyRowEnd = dayLines.length + 2;
+  /** 일간 시트에는 헤더 행이 없다 → 첫 라인이 grid row 1. 주간 뷰는 헤더가 1행이라 2부터다. */
+  const DAY_ROW_BASE = 1;
+  const dayBodyRowEnd = dayLines.length + DAY_ROW_BASE;
 
   const gridTemplateColumns = isDayView
     ? `${DAY_TIME_COL_PX}px ${DAY_RATE_COL_PX}px repeat(${DAY_SEATS}, minmax(112px, 1fr)) 56px 44px`
@@ -362,7 +356,6 @@ export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
   const gridTemplateRows = isDayView
     ? dayLines.length > 0
       ? [
-          "auto",
           ...dayLines.map((line) =>
             line.kind === "band" ? `${DAY_BAND_PX}px` : `minmax(var(--day-row, ${DAY_ROW_PX}px), auto)`,
           ),
@@ -403,7 +396,12 @@ export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
       <div className="min-h-0 min-w-0 flex-1 overflow-auto border-t border-[#d6d6dc] bg-white">
         <div className={isDayView ? "min-w-[700px]" : "min-w-[1050px]"}>
           <div className="grid text-xs" style={{ gridTemplateColumns, gridTemplateRows }}>
-            {/* ---------- 헤더 행 (grid row 1) ---------- */}
+            {/* ================= 주간 뷰 본문 (그대로 유지) =================
+                주간 뷰는 컬럼이 **날짜**라서 헤더 행이 있어야 어느 칸이 어느 날인지 알 수 있다.
+                일간 시트에는 헤더 행이 없다 — 컬럼이 그냥 좌석 1~4번이고, 날짜는 위의
+                상태 스트립이 이미 크게 말하고 있다 (레퍼런스와 동일). */}
+            {!isDayView && (
+              <>
             <div
               className="sticky top-0 left-0 z-40 border-b border-[#d6d6dc] bg-[#d7d5da] px-2 py-1 text-left font-bold"
               style={{ gridColumn: 1, gridRow: 1 }}
@@ -417,9 +415,6 @@ export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
               Rate
             </div>
 
-            {/* ================= 주간 뷰 본문 (그대로 유지) ================= */}
-            {!isDayView && (
-              <>
             {columns.map((iso, index) => {
               const isToday = iso === today;
               const weekend = isWeekend(iso);
@@ -588,34 +583,6 @@ export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
             {/* ================= 일간 시트 본문 ================= */}
             {isDayView && (
               <>
-                {/* 헤더: 플레이어 4칸을 한 덩어리로 묶어 날짜를 보여준다.
-                    (같은 날짜를 다시 고르는 버튼은 아무 일도 하지 않으므로 버튼이 아니라 라벨이다.) */}
-                <div
-                  className="sticky top-0 z-30 border-b border-[#d6d6dc] bg-[#d7d5da] px-2 py-1 text-center font-bold text-[#1f2328]"
-                  style={{ gridColumn: `${DAY_PLAYER_COL} / span ${DAY_SEATS}`, gridRow: 1 }}
-                >
-                  {/* focusedDate 는 todayIso() 에서 파생된다. 정적 export 의 프리렌더 HTML 은
-                      **빌드 날짜**를 담으므로, 다음 날 열면 클라이언트 첫 렌더와 글자가 달라져
-                      하이드레이션이 깨진다. 그래서 첫 렌더는 서버와 똑같이 날짜와 무관한
-                      자리표시자(nbsp — 헤더 높이 유지)를 그리고, 마운트 후 진짜 날짜로 바꾼다.
-                      DateNav 의 요일 탭이 쓰는 것과 같은 useSyncExternalStore 스위치다. */}
-                  {mounted ? longDate(focusedDate) : <>&nbsp;</>}
-                </div>
-                <div
-                  className="sticky top-0 z-30 border-b border-[#d6d6dc] bg-[#d7d5da] px-2 py-1 text-center font-bold"
-                  style={{ gridColumn: DAY_CART_COL, gridRow: 1 }}
-                >
-                  Cart
-                </div>
-                <div
-                  className="sticky top-0 z-30 border-b border-[#d6d6dc] bg-[#d7d5da] px-2 py-1 text-center font-bold"
-                  style={{ gridColumn: DAY_TIMER_COL, gridRow: 1 }}
-                  title="Check in"
-                >
-                  <span aria-hidden>⏱</span>
-                  <span className="sr-only">Check in</span>
-                </div>
-
                 {/* 세로 구분선 (본문 전체 높이) */}
                 {dayLines.length > 0 &&
                   Array.from({ length: DAY_SEATS + 2 }, (_, index) => (
@@ -625,19 +592,19 @@ export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
                       className="pointer-events-none border-l border-[#ececf0]"
                       style={{
                         gridColumn: DAY_PLAYER_COL + index,
-                        gridRow: `2 / ${dayBodyRowEnd}`,
+                        gridRow: `${DAY_ROW_BASE} / ${dayBodyRowEnd}`,
                       }}
                     />
                   ))}
 
                 {dayLines.map((line, lineIdx) => {
-                  const gridRow = lineIdx + 2;
+                  const gridRow = lineIdx + DAY_ROW_BASE;
 
                   if (line.kind === "band") {
                     return (
                       <div
                         key={line.key}
-                        className="z-[15] flex items-center border-y border-[#d6d6dc] bg-[#e8e8ec]"
+                        className="z-[15] flex items-center border-y border-[#c9d8e8] bg-[#dde7f2]"
                         style={{ gridColumn: `1 / ${DAY_ROW_END}`, gridRow }}
                       >
                         {/* 가로 스크롤 시에도 시각 라벨이 보이도록 라벨만 sticky. */}
@@ -706,7 +673,7 @@ export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
                         >
                           <span
                             aria-hidden
-                            className="text-[13px] leading-none font-bold text-[#b6b6c0] opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                            className="flex h-[15px] w-[15px] items-center justify-center rounded-full border border-[#c2c2cc] text-[11px] leading-none font-bold text-[#9aa0a6] group-hover:border-[#4533ff] group-hover:text-[#4533ff]"
                           >
                             +
                           </span>
@@ -914,7 +881,9 @@ function DaySegmentCard({
         .filter(Boolean)
         .join(" · ")}
       title={`${booking.title} · ${booking.time} · ${STATUS_LABEL[booking.status]}`}
-      style={{ ...style, ...(blocked ? HATCH_STYLE : undefined) }}
+      // 잠긴 티타임에는 해칭을 깔지 않는다 — 레퍼런스는 흰 줄에 자물쇠 하나뿐이고,
+      // 해칭은 "여기 뭔가 예약이 있다" 처럼 읽혀서 오히려 헷갈린다.
+      style={style}
       // scroll-mt: 고정 헤더 뒤에 숨은 채로 스크롤되지 않게.
       // 세그먼트가 셀을 꽉 채우므로 행 밑줄도 스스로 그린다 — 안 그리면 위아래
       // 행의 같은 색 세그먼트가 한 덩어리로 뭉쳐 보인다.
@@ -922,7 +891,13 @@ function DaySegmentCard({
         booking,
       )} ${cancelled ? "opacity-60" : ""} ${selected ? "ring-2 ring-[#111315] ring-inset" : ""}`}
     >
-      {hasChrome && (
+      {blocked && (
+        <span className="flex min-w-0 flex-1 items-center justify-center text-[#6b7280]">
+          <span aria-hidden>&#128274;</span>
+        </span>
+      )}
+
+      {!blocked && hasChrome && (
         <span className="flex shrink-0 flex-col items-center justify-center gap-[2px] px-[3px]">
           {booking.holes === 9 && (
             <span
@@ -941,7 +916,7 @@ function DaySegmentCard({
         </span>
       )}
 
-      {booking.players.length === 0 ? (
+      {blocked ? null : booking.players.length === 0 ? (
         // 방어용 경로. dayPacks 가 좌석 0인 예약(플레이어 0명 · 취소됨)을 세그먼트로
         // 만들지 않으므로 지금은 도달하지 않지만, 그런 예약이 이 컴포넌트까지 오더라도
         // 이름 없이 빈 칸으로 그려지는 일은 없어야 한다.

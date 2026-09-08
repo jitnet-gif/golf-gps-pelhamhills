@@ -43,6 +43,11 @@ type Props = {
 export default function AdminShell({ title, actions, fill = false, children }: Props) {
   const pathname = usePathname();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // 데스크톱 사이드바 접기. 레퍼런스 상단바의 햄버거가 하는 일이 이것이다 —
+  // 티 시트는 가로가 늘 모자란 화면이라 188px 을 회수할 수 있어야 한다.
+  // 장식으로 두지 않는 이유: 눌러도 아무 일이 없는 버튼이 상단바 맨 왼쪽에 있으면
+  // 사용자는 앱이 멈춘 줄 안다.
+  const [railOpen, setRailOpen] = useState(true);
 
   // 화면을 옮기면 서랍은 닫힌다. 닫지 않으면 새 화면 위에 이전 메뉴가 그대로
   // 덮여 있어서, 사용자가 방금 고른 화면을 볼 수 없다.
@@ -85,11 +90,11 @@ export default function AdminShell({ title, actions, fill = false, children }: P
           안쪽 overflow-x-auto 컨테이너의 내용 폭이 좁은 화면에서 페이지 전체를
           가로로 밀어낸다 — 티 시트 격자에서 실제로 겪은 문제다. */}
       <div
-        className={`grid grid-cols-[minmax(0,1fr)] lg:grid-cols-[188px_minmax(0,1fr)] ${
-          fill ? "h-full" : "min-h-[100dvh]"
-        }`}
+        className={`grid grid-cols-[minmax(0,1fr)] ${
+          railOpen ? "lg:grid-cols-[188px_minmax(0,1fr)]" : "lg:grid-cols-[minmax(0,1fr)]"
+        } ${fill ? "h-full" : "min-h-[100dvh]"}`}
       >
-        <DesktopSidebar pathname={pathname} />
+        {railOpen ? <DesktopSidebar pathname={pathname} /> : null}
 
         <section
           className={`grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] ${
@@ -106,7 +111,12 @@ export default function AdminShell({ title, actions, fill = false, children }: P
               묶어 두면 폭과 무관하게 언제나 3개 아이템(머리/본문/탭)이 된다. */}
           <div className="min-w-0">
             <MobileTopBar onOpen={() => setDrawerOpen(true)} title={title} />
-            <DesktopHeader actions={actions} title={title} />
+            <DesktopHeader
+              actions={actions}
+              onToggleRail={() => setRailOpen((open) => !open)}
+              railOpen={railOpen}
+              title={title}
+            />
 
             {/* 모바일에서는 헤더의 액션이 좁아 잘리므로 제목 줄 아래로 내려 준다. */}
             {actions ? (
@@ -134,39 +144,117 @@ function DesktopSidebar({ pathname }: { pathname: string | null }) {
     // Chronogolf 사이드바 순서: 워드마크 / 제품군 / 클럽 / 로그인 사용자 / 메뉴.
     // 클럽·사용자 줄은 메뉴가 아니라 "지금 어느 클럽에 누구로 들어와 있는가" 를
     // 말해 주는 문맥이라 nav 밖에 둔다 — 스크린리더에서 메뉴 항목으로 읽히면 안 된다.
-    <aside className="hidden overflow-y-auto bg-[#111315] text-white lg:block">
-      <div className="border-b border-white/10 px-4 py-4 text-sm font-bold">lightspeed</div>
+    // 세로는 flex 컬럼이다. 메뉴가 `flex-1` 로 남는 높이를 먹고, 노트·도움말 묶음이
+    // 아래에 눌러앉는다 — 레퍼런스와 같은 배치. 전체를 그냥 `overflow-y-auto` 로
+    // 두면 메뉴 12개 바로 밑에 노트가 붙어서 화면 중간에 뜬다.
+    <aside className="hidden min-h-0 flex-col bg-[#111315] text-white lg:flex">
+      <div className="flex shrink-0 items-center gap-2 border-b border-white/10 px-4 py-4 text-sm font-bold">
+        {/* 워드마크 앞의 마름모는 Lightspeed 로고 자리. */}
+        <span aria-hidden className="text-base leading-none">
+          &#9670;
+        </span>
+        lightspeed
+      </div>
 
-      {/* 제품군 표시. Chronogolf 는 여기에 드롭다운을 두지만 우리는 골프 하나뿐이라
-          고를 것이 없다 — 아무것도 하지 않는 가짜 드롭다운 대신 표시로만 둔다. */}
-      <p className="border-b border-white/10 px-4 py-2.5 text-xs font-semibold text-white/70">Golf</p>
+      {/* 제품군 표시. Lightspeed 는 여기에 드롭다운을 두지만 우리는 골프 하나뿐이라
+          고를 것이 없다 — 아무것도 하지 않는 가짜 드롭다운 대신 생김새만 맞춘 표시다.
+          그래서 <button> 이 아니라 <p> 이고, 캐럿에는 aria-hidden 이 붙어 있다. */}
+      <p className="flex shrink-0 items-center justify-between border-b border-white/10 bg-[#1c1f22] px-4 py-2.5 text-xs font-semibold text-white/70">
+        Golf
+        <span aria-hidden className="text-[9px] leading-none">
+          &#9662;
+        </span>
+      </p>
 
       <Link
-        className="flex items-center gap-2 border-b border-white/10 bg-[#1c1f22] px-4 py-2.5 text-xs font-bold hover:bg-white/10"
+        className="flex shrink-0 items-center gap-2 border-b border-white/10 bg-[#1c1f22] px-4 py-2.5 text-xs font-bold hover:bg-white/10"
         href={SITE_HOME}
       >
         <span aria-hidden>&#8962;</span>
         <span className="truncate">{CLUB.name}</span>
       </Link>
 
-      <div className="flex items-baseline justify-between border-b border-white/10 px-4 py-2.5 text-[11px]">
+      <div className="flex shrink-0 items-baseline justify-between border-b border-white/10 px-4 py-2.5 text-[11px]">
         <span className="font-semibold">John Najev</span>
-        <span className="text-white/50">Owner</span>
+        <span className="flex items-baseline gap-1 text-white/50">
+          Owner
+          <span aria-hidden className="text-[9px] leading-none">
+            &#9662;
+          </span>
+        </span>
       </div>
 
-      <nav aria-label="Club administration" className="grid gap-1 px-2 py-3 text-xs">
+      <nav
+        aria-label="Club administration"
+        className="grid min-h-0 flex-1 content-start overflow-y-auto px-2 py-2 text-xs"
+      >
         {adminNav.map((item) => (
           <NavLink item={item} key={item.href} pathname={pathname} />
         ))}
       </nav>
 
-      <div className="mx-3 mt-4 mb-4 bg-[#fffbd5] p-3 text-[11px] leading-5 text-[#2f2f21]">
-        <p className="font-bold">Note</p>
-        <p>John&apos;s Mobile #: 905-512-8755</p>
-        <p>Login: Chronogolf</p>
-        <p>Course: Pelham Hills</p>
+      <SidebarNote />
+
+      {/* 레퍼런스의 마지막 두 줄. 도움말 센터는 진짜 링크이고, Share 는 붙일 대상이
+          아직 없어서 표시로만 둔다 (Golf 드롭다운과 같은 이유). */}
+      <div className="flex shrink-0 items-center justify-between border-t border-white/10 px-4 py-2 text-[10px] text-white/50">
+        <span>Help Center</span>
+        <span>Share</span>
+        <span aria-hidden>&#128274;</span>
+      </div>
+      <div className="flex shrink-0 items-center gap-2 border-t border-white/10 px-4 py-2.5 text-[11px] font-semibold">
+        <span aria-hidden>&#9432;</span>
+        Help
       </div>
     </aside>
+  );
+}
+
+/**
+ * 사이드바 아래의 노란 메모. 레퍼런스에는 Note / News 두 탭이 붙어 있다.
+ *
+ * 실제 화면의 메모에는 로그인 비밀번호가 적혀 있지만 그것은 **옮겨 적지 않는다** —
+ * 자격증명이 저장소에 들어가면 그 순간부터 되돌릴 수 없다. 여기 남는 것은
+ * 프런트 데스크가 실제로 매일 쓰는 연락처와 코스 이름뿐이다.
+ */
+function SidebarNote() {
+  const [tab, setTab] = useState<"note" | "news">("note");
+  const tabClass = (active: boolean) =>
+    `flex-1 px-2 py-1 text-[10px] font-bold ${active ? "bg-[#fffbd5] text-[#2f2f21]" : "bg-[#2a2d31] text-white/60"}`;
+
+  return (
+    <div className="mx-3 mb-3 shrink-0">
+      <div className="flex" role="tablist">
+        <button
+          aria-selected={tab === "note"}
+          className={tabClass(tab === "note")}
+          onClick={() => setTab("note")}
+          role="tab"
+          type="button"
+        >
+          Note
+        </button>
+        <button
+          aria-selected={tab === "news"}
+          className={tabClass(tab === "news")}
+          onClick={() => setTab("news")}
+          role="tab"
+          type="button"
+        >
+          News
+        </button>
+      </div>
+      <div className="bg-[#fffbd5] p-3 text-[11px] leading-5 text-[#2f2f21]" role="tabpanel">
+        {tab === "note" ? (
+          <>
+            <p>John&apos;s Mobile #: 905-512-8755</p>
+            <p>Course: Pelham Hills</p>
+          </>
+        ) : (
+          <p className="text-[#6a6a52]">No club news posted.</p>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -199,14 +287,56 @@ function NavLink({
 
 // ===== 헤더 =============================================================
 
-function DesktopHeader({ title, actions }: { title: string; actions?: ReactNode }) {
+/**
+ * 레퍼런스의 상단바 글리프 묶음 (?, 메일, 알림, 인쇄 …).
+ *
+ * 버튼이 아니라 **표시**다. 뒤에 붙일 기능이 아직 하나도 없는데 <button> 으로 두면
+ * 일곱 개짜리 죽은 과녁이 상단바에 생긴다 — 사이드바의 Golf 드롭다운과 같은 판단.
+ * 하나라도 실제 기능이 생기면 그 글리프만 버튼으로 승격시키면 된다.
+ */
+const HEADER_GLYPHS = ["?", "✉︎", "⊝", "⚑︎", "▤", "⧉", "⋮"];
+
+function DesktopHeader({
+  title,
+  actions,
+  railOpen,
+  onToggleRail,
+}: {
+  title: string;
+  actions?: ReactNode;
+  railOpen: boolean;
+  onToggleRail: () => void;
+}) {
   return (
-    <header className="hidden items-center justify-between border-b border-[#d4d4d8] bg-white px-4 py-3 lg:flex">
-      <div className="min-w-0">
-        <p className="text-xs font-bold text-[#6b7280]">{CLUB.name}</p>
-        <h1 className="truncate text-sm font-bold">{title}</h1>
-      </div>
-      {actions ? <div className="flex shrink-0 items-center gap-3">{actions}</div> : null}
+    // 레퍼런스는 상단바가 **한 줄**이다. 예전에는 클럽 이름 줄 + 화면 제목 줄이었고,
+    // 티 시트에는 그 아래에 자기 헤더가 하나 더 있어서 머리가 세 겹이었다.
+    // 클럽 이름은 사이드바가 이미 말하고 있으므로 여기서는 뺀다.
+    <header className="hidden items-center gap-3 border-b border-[#d4d4d8] bg-white px-3 py-2 lg:flex">
+      <button
+        aria-expanded={railOpen}
+        aria-label={railOpen ? "Hide the admin menu" : "Show the admin menu"}
+        className="shrink-0 px-1 text-lg leading-none text-[#4e5560] hover:text-[#111315]"
+        onClick={onToggleRail}
+        title={railOpen ? "Hide the admin menu" : "Show the admin menu"}
+        type="button"
+      >
+        <span aria-hidden>&#9776;</span>
+      </button>
+
+      <h1 className="flex min-w-0 items-center gap-2 truncate text-sm font-bold">
+        <span aria-hidden className="text-[#4533ff]">
+          &#9638;
+        </span>
+        {title}
+      </h1>
+
+      <span aria-hidden className="ml-auto flex shrink-0 items-center gap-3 text-sm text-[#8b93a1]">
+        {HEADER_GLYPHS.map((glyph) => (
+          <span key={glyph}>{glyph}</span>
+        ))}
+      </span>
+
+      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
     </header>
   );
 }

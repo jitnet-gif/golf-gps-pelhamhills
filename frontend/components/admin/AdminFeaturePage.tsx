@@ -10,7 +10,7 @@
  * 없앴다 — 어느 항목이 활성인지는 `AdminShell` 이 `usePathname()` 으로 판단한다.
  */
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import AdminShell from "@/components/admin/AdminShell";
 
@@ -31,12 +31,15 @@ export default function AdminFeaturePage({
   metrics,
   rows,
   actionLabel,
+  children,
 }: {
   title: string;
   description: string;
   metrics: Metric[];
   rows: Row[];
   actionLabel: string;
+  /** 뼈대(설명·지표·표) 아래에 붙일 진짜 패널. 없으면 아무것도 그리지 않는다. */
+  children?: ReactNode;
 }) {
   const [items, setItems] = useState(rows);
   const [saved, setSaved] = useState("Ready");
@@ -127,6 +130,8 @@ export default function AdminFeaturePage({
             ))}
           </section>
         </div>
+
+        {children}
       </section>
     </AdminShell>
   );

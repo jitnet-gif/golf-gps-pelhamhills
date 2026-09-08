@@ -1,344 +1,344 @@
 "use client";
 
-import Link from "next/link";
-import { useMemo, useState } from "react";
+/**
+ * Tee Times & Pricing — 티 타임 격자와 그린피가 **실제로** 어떻게 생성되는지 보는 화면.
+ *
+ * ## 왜 편집 화면이 아닌가
+ *
+ * 예전 버전은 요일마다 9홀/18홀/카트 요금을 입력받고 `Save` · `Publish Rates` ·
+ * `Apply Defaults` 버튼이 달린 편집 화면이었다. 그 값들은 **전부 이 파일 안의 로컬
+ * 상태**였고 어디에도 저장되지 않았다. 결과가 나빴던 이유는 버튼이 안 먹는다는 것보다,
+ * 화면이 **거짓말을 했다**는 데 있다: 금요일 18홀 $64.00 이라고 적혀 있었지만 티 시트가
+ * 실제로 청구하는 금액은 $47.79 였다. 프로 샵이 이 화면을 믿고 손님에게 요금을
+ * 말하면 그대로 틀린다.
+ *
+ * 그래서 지금은 백엔드에서 **진짜 값을 읽어** 보여 주기만 한다. 상수를 이 쪽에
+ * 옮겨 적지도 않는다 — `GET /tee-sheet/slots?date=` 가 다섯 가지를 전부 말해 준다:
+ * 첫 티 / 마지막 티 / 간격 / 요금 / 티 타임당 카트 수.
+ *
+ * ## 편집을 붙이려면
+ *
+ * 간격이나 첫 티 시각을 바꿀 수 있게 만들면 안 된다. 기존 예약의 시각 라벨
+ * (`6:58 AM`, `7:43 AM` …)은 6:40 부터 9분 격자 위에 찍혀 있고, 백엔드의
+ * `require_slot()` 이 예약 생성·이동 때 그 라벨을 검사한다. 간격을 15분으로 바꾸는
+ * 순간 기존 라벨이 전부 해석 불가가 되어 티 시트의 "no matching tee time" 스트립으로
+ * 쏟아지고, 이동은 거부된다.
+ *
+ * 안전하게 열 수 있는 것은 `RATE_OVERRIDES` (backend/api/routes/tee_sheet.py) 하나다 —
+ * 날짜별 요금 강제라서 시각 라벨을 하나도 건드리지 않는다. 공휴일·단체 행사 요금은
+ * 그쪽으로 붙이면 된다.
+ */
+
+import { useEffect, useMemo, useState } from "react";
 
 import AdminShell from "@/components/admin/AdminShell";
-import { ADMIN_HOME } from "@/lib/nav";
+import DayTabs from "@/components/admin/DayTabs";
+import { apiBaseUrl } from "@/lib/apiHost";
+import { addDays, longDate, minutesToTime, money, toDate, todayIso } from "@/lib/teeSheet/dates";
+import type { SlotsResponse, TeeSlot } from "@/lib/teeSheet/types";
 
-type DayRate = {
-  day: string;
-  enabled: boolean;
-  nineHole: number;
-  eighteenHole: number;
-  cart: number;
-};
+/**
+ * 한 티 타임의 플레이어 자리 수. 백엔드 `PLAYERS_PER_TEE_TIME` 과 같은 값이고,
+ * 슬롯 응답에는 담겨 오지 않아 여기서 한 번 적는다 (WeekGrid 의 `DAY_SEATS` 와 동일).
+ */
+const PLAYERS_PER_TEE_TIME = 4;
 
-const initialRates: DayRate[] = [
-  { day: "Monday", enabled: true, nineHole: 34, eighteenHole: 58.41, cart: 18 },
-  { day: "Tuesday", enabled: true, nineHole: 34, eighteenHole: 47.79, cart: 18 },
-  { day: "Wednesday", enabled: true, nineHole: 34, eighteenHole: 47.79, cart: 18 },
-  { day: "Thursday", enabled: true, nineHole: 34, eighteenHole: 47.79, cart: 18 },
-  { day: "Friday", enabled: true, nineHole: 39, eighteenHole: 64, cart: 20 },
-  { day: "Saturday", enabled: true, nineHole: 42, eighteenHole: 72, cart: 22 },
-  { day: "Sunday", enabled: true, nineHole: 42, eighteenHole: 72, cart: 22 },
-];
+type Loaded = { slots: TeeSlot[]; weekdayRate: number | null; weekendRate: number | null };
+/** 로딩은 상태로 들고 있지 않고 렌더에서 파생한다 (아래 `useSlotConfig` 주석 참고). */
+type Settled = { kind: "no-api" } | { kind: "error"; detail: string } | { kind: "ready"; data: Loaded };
+type State = { kind: "loading" } | Settled;
 
-function money(value: number) {
-  return `$${value.toFixed(2)}`;
+/** 안정적인 빈 배열. 매 렌더 새 `[]` 를 만들면 아래 useMemo 가 헛돈다. */
+const NO_SLOTS: TeeSlot[] = [];
+
+async function fetchSlots(base: string, iso: string, signal: AbortSignal): Promise<TeeSlot[]> {
+  const response = await fetch(`${base}/tee-sheet/slots?date=${iso}`, { signal });
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  const body: SlotsResponse = await response.json();
+  return body.slots ?? [];
 }
 
-function minutesFromTime(value: string) {
-  const [hour, minute] = value.split(":").map(Number);
-  return hour * 60 + minute;
+function isWeekendIso(iso: string): boolean {
+  const day = toDate(iso).getDay();
+  return day === 0 || day === 6;
 }
 
-function formatMinutes(total: number) {
-  const hour24 = Math.floor(total / 60);
-  const minute = total % 60;
-  const suffix = hour24 >= 12 ? "PM" : "AM";
-  const hour12 = hour24 % 12 || 12;
-  return `${hour12}:${String(minute).padStart(2, "0")} ${suffix}`;
+async function loadConfig(
+  focusedDate: string,
+  weekdayProbe: string | null,
+  weekendProbe: string | null,
+  signal: AbortSignal,
+): Promise<Settled> {
+  const base = apiBaseUrl();
+  if (!base) return { kind: "no-api" };
+  const [slots, weekday, weekend] = await Promise.all([
+    fetchSlots(base, focusedDate, signal),
+    weekdayProbe ? fetchSlots(base, weekdayProbe, signal) : Promise.resolve(NO_SLOTS),
+    weekendProbe ? fetchSlots(base, weekendProbe, signal) : Promise.resolve(NO_SLOTS),
+  ]);
+  return {
+    kind: "ready",
+    data: { slots, weekdayRate: weekday[0]?.rate ?? null, weekendRate: weekend[0]?.rate ?? null },
+  };
+}
+
+/**
+ * 고른 날짜의 슬롯과, 기준 요금 두 가지(평일 · 주말)를 함께 읽는다.
+ *
+ * 기준 요금을 상수로 적지 않고 **조회하는** 이유: 백엔드의 `WEEKDAY_RATE` /
+ * `WEEKEND_RATE` 가 바뀌었을 때 이 화면만 옛날 숫자를 붙들고 있으면, 고치기 전과
+ * 똑같이 거짓말하는 화면이 된다.
+ *
+ * 조회 날짜는 고른 날 앞뒤 3일(= 연속 7일) 안에서 찾는다 — 어느 7일 창이든 평일과
+ * 주말이 반드시 하나씩은 들어 있다. 탭이 보여 주는 배열을 넘겨받지 않는 이유:
+ * 그러면 이 화면이 `DayTabs` 의 앵커 규칙(오늘 기준이냐 고른 날 기준이냐)에 묶여
+ * 버린다. 요금 조회에 필요한 것은 "평일 하나, 주말 하나" 뿐이고 그건 탭과 무관하다.
+ *
+ * 결과에 **어느 날짜의 것인지**를 함께 담고 "로딩" 은 렌더에서 파생한다. 두 가지를
+ * 동시에 얻는다: (a) effect 본문에서 동기 setState 를 하지 않게 되고, (b) 날짜를 바꾼
+ * 순간 이전 날짜의 요금이 새 날짜 제목 아래 잠깐 남아 있는 일이 없다.
+ */
+function useSlotConfig(focusedDate: string): State {
+  const [settled, setSettled] = useState<{ date: string; value: Settled } | null>(null);
+
+  const probeWindow = useMemo(
+    () => Array.from({ length: 7 }, (_, index) => addDays(focusedDate, index - 3)),
+    [focusedDate],
+  );
+  const weekdayProbe = useMemo(() => probeWindow.find((iso) => !isWeekendIso(iso)) ?? null, [probeWindow]);
+  const weekendProbe = useMemo(() => probeWindow.find((iso) => isWeekendIso(iso)) ?? null, [probeWindow]);
+
+  useEffect(() => {
+    const abort = new AbortController();
+    // setState 는 오직 then/catch 안에서만 — effect 본문에서 동기로 부르지 않는다.
+    loadConfig(focusedDate, weekdayProbe, weekendProbe, abort.signal)
+      .then((value) => {
+        if (!abort.signal.aborted) setSettled({ date: focusedDate, value });
+      })
+      .catch((error: unknown) => {
+        if (abort.signal.aborted) return;
+        setSettled({
+          date: focusedDate,
+          value: { kind: "error", detail: error instanceof Error ? error.message : "network error" },
+        });
+      });
+    return () => abort.abort();
+  }, [focusedDate, weekdayProbe, weekendProbe]);
+
+  return settled?.date === focusedDate ? settled.value : { kind: "loading" };
+}
+
+// ===== 작은 조각들 =====
+
+const ICON = "h-3.5 w-3.5 shrink-0";
+
+function ClockIcon() {
+  return (
+    <svg aria-hidden="true" className={ICON} fill="none" stroke="currentColor" strokeWidth="1.6" viewBox="0 0 16 16">
+      <circle cx="8" cy="8" r="5.6" />
+      <path d="M8 5v3.2l2 1.4" />
+    </svg>
+  );
+}
+
+function PeopleIcon() {
+  return (
+    <svg aria-hidden="true" className={ICON} fill="none" stroke="currentColor" strokeWidth="1.6" viewBox="0 0 16 16">
+      <circle cx="6" cy="5.5" r="2.5" />
+      <path d="M1.6 13.4c0-2.4 2-4 4.4-4s4.4 1.6 4.4 4M11 3.4a2.3 2.3 0 0 1 0 4.4M12.2 9.8c1.4.5 2.3 1.8 2.3 3.6" />
+    </svg>
+  );
+}
+
+function CartIcon() {
+  return (
+    <svg aria-hidden="true" className={ICON} fill="none" stroke="currentColor" strokeWidth="1.6" viewBox="0 0 16 16">
+      <path d="M2 4.5h6.5v5H2zM8.5 6.5H12l2 3v0h-5.5z" />
+      <circle cx="4.5" cy="12" r="1.4" />
+      <circle cx="11.5" cy="12" r="1.4" />
+    </svg>
+  );
+}
+
+/** 두 값짜리 정의 줄. 카드 안에서 "이름 …… 값" 으로 읽힌다. */
+function Row({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 border-b border-[#ececf0] px-3 py-1.5 last:border-b-0">
+      <span className="text-[#5c6270]">{label}</span>
+      <span className={`font-bold tabular-nums ${muted ? "text-[#9aa0a6]" : ""}`}>{value}</span>
+    </div>
+  );
+}
+
+function Card({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="border border-[#d6d6dc] bg-white text-xs">
+      <h2 className="border-b border-[#d6d6dc] bg-[#ececf0] px-3 py-1.5 text-[11px] font-bold">{title}</h2>
+      {children}
+    </section>
+  );
 }
 
 export default function PricingPage() {
-  const [openTime, setOpenTime] = useState("06:40");
-  const [closeTime, setCloseTime] = useState("18:58");
-  const [interval, setInterval] = useState(9);
-  const [defaultNineHole, setDefaultNineHole] = useState(34);
-  const [defaultEighteenHole, setDefaultEighteenHole] = useState(47.79);
-  const [defaultCart, setDefaultCart] = useState(18);
-  const [rates, setRates] = useState<DayRate[]>(initialRates);
-  const [previewDay, setPreviewDay] = useState("Thursday");
-  const [holes, setHoles] = useState<9 | 18>(18);
+  // 이 화면은 자기 날짜 상태를 갖는다 — 티 시트 컨트롤러(`useTeeSheet`)를 끌어오지
+  // 않는다. 요금을 보는 데 예약 목록과 폴링이 전부 따라올 이유가 없다.
+  const [focusedDate, setFocusedDate] = useState(todayIso);
+  const state = useSlotConfig(focusedDate);
 
-  const selectedRate = rates.find((rate) => rate.day === previewDay) ?? rates[0];
-  const previewTimes = useMemo(() => {
-    const start = minutesFromTime(openTime);
-    const end = minutesFromTime(closeTime);
-    if (end <= start || interval <= 0) return [];
+  const data = state.kind === "ready" ? state.data : null;
+  const slots = data?.slots ?? NO_SLOTS;
+  const rate = slots[0]?.rate ?? null;
+  const intervalMinutes =
+    slots.length >= 2 && Number.isFinite(slots[0].minutes) && Number.isFinite(slots[1].minutes)
+      ? slots[1].minutes - slots[0].minutes
+      : null;
+  const cartsPerSlot = slots[0]?.cartsTotal ?? null;
+  const capacity = slots.length * PLAYERS_PER_TEE_TIME;
+  const potential = rate === null ? null : capacity * rate;
 
-    const slots: string[] = [];
-    for (let time = start; time <= end && slots.length < 64; time += interval) {
-      slots.push(formatMinutes(time));
+  // 미리보기 목록에 시(hour) 밴드를 섞는다 — 티 시트 격자와 같은 모양이라야
+  // "이 화면이 저 화면을 만든다" 가 눈에 보인다.
+  const lines = useMemo(() => {
+    const out: Array<{ kind: "band"; label: string } | { kind: "slot"; slot: TeeSlot }> = [];
+    let prevHour: number | null = null;
+    for (const slot of slots) {
+      const hour = Number.isFinite(slot.minutes) ? Math.floor(slot.minutes / 60) : null;
+      if (hour !== null && hour !== prevHour) {
+        out.push({ kind: "band", label: minutesToTime(hour * 60) });
+        prevHour = hour;
+      }
+      out.push({ kind: "slot", slot });
     }
-    return slots;
-  }, [closeTime, interval, openTime]);
-
-  function updateRate(day: string, patch: Partial<DayRate>) {
-    setRates((current) => current.map((rate) => (rate.day === day ? { ...rate, ...patch } : rate)));
-  }
-
-  function applyDefaults() {
-    setRates((current) =>
-      current.map((rate) => ({
-        ...rate,
-        nineHole: defaultNineHole,
-        eighteenHole: defaultEighteenHole,
-        cart: defaultCart,
-      })),
-    );
-  }
-
-  const previewPrice = holes === 18 ? selectedRate.eighteenHole : selectedRate.nineHole;
-  const dailyCapacity = previewTimes.length * 4;
-  const potentialGreenFee = previewTimes.length * 4 * previewPrice;
+    return out;
+  }, [slots]);
 
   return (
-    <AdminShell
-      actions={
-        <>
-          <Link
-            className="tap-target border border-[#d7d7dc] px-3 py-1.5 text-xs font-bold"
-            href={ADMIN_HOME}
+    <AdminShell title="Tee Times & Pricing">
+      {/* 상태 스트립 — 티 시트와 같은 3열 그리드. 가운데 큰 숫자가 이 화면의 주인공
+          (티 간격)이고, 좌우가 같은 `1fr` 이라 화면 기준으로 정확히 가운데에 온다. */}
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-[#d4d4d8] bg-white px-4 py-1.5 text-xs text-[#4e5560]">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="flex shrink-0 items-center gap-1.5 font-semibold text-[#111315]" title="Tee times generated for this day">
+            <ClockIcon />
+            {slots.length}
+          </span>
+          <span
+            className="flex shrink-0 items-center gap-1.5 font-semibold text-[#111315]"
+            title={`Player capacity — ${PLAYERS_PER_TEE_TIME} seats per tee time`}
           >
-            Tee Sheet
-          </Link>
-          <button
-            className="tap-target bg-[#4533ff] px-4 py-1.5 text-xs font-bold text-white"
-            type="button"
-          >
-            Save
-          </button>
-        </>
-      }
-      title="Tee Times & Pricing"
-    >
-      <div className="grid min-w-0 grid-rows-[auto_1fr]">
-        <section className="border-b border-[#d4d4d8] bg-white px-4 py-3">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <div className="flex flex-wrap items-center gap-3 text-xs">
-              <span className="rounded bg-[#111315] px-2 py-1 text-white">Pricing Setup</span>
-              <span>{previewTimes.length} Tee Times</span>
-              <span>{dailyCapacity} Player Capacity</span>
-              <span>{money(potentialGreenFee)} Green Fee Potential</span>
-            </div>
-            <div className="text-center">
-              <p className="text-3xl font-semibold leading-none">{interval}</p>
-              <p className="text-xs font-semibold">Minute Tee Interval</p>
-            </div>
-            <div className="flex gap-2">
-              <button className="inline-flex min-h-11 items-center border bg-white px-3 text-xs font-bold lg:min-h-0 lg:py-1.5" onClick={applyDefaults}>
-                Apply Defaults
-              </button>
-              <button className="inline-flex min-h-11 items-center bg-[#4533ff] px-3 text-xs font-bold text-white lg:min-h-0 lg:py-1.5">Publish Rates</button>
-            </div>
-          </div>
-        </section>
+            <PeopleIcon />
+            {capacity}
+          </span>
+          <span className="flex shrink-0 items-center gap-1.5 font-semibold text-[#111315]" title="Carts available per tee time">
+            <CartIcon />
+            {cartsPerSlot ?? "—"}
+          </span>
+          {potential !== null ? (
+            <span className="shrink-0" title="Green fee at full occupancy for this day">
+              {money(potential)} potential
+            </span>
+          ) : null}
+        </div>
 
-        <section className="min-w-0 overflow-auto p-4">
-          <div className="grid gap-4 xl:grid-cols-[330px_1fr_320px]">
-            <section className="border border-[#d6d6dc] bg-white">
-              <div className="border-b border-[#d6d6dc] bg-[#d7d5da] px-3 py-2 text-xs font-bold">
-                Operating Hours
-              </div>
-              <div className="grid gap-3 p-3 text-xs">
-                <label className="grid gap-1 font-semibold">
-                  Opening Time
-                  <input
-                    className="border border-[#cfd2d8] px-2 py-2 font-normal"
-                    onChange={(event) => setOpenTime(event.target.value)}
-                    type="time"
-                    value={openTime}
-                  />
-                </label>
-                <label className="grid gap-1 font-semibold">
-                  Closing Time
-                  <input
-                    className="border border-[#cfd2d8] px-2 py-2 font-normal"
-                    onChange={(event) => setCloseTime(event.target.value)}
-                    type="time"
-                    value={closeTime}
-                  />
-                </label>
-                <label className="grid gap-1 font-semibold">
-                  Tee Interval
-                  <select
-                    className="border border-[#cfd2d8] px-2 py-2 font-normal"
-                    onChange={(event) => setInterval(Number(event.target.value))}
-                    value={interval}
+        <div className="flex shrink-0 items-center gap-2 text-[#111315]">
+          <span className="text-2xl leading-none font-semibold">{intervalMinutes ?? "—"}</span>
+          <span className="text-[11px] leading-tight font-semibold">
+            Minute
+            <br />
+            Tee Interval
+          </span>
+        </div>
+
+        <span />
+      </div>
+
+      <DayTabs onChange={setFocusedDate} value={focusedDate} />
+
+      <div className="grid gap-3 p-3">
+        {/* 이 화면이 무엇인지 한 줄로 말한다. 없으면 "왜 아무것도 못 고치지?" 가 된다. */}
+        <p className="border border-[#c9d8e8] bg-[#dde7f2] px-3 py-2 text-[11px] leading-5 text-[#2b3a4a]">
+          These values come from the booking server and are shown read-only. Changing the tee interval or the first tee
+          time would strand every existing reservation — their time labels (<code>6:58 AM</code>, <code>7:43 AM</code>…)
+          sit on this exact grid. Per-date rate overrides are the safe place to add editing.
+        </p>
+
+        {state.kind === "no-api" ? (
+          <p className="border border-[#e7c3b6] bg-[#fbe9e2] px-3 py-2 text-xs text-[#8a3f26]">
+            The booking server is not configured for this site, so tee times and rates cannot be read.
+          </p>
+        ) : null}
+
+        {state.kind === "error" ? (
+          <p className="border border-[#e7c3b6] bg-[#fbe9e2] px-3 py-2 text-xs text-[#8a3f26]">
+            Could not read tee times for {longDate(focusedDate)} — {state.detail}.
+          </p>
+        ) : null}
+
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <Card title="Tee time generation">
+            <Row label="First tee" value={slots[0]?.time ?? "—"} />
+            <Row label="Last tee" value={slots[slots.length - 1]?.time ?? "—"} />
+            <Row label="Interval" value={intervalMinutes === null ? "—" : `${intervalMinutes} minutes`} />
+            <Row label="Tee times per day" value={slots.length ? String(slots.length) : "—"} />
+            <Row label="Player seats per tee time" value={String(PLAYERS_PER_TEE_TIME)} />
+            <Row label="Carts per tee time" value={cartsPerSlot === null ? "—" : String(cartsPerSlot)} />
+          </Card>
+
+          <Card title="Green fee">
+            <Row label={longDate(focusedDate)} value={rate === null ? "—" : money(rate)} />
+            <Row
+              label="Weekday base"
+              value={data?.weekdayRate == null ? "—" : money(data.weekdayRate)}
+              muted={isWeekendIso(focusedDate)}
+            />
+            <Row
+              label="Weekend base"
+              value={data?.weekendRate == null ? "—" : money(data.weekendRate)}
+              muted={!isWeekendIso(focusedDate)}
+            />
+            {/* 9홀 요금과 카트 요금은 예전 화면에 있었지만 백엔드에는 존재하지 않는다.
+                슬롯은 홀 수와 무관하게 요금이 하나이고, 카트는 **개수**만 있고 금액이 없다.
+                칸을 지우는 대신 "없다" 고 말해 둔다 — 지워 버리면 다음 사람이 또
+                그럴듯한 숫자를 지어 넣는다. */}
+            <Row label="9-hole rate" muted value="not a separate rate" />
+            <Row label="Cart fee" muted value="no charge configured" />
+          </Card>
+        </div>
+
+        {/* 미리보기 — 티 시트 격자와 같은 모양(헤더 줄 없음, 옅은 파란 시 밴드,
+            굵은 시각 + 회색 요금). 이 화면이 만드는 것이 저 화면이라는 점이 보여야 한다. */}
+        <section className="border border-[#d6d6dc] bg-white">
+          <h2 className="border-b border-[#d6d6dc] bg-[#ececf0] px-3 py-1.5 text-[11px] font-bold">
+            Generated tee times — {longDate(focusedDate)}
+          </h2>
+          <div className="max-h-[420px] overflow-y-auto">
+            {state.kind === "loading" ? (
+              <p className="px-3 py-6 text-center text-xs text-[#6b7280]">Loading tee times…</p>
+            ) : lines.length === 0 ? (
+              <p className="px-3 py-6 text-center text-xs text-[#6b7280]">No tee times for this day.</p>
+            ) : (
+              lines.map((line) =>
+                line.kind === "band" ? (
+                  <div
+                    className="border-y border-[#c9d8e8] bg-[#dde7f2] px-3 py-0.5 text-[11px] font-semibold text-[#4e5560]"
+                    key={`band-${line.label}`}
                   >
-                    {[7, 8, 9, 10, 12, 15].map((value) => (
-                      <option key={value} value={value}>
-                        {value} minutes
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-
-              <div className="border-y border-[#d6d6dc] bg-[#d7d5da] px-3 py-2 text-xs font-bold">
-                Default Rates
-              </div>
-              <div className="grid gap-3 p-3 text-xs">
-                <label className="grid gap-1 font-semibold">
-                  9 Holes
-                  <input
-                    className="border border-[#cfd2d8] px-2 py-2 font-normal"
-                    min="0"
-                    onChange={(event) => setDefaultNineHole(Number(event.target.value))}
-                    step="0.01"
-                    type="number"
-                    value={defaultNineHole}
-                  />
-                </label>
-                <label className="grid gap-1 font-semibold">
-                  18 Holes
-                  <input
-                    className="border border-[#cfd2d8] px-2 py-2 font-normal"
-                    min="0"
-                    onChange={(event) => setDefaultEighteenHole(Number(event.target.value))}
-                    step="0.01"
-                    type="number"
-                    value={defaultEighteenHole}
-                  />
-                </label>
-                <label className="grid gap-1 font-semibold">
-                  Cart Fee
-                  <input
-                    className="border border-[#cfd2d8] px-2 py-2 font-normal"
-                    min="0"
-                    onChange={(event) => setDefaultCart(Number(event.target.value))}
-                    step="0.01"
-                    type="number"
-                    value={defaultCart}
-                  />
-                </label>
-              </div>
-            </section>
-
-            <section className="min-w-[620px] border border-[#d6d6dc] bg-white">
-              <div className="grid grid-cols-[120px_90px_repeat(3,1fr)] border-b border-[#d6d6dc] bg-[#d7d5da] text-xs font-bold">
-                <div className="p-2">Day</div>
-                <div className="p-2 text-center">Open</div>
-                <div className="p-2 text-right">9 Holes</div>
-                <div className="p-2 text-right">18 Holes</div>
-                <div className="p-2 text-right">Cart</div>
-              </div>
-              {rates.map((rate) => (
-                <div
-                  className="grid grid-cols-[120px_90px_repeat(3,1fr)] items-center border-b border-[#ececf0] text-xs last:border-b-0"
-                  key={rate.day}
-                >
-                  <button
-                    className={`flex min-h-11 items-center p-2 text-left font-bold lg:min-h-0 ${previewDay === rate.day ? "bg-[#4533ff] text-white" : ""}`}
-                    onClick={() => setPreviewDay(rate.day)}
+                    {line.label}
+                  </div>
+                ) : (
+                  <div
+                    className="grid grid-cols-[96px_88px_1fr] items-center border-b border-[#ececf0] px-3 py-1 text-xs last:border-b-0"
+                    key={`slot-${line.slot.time}`}
                   >
-                    {rate.day}
-                  </button>
-                  <label className="flex justify-center p-2">
-                    <input
-                      checked={rate.enabled}
-                      onChange={(event) => updateRate(rate.day, { enabled: event.target.checked })}
-                      type="checkbox"
-                    />
-                  </label>
-                  <div className="p-2">
-                    <input
-                      className="w-full border border-[#cfd2d8] px-2 py-1 text-right"
-                      min="0"
-                      onChange={(event) => updateRate(rate.day, { nineHole: Number(event.target.value) })}
-                      step="0.01"
-                      type="number"
-                      value={rate.nineHole}
-                    />
+                    <span className="font-bold">{line.slot.time}</span>
+                    <span className="text-[#9aa0a6] tabular-nums">{money(line.slot.rate)}</span>
+                    <span className="text-[#9aa0a6]">
+                      {line.slot.cartsTotal} carts · {PLAYERS_PER_TEE_TIME} seats
+                    </span>
                   </div>
-                  <div className="p-2">
-                    <input
-                      className="w-full border border-[#cfd2d8] px-2 py-1 text-right"
-                      min="0"
-                      onChange={(event) => updateRate(rate.day, { eighteenHole: Number(event.target.value) })}
-                      step="0.01"
-                      type="number"
-                      value={rate.eighteenHole}
-                    />
-                  </div>
-                  <div className="p-2">
-                    <input
-                      className="w-full border border-[#cfd2d8] px-2 py-1 text-right"
-                      min="0"
-                      onChange={(event) => updateRate(rate.day, { cart: Number(event.target.value) })}
-                      step="0.01"
-                      type="number"
-                      value={rate.cart}
-                    />
-                  </div>
-                </div>
-              ))}
-            </section>
-
-            <section className="border border-[#d6d6dc] bg-white">
-              <div className="border-b border-[#d6d6dc] bg-[#d7d5da] px-3 py-2 text-xs font-bold">
-                Generated Tee Time Preview
-              </div>
-              <div className="grid gap-3 p-3 text-xs">
-                <div className="grid grid-cols-2 gap-2">
-                  <label className="grid gap-1 font-semibold">
-                    Day
-                    <select
-                      className="border border-[#cfd2d8] px-2 py-2 font-normal"
-                      onChange={(event) => setPreviewDay(event.target.value)}
-                      value={previewDay}
-                    >
-                      {rates.map((rate) => (
-                        <option key={rate.day} value={rate.day}>
-                          {rate.day}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="grid gap-1 font-semibold">
-                    Holes
-                    <select
-                      className="border border-[#cfd2d8] px-2 py-2 font-normal"
-                      onChange={(event) => setHoles(Number(event.target.value) as 9 | 18)}
-                      value={holes}
-                    >
-                      <option value={9}>9 holes</option>
-                      <option value={18}>18 holes</option>
-                    </select>
-                  </label>
-                </div>
-
-                <div className="grid grid-cols-3 border border-[#ececf0] text-center">
-                  <div className="border-r border-[#ececf0] p-2">
-                    <p className="font-bold">{money(previewPrice)}</p>
-                    <p className="text-[#6b7280]">Green Fee</p>
-                  </div>
-                  <div className="border-r border-[#ececf0] p-2">
-                    <p className="font-bold">{money(selectedRate.cart)}</p>
-                    <p className="text-[#6b7280]">Cart</p>
-                  </div>
-                  <div className="p-2">
-                    <p className="font-bold">{selectedRate.enabled ? "Open" : "Closed"}</p>
-                    <p className="text-[#6b7280]">Status</p>
-                  </div>
-                </div>
-
-                <div className="max-h-[480px] overflow-auto border border-[#d6d6dc]">
-                  <div className="grid grid-cols-[74px_1fr_64px] bg-[#d7d5da] text-xs font-bold">
-                    <div className="p-2">Time</div>
-                    <div className="p-2">Rate</div>
-                    <div className="p-2 text-center">Cart</div>
-                  </div>
-                  {selectedRate.enabled && previewTimes.length > 0 ? (
-                    previewTimes.map((time, index) => (
-                      <div className="grid grid-cols-[74px_1fr_64px] border-t border-[#ececf0]" key={time}>
-                        <div className="p-2 font-semibold">{time}</div>
-                        <div className="p-2">
-                          <span className={index < 8 ? "text-[#0034c9]" : index > previewTimes.length - 8 ? "text-[#9e2f20]" : ""}>
-                            {money(previewPrice)}
-                          </span>
-                        </div>
-                        <div className="p-2 text-center">{money(selectedRate.cart)}</div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="p-4 text-center text-[#6b7280]">No tee times generated for this day.</div>
-                  )}
-                </div>
-              </div>
-            </section>
+                ),
+              )
+            )}
           </div>
         </section>
       </div>

@@ -1,50 +1,34 @@
 "use client";
 
-// 티시트 헤더 + 상태 스트립 + 요일 탭 + 통계/연결 상태 + 토스트 스택.
+// 티시트 상태 스트립 + 요일 탭 + 토스트 스택.
 // 이 파일은 토스트를 렌더링하는 유일한 곳이다 (다른 컴포넌트가 여기에 의존한다).
-// 레이아웃은 Chronogolf 관리자 티시트를 따른다: (a) 얇은 상태 스트립, (b) 요일 탭 스트립.
+//
+// 레이아웃은 Lightspeed Golf 관리자 티시트를 그대로 따른다:
+//   (a) 얇은 상태 스트립 — 왼쪽 기온/일출·일몰/카운터, **가운데** 큰 날짜, 오른쪽 노트 글리프
+//   (b) 요일 탭 스트립  — 오늘부터 7일, 폭을 꽉 채운 파란 띠
+//
+// 화면 제목("Tee Sheet")과 Add 버튼은 여기 있었지만 `AdminShell` 의 상단바로 옮겼다.
+// 레퍼런스 화면에는 상단바가 하나뿐인데 우리는 두 줄이었다 — 클럽 이름 줄과
+// 티시트 자체 헤더 줄이 겹쳐서 세로로 40px 을 헛되이 먹고 있었다.
 
-import { useMemo, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import {
-  columnLabel,
-  dayNumber,
-  headerCaption,
-  longDate,
-  minutesToTime,
-  money,
-  startOfWeek,
-  toDate,
-  todayIso,
-} from "@/lib/teeSheet/dates";
+import DayTabs from "@/components/admin/DayTabs";
+import { dayNumber, longDate, minutesToTime, toDate } from "@/lib/teeSheet/dates";
 import type { TeeSheetController, Toast } from "@/lib/teeSheet/types";
 
-export type DateNavProps = { controller: TeeSheetController; onAdd: () => void };
+export type DateNavProps = { controller: TeeSheetController };
 
+const WEEKDAY_FULL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-/** "Sep 7" — dates.ts는 MONTH_SHORT를 export하지 않고 columnLabel은 오늘을 "Today"로 바꾸므로 여기서 만든다. */
-function shortDay(iso: string): string {
+/**
+ * 큰 날짜 블록의 아랫줄. dates.ts 의 `headerCaption` 은 "Tuesday · Sep 2026" 한 줄이라
+ * 레퍼런스의 2행 배치(요일 / 월·연도)에 그대로 쓸 수 없다.
+ */
+function monthYear(iso: string): string {
   const date = toDate(iso);
-  return `${MONTH_SHORT[date.getMonth()]} ${date.getDate()}`;
-}
-
-/** "Wed 9" — columnLabel()의 "오늘이 아닐 때" 형태. 하이드레이션 전 라벨로만 쓴다(아래 주석 참고). */
-function weekdayLabel(iso: string): string {
-  const date = toDate(iso);
-  return `${WEEKDAY_SHORT[date.getDay()]} ${date.getDate()}`;
-}
-
-/** "Sep 7 – Sep 13, 2026", 연도가 걸치면 "Dec 28, 2025 – Jan 3, 2026". */
-function weekRangeLabel(dates: string[]): string {
-  if (dates.length === 0) return "";
-  const first = dates[0];
-  const last = dates[dates.length - 1];
-  const firstYear = toDate(first).getFullYear();
-  const lastYear = toDate(last).getFullYear();
-  const left = firstYear === lastYear ? shortDay(first) : `${shortDay(first)}, ${firstYear}`;
-  return `${left} – ${shortDay(last)}, ${lastYear}`;
+  return `${MONTH_SHORT[date.getMonth()]} ${date.getFullYear()}`;
 }
 
 // ===== 일출 / 일몰 =====
@@ -106,17 +90,39 @@ function clockOrDash(minutes: number): string {
   return Number.isFinite(minutes) ? minutesToTime(minutes) : "—";
 }
 
-const CONNECTION_STYLE: Record<TeeSheetController["connection"], string> = {
-  connecting: "bg-[#ececf0] text-[#4e5560]",
-  online: "bg-[#dbf5e3] text-[#126c31]",
-  offline: "bg-[#fff3cd] text-[#8a5b00]",
-};
+// ===== 기온 =====
+//
+// 예전에는 이 자리를 비워 뒀다 — "실제 피드가 없으니 가짜 숫자를 띄우지 않는다".
+// 그 원칙은 그대로 두고, 대신 **진짜 값**을 가져온다. Open-Meteo 는 키가 필요 없는
+// 공개 API 라서 정적 export 인 이 앱에서도 브라우저에서 바로 부를 수 있다.
+//
+// 실패하면 아무것도 그리지 않는다 (`null`). 프로 샵 화면이 날씨 API 때문에
+// 깨지거나 "—" 같은 잔해를 남기면 안 된다.
+const WEATHER_URL =
+  `https://api.open-meteo.com/v1/forecast?latitude=${CLUB_LAT}&longitude=${CLUB_LON}` +
+  `&current=temperature_2m&timezone=${encodeURIComponent(CLUB_TZ)}`;
 
-const CONNECTION_LABEL: Record<TeeSheetController["connection"], string> = {
-  connecting: "Connecting…",
-  online: "Online",
-  offline: "Offline",
-};
+function useClubTemperature(): number | null {
+  const [celsius, setCelsius] = useState<number | null>(null);
+
+  useEffect(() => {
+    // 마운트 후에만 부른다 — 서버 렌더 HTML 에 기온이 박히면 정적 export 된 페이지가
+    // 빌드 시점의 날씨를 보여 주고, 하이드레이션도 어긋난다.
+    const abort = new AbortController();
+    fetch(WEATHER_URL, { signal: abort.signal })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        const value = data?.current?.temperature_2m;
+        if (typeof value === "number" && Number.isFinite(value)) setCelsius(Math.round(value));
+      })
+      .catch(() => {
+        // 오프라인 · 차단 · rate limit — 전부 "기온을 안 그린다" 로 수렴한다.
+      });
+    return () => abort.abort();
+  }, []);
+
+  return celsius;
+}
 
 const TOAST_STYLE: Record<Toast["kind"], string> = {
   info: "border-[#d4d4d8] bg-white text-[#1f2328]",
@@ -126,6 +132,15 @@ const TOAST_STYLE: Record<Toast["kind"], string> = {
 
 // 상태 스트립 글리프 — 순수 장식이라 aria-hidden, 의미는 감싸는 요소의 title이 전달한다.
 const ICON = "h-3.5 w-3.5 shrink-0";
+
+function ThermometerIcon() {
+  return (
+    <svg aria-hidden="true" className={ICON} fill="none" stroke="currentColor" strokeWidth="1.6" viewBox="0 0 16 16">
+      <path d="M6.4 9.2V3.4a1.6 1.6 0 0 1 3.2 0v5.8" />
+      <circle cx="8" cy="11.4" r="2.6" />
+    </svg>
+  );
+}
 
 function SunIcon({ up }: { up: boolean }) {
   return (
@@ -172,21 +187,8 @@ function NoteIcon() {
   );
 }
 
-// 서버 렌더에서는 false, 하이드레이션 이후에는 true — "오늘"을 안전하게 읽기 위한 스위치.
-const subscribeNever = () => () => {};
-const getClient = () => true;
-const getServer = () => false;
-
-export default function DateNav({ controller, onAdd }: DateNavProps) {
-  const { connection, focusedDate, message, stats, toasts, view, visibleBookings, weekDates, weekStart } = controller;
-
-  // todayIso()는 서버 렌더와 클라이언트에서 달라질 수 있어(타임존) 하이드레이션 후에만 읽는다.
-  const mounted = useSyncExternalStore(subscribeNever, getClient, getServer);
-  const today = mounted ? todayIso() : null;
-
-  const rangeLabel = useMemo(() => weekRangeLabel(weekDates), [weekDates]);
-  // goToToday가 아무것도 바꾸지 않을 때만 비활성화한다.
-  const onToday = today !== null && weekStart === startOfWeek(today) && focusedDate === today;
+export default function DateNav({ controller }: DateNavProps) {
+  const { connection, focusedDate, stats, toasts, visibleBookings } = controller;
 
   // stats.reservations는 "예약 수"라서 한 티타임에 두 예약이 붙으면 2로 센다.
   // 상태 스트립의 첫 카운터는 "예약이 하나라도 있는 티타임 수"라 날짜+시각으로 중복을 제거한다.
@@ -196,39 +198,26 @@ export default function DateNav({ controller, onAdd }: DateNavProps) {
   );
 
   const sun = useMemo(() => sunMinutes(focusedDate), [focusedDate]);
+  const celsius = useClubTemperature();
 
   return (
     <>
-      <header className="flex items-center justify-between border-b border-[#d4d4d8] bg-white px-4 py-2">
-        <div className="flex items-center gap-3">
-          <a className="flex min-h-11 items-center text-sm font-bold lg:min-h-0" href="/admin">
-            Tee Sheet
-          </a>
-        </div>
-        <div className="flex items-center gap-2">
-          <a className="flex min-h-11 items-center border border-[#d7d7dc] px-3 text-xs font-bold lg:min-h-0 lg:py-1" href="/booking">
-            Booking
-          </a>
-          <button
-            className="inline-flex min-h-11 items-center bg-[#4533ff] px-4 text-xs font-bold text-white lg:min-h-0 lg:py-1.5"
-            onClick={onAdd}
-            type="button"
-          >
-            Add +
-          </button>
-        </div>
-      </header>
+      {/* (a) 상태 스트립 — 왼쪽 기온·일출·일몰·카운터 / 가운데 큰 날짜 / 오른쪽 노트 글리프.
+          3열 그리드다: 가운데 칸이 **화면 기준으로** 가운데여야 하므로 좌우를 같은
+          `1fr` 로 잡는다. flex + ml-auto 로는 왼쪽 카운터 자릿수에 따라 날짜가 흔들린다.
 
-      {/* (a) 상태 스트립 — 일출/일몰 · 카운터 · 집계 · 연결 상태를 한 줄에 담고, 오른쪽에 큰 날짜.
-          Lightspeed 관리자 화면과 같은 "한 줄" 구조다. 예전에는 이 줄과 집계 줄이 따로 있어
-          날짜 · Players · Carts 가 두 번 나오고 세로로 40px 을 더 먹었다 — 티 시트가 그만큼 짧아진다.
-          날씨(13°)는 실제 피드가 없어서 일부러 뺐다: 가짜 숫자를 띄우지 않는다.
-
-          바깥은 줄바꿈 없는 2단 flex 다. 왼쪽(집계)만 `flex-wrap` 으로 접히고 오른쪽(날짜)은
-          `shrink-0` 이라, 좁은 화면에서 집계가 몇 줄로 늘어나도 큰 날짜는 항상 오른쪽 위에 남는다.
-          왼쪽을 `overflow-x-auto` 로 하면 대신 Retry 버튼이 스크롤 밖으로 숨어 버린다. */}
-      <div className="flex items-center gap-3 border-b border-[#d4d4d8] bg-white px-4 py-1.5 text-xs text-[#4e5560]">
+          예전에 여기 붙어 있던 집계 칩(Reservations · Arrived · Paid · Revenue ·
+          Outstanding)과 연결 상태 배지는 레퍼런스에 없어서 뺐다. 같은 정보를
+          Reports 화면과 토스트가 이미 말해 준다. */}
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-[#d4d4d8] bg-white px-4 py-1.5 text-xs text-[#4e5560]">
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+          {/* 기온은 도착하면 그때 나타난다 (실패하면 영영 안 나온다). */}
+          {celsius !== null ? (
+            <span className="flex shrink-0 items-center gap-1.5" title="Current temperature at the club">
+              <ThermometerIcon />
+              {celsius}°
+            </span>
+          ) : null}
           <span className="flex shrink-0 items-center gap-1.5" title="Sunrise at the club">
             <SunIcon up />
             {clockOrDash(sun.sunrise)}
@@ -237,8 +226,6 @@ export default function DateNav({ controller, onAdd }: DateNavProps) {
             <SunIcon up={false} />
             {clockOrDash(sun.sunset)}
           </span>
-
-          <span aria-hidden="true" className="h-4 w-px shrink-0 bg-[#d4d4d8]" />
 
           <span
             className="flex shrink-0 items-center gap-1.5 font-semibold text-[#111315]"
@@ -256,28 +243,9 @@ export default function DateNav({ controller, onAdd }: DateNavProps) {
             {stats.carts}
           </span>
 
-          <span aria-hidden="true" className="h-4 w-px shrink-0 bg-[#d4d4d8]" />
-
-          {/* 일 뷰의 날짜는 오른쪽 큰 날짜와 겹치므로 주간 범위일 때만 낸다. */}
-          {view === "week" ? <span className="shrink-0 font-semibold">{rangeLabel}</span> : null}
-          <span className="shrink-0 rounded bg-[#111315] px-2 py-0.5 text-white">
-            {stats.reservations} Reservations
-          </span>
-          <span className="shrink-0">{stats.arrived} Arrived</span>
-          <span className="shrink-0">{stats.paid} Paid</span>
-          <span className="shrink-0">{money(stats.revenue)} Revenue</span>
-          <span className="shrink-0">{money(stats.outstanding)} Outstanding</span>
-
-          {/* 상태 문구는 길어질 수 있다 ("Loaded 11 reservation(s) for the week of …").
-              한 줄 스트립을 통째로 두 줄로 밀어내지 않도록 폭을 묶고 잘라 낸다 —
-              전문은 title 툴팁과, 같은 내용을 띄우는 토스트에 남는다. */}
-          <span
-            className={`max-w-[24ch] truncate rounded px-2 py-0.5 font-semibold ${CONNECTION_STYLE[connection]}`}
-            title={message ? `${CONNECTION_LABEL[connection]} · ${message}` : CONNECTION_LABEL[connection]}
-          >
-            {CONNECTION_LABEL[connection]}
-            {message ? ` · ${message}` : ""}
-          </span>
+          {/* 오프라인 복구 버튼은 레퍼런스에 없지만 남긴다 — 스크린샷은 정상 상태이고
+              오류 상태에 대해서는 아무 말도 하지 않는다. 이걸 빼면 연결이 끊겼을 때
+              다시 시도할 방법이 (날짜를 바꿔 보는 것 말고는) 사라진다. */}
           {connection === "offline" ? (
             <button
               className="shrink-0 border border-[#d7d7dc] bg-white px-2 py-0.5 font-bold hover:bg-[#f2f2f4] disabled:opacity-50"
@@ -292,117 +260,50 @@ export default function DateNav({ controller, onAdd }: DateNavProps) {
           ) : null}
         </div>
 
-        <div className="ml-auto flex shrink-0 items-center gap-2 text-[#111315]">
+        {/* 가운데: 큰 날짜. 블록 전체가 날짜 선택기다 — Week/Day 토글과 별도의 date
+            입력칸을 없앴으므로(레퍼런스에 없다) 임의의 날짜로 가는 길이 여기 하나뿐이다.
+            네이티브 <input type="date"> 를 투명하게 겹쳐 두고, 그 위를 누르면
+            `showPicker()` 를 부른다. **투명하게 겹쳐 두는 것만으로는 부족하다** —
+            크롬에서 날짜 입력칸의 글자 부분을 누르면 세그먼트에 포커스만 갈 뿐이고,
+            달력은 오른쪽 끝 달력 아이콘에서만 열린다. 그 아이콘이 투명하니
+            사용자에게는 "눌러도 아무 일이 없는 날짜" 가 된다.
+            `showPicker()` 가 없는 브라우저에서는 입력칸이 그냥 포커스를 받고,
+            키보드(숫자 입력 · 화살표)로 여전히 날짜를 바꿀 수 있다. */}
+        <div className="relative flex shrink-0 items-center gap-2 text-[#111315]">
           <span className="text-2xl leading-none font-semibold">{dayNumber(focusedDate)}</span>
-          <span className="text-xs leading-tight font-semibold">{headerCaption(focusedDate)}</span>
-          {/* 캐럿과 노트 글리프는 장식이다 — 캐럿의 실제 조작은 아래 줄의 date input이고,
-              하루 단위 노트 API는 아직 없어서 동작하지 않는 버튼을 만들지 않았다. */}
+          <span className="text-[11px] leading-tight font-semibold">
+            {WEEKDAY_FULL[toDate(focusedDate).getDay()]}
+            <br />
+            {monthYear(focusedDate)}
+          </span>
           <span aria-hidden="true" className="text-[10px] leading-none text-[#4e5560]">
             ▾
           </span>
-          <span aria-hidden="true" className="pl-2 text-[#4e5560]">
-            <NoteIcon />
-          </span>
+          <input
+            aria-label="Jump to date"
+            className="absolute inset-0 cursor-pointer opacity-0"
+            onChange={(event) => {
+              if (event.target.value) controller.setFocusedDate(event.target.value);
+            }}
+            onClick={(event) => {
+              // 자기 click 핸들러 안이라 사용자 제스처로 인정된다.
+              event.currentTarget.showPicker?.();
+            }}
+            title={longDate(focusedDate)}
+            type="date"
+            value={focusedDate}
+          />
         </div>
+
+        {/* 하루 단위 노트 API 가 아직 없어서 동작하지 않는 버튼을 만들지 않았다 — 표시로만 둔다. */}
+        <span aria-hidden="true" className="flex justify-end text-[#4e5560]">
+          <NoteIcon />
+        </span>
       </div>
 
-      {/* (b) 요일 탭 스트립 + 주 이동 / 날짜 점프 / Week·Day 토글.
-          한 화면 고정 레이아웃이라 페이지가 가로로 늘어나면 안 된다 → 탭만 내부에서 스크롤시킨다.
-
-          `flex-wrap` 이 반드시 있어야 한다: 이 줄은 한 줄로 펴면 ~484px 를 요구하는데
-          바깥 <main> 은 `overflow-hidden` 이라 넘치는 부분을 **잘라 버린다**(스크롤이 아니다).
-          래핑이 없으면 390px(iPhone 14)에서 날짜 입력과 Week/Day 토글이 화면 밖으로
-          잘려 나가 주간 뷰로 돌아갈 방법이 사라진다. */}
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-[#d4d4d8] bg-white px-4 py-1.5 text-xs">
-        <button
-          aria-label="Previous week"
-          className="inline-flex min-h-11 shrink-0 items-center border border-[#d7d7dc] bg-white px-3 font-bold hover:bg-[#f2f2f4] lg:min-h-0 lg:py-1"
-          onClick={controller.goToPreviousWeek}
-          type="button"
-        >
-          ‹ Prev
-        </button>
-        <button
-          className="inline-flex min-h-11 shrink-0 items-center border border-[#d7d7dc] bg-white px-3 font-bold hover:bg-[#f2f2f4] disabled:cursor-default disabled:opacity-40 lg:min-h-0 lg:py-1"
-          disabled={onToday}
-          onClick={controller.goToToday}
-          type="button"
-        >
-          Today
-        </button>
-        <button
-          aria-label="Next week"
-          className="inline-flex min-h-11 shrink-0 items-center border border-[#d7d7dc] bg-white px-3 font-bold hover:bg-[#f2f2f4] lg:min-h-0 lg:py-1"
-          onClick={controller.goToNextWeek}
-          type="button"
-        >
-          Next ›
-        </button>
-
-        {/* 좁은 화면에서는 `basis-full` 로 탭 줄을 통째로 자기 줄에 내린다.
-            `flex-1`(= basis 0%) 만 두면 flex 가 줄바꿈 판단에서 이 항목을 0px 로 보고
-            같은 줄에 밀어 넣은 뒤 남는 폭만 나눠 줘서, 탭 스트립이 몇십 px 로 눌린다.
-            sm 이상에서는 원래의 한 줄 레이아웃(basis 0 + grow)으로 돌아간다.
-            어느 쪽이든 탭은 자기 컨테이너 안에서만 가로 스크롤한다. */}
-        <div className="min-w-0 basis-full overflow-x-auto sm:flex-1 sm:basis-0">
-          <div className="flex w-max gap-1">
-            {weekDates.map((iso) => {
-              // columnLabel()은 내부에서 todayIso()를 부른다 → 서버 타임존 기준 "Today"가 섞이면
-              // 하이드레이션이 깨진다. 마운트 전에는 요일 라벨만 쓰고, 이후에만 columnLabel을 믿는다.
-              const label = mounted ? columnLabel(iso) : weekdayLabel(iso);
-              const active = iso === focusedDate;
-              return (
-                <button
-                  aria-pressed={active}
-                  className={`inline-flex min-h-11 items-center border px-3 font-bold whitespace-nowrap lg:min-h-0 lg:py-1 ${
-                    active
-                      ? "border-[#4533ff] bg-[#4533ff] text-white"
-                      : "border-[#d7d7dc] bg-white hover:bg-[#f2f2f4]"
-                  }`}
-                  key={iso}
-                  onClick={() => controller.setFocusedDate(iso)}
-                  title={longDate(iso)}
-                  type="button"
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <input
-          aria-label="Jump to date"
-          className="shrink-0 border border-[#d7d7dc] bg-white px-2 py-1 text-xs"
-          onChange={(event) => {
-            if (event.target.value) controller.setFocusedDate(event.target.value);
-          }}
-          type="date"
-          value={focusedDate}
-        />
-        <div className="flex shrink-0 gap-1">
-          <button
-            aria-pressed={view === "week"}
-            className={`inline-flex min-h-11 items-center border border-[#d7d7dc] px-3 font-bold lg:min-h-0 lg:py-1 ${
-              view === "week" ? "bg-[#4533ff] text-white" : "bg-white"
-            }`}
-            onClick={() => controller.setView("week")}
-            type="button"
-          >
-            Week
-          </button>
-          <button
-            aria-pressed={view === "day"}
-            className={`inline-flex min-h-11 items-center border border-[#d7d7dc] px-3 font-bold lg:min-h-0 lg:py-1 ${
-              view === "day" ? "bg-[#4533ff] text-white" : "bg-white"
-            }`}
-            onClick={() => controller.setView("day")}
-            type="button"
-          >
-            Day
-          </button>
-        </div>
-      </div>
+      {/* (b) 요일 탭 스트립 — 오늘부터 7일. 요금 화면과 **같은 컴포넌트**를 쓴다
+          (components/admin/DayTabs.tsx). 클래스를 베껴 두면 한쪽만 색이 바뀐다. */}
+      <DayTabs onChange={controller.setFocusedDate} value={focusedDate} />
 
       {/* 토스트 스택 — BookingDialog(z-50) 위에 떠야 하므로 z-[60]. */}
       <div aria-live="polite" className="pointer-events-none fixed right-4 top-4 z-[60] flex w-72 flex-col gap-2">

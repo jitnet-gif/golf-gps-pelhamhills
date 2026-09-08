@@ -100,6 +100,14 @@ export function minutesToTime(minutes: number): string {
   return `${hour12}:${String(minute).padStart(2, "0")} ${suffix}`;
 }
 
+/**
+ * `$1,234.56`. 천 단위 구분을 직접 넣는 이유: `toLocaleString` 은 서버(노드)와
+ * 브라우저의 로케일이 다르면 다른 문자열을 내서 하이드레이션을 깬다. 이 앱은
+ * 정적 export 라 그 위험이 실재한다.
+ */
 export function money(value: number): string {
-  return `$${(Number.isFinite(value) ? value : 0).toFixed(2)}`;
+  const amount = Number.isFinite(value) ? value : 0;
+  const [whole, cents] = Math.abs(amount).toFixed(2).split(".");
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return `${amount < 0 ? "-" : ""}$${grouped}.${cents}`;
 }

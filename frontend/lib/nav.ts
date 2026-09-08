@@ -84,7 +84,6 @@ export const ADMIN_HOME = "/admin";
  */
 export const adminNav: NavItem[] = [
   { label: "Tee Sheet", href: "/admin", glyph: "▦" },
-  { label: "Retail", href: "/admin/retail", glyph: "🛒" },
   { label: "Tee Times & Pricing", href: "/admin/pricing", glyph: "◉" },
   { label: "Dynamic Pricing", href: "/admin/dynamic-pricing", glyph: "↗" },
   { label: "Events", href: "/admin/events", glyph: "▤" },
@@ -99,12 +98,24 @@ export const adminNav: NavItem[] = [
 ];
 
 /**
- * 모바일 하단 탭에 올릴 어드민 메뉴. 13개를 전부 탭으로 만들면 글자가 뭉개지므로
+ * 모바일 하단 탭에 올릴 어드민 메뉴. 12개를 전부 탭으로 만들면 글자가 뭉개지므로
  * 프로 샵에서 하루에도 몇 번씩 여는 4개만 남기고 나머지는 서랍(drawer)으로 보낸다.
+ *
+ * `Retail` 은 여기 있었지만 사이드바에서 빠지면서 함께 빠졌다 (아래 주석 참고) —
+ * 이 배열은 `adminNav` 를 걸러 만들기 때문에, 없는 라벨을 남겨 두면 탭이 조용히
+ * 3개가 된다.
  */
 export const adminQuickNav: NavItem[] = adminNav.filter((item) =>
-  ["Tee Sheet", "Retail", "Customers", "Reports"].includes(item.label),
+  ["Tee Sheet", "Customers", "Promotions", "Reports"].includes(item.label),
 );
+
+/**
+ * `/admin/retail` 은 여전히 살아 있는 화면이지만 메뉴에는 없다 — 맞춰 온 Lightspeed
+ * 사이드바에 Retail 항목이 없기 때문이다. 주소로 직접 들어가면 그대로 열린다.
+ * 다시 노출하려면 `adminNav` 에 `{ label: "Retail", href: "/admin/retail", glyph: "🛒" }`
+ * 를 되돌려 놓으면 된다.
+ */
+export const ADMIN_RETAIL = "/admin/retail";
 
 /**
  * 정적 export 는 뒤에 슬래시가 붙은 주소도 같은 페이지로 서빙한다(`cleanUrls`).

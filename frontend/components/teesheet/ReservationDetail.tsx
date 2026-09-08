@@ -1,7 +1,18 @@
 "use client";
 
 // 예약 상세 패널 (Reservation Detail).
-// 하단 Lightspeed 스타일 패널 — 플레이어 카드 편집, 상태 액션, 취소/삭제, 히스토리.
+//
+// 레이아웃은 Lightspeed Golf 의 하단 패널을 그대로 따른다:
+//   ┌ 헤더 줄: ☎ 확인코드 · 홀 수 · 날짜 · 시각 ······ [Cancel] [Save]
+//   ├ 왼쪽 아이콘 레일 │ 플레이어 카드 가로 나열
+//   └ 노란 메모 줄
+//
+// 예전에는 **예약 단위**로 편집하는 화면이었다 (Title / Notes / Holes / Rate / Carts
+// 한 묶음 + Check In All · Collect All · Mark No Show · Reopen 네 버튼). 레퍼런스는
+// 그 반대로 **플레이어 단위**다 — 요금제도, 도착 여부도, 받을 돈도 사람마다 다르기
+// 때문이다. 그래서 예약 단위로만 남은 것은 홀 수 · 날짜 · 시각 · 메모 넷뿐이고
+// 나머지는 전부 카드 안으로 들어갔다.
+//
 // 모든 서버 호출은 controller 를 통해서만 한다. 이 파일에서 fetch 를 직접 부르지 않는다.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -9,7 +20,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { longDate, money } from "@/lib/teeSheet/dates";
 import type {
   AuditEntry,
-  BookingStatus,
   PatchBookingInput,
   PatchPlayerInput,
   Player,
@@ -22,27 +32,8 @@ export type ReservationDetailProps = { controller: TeeSheetController };
 // ===== constants =====
 
 const MAX_PLAYERS = 4;
-const MAX_CARTS = 4;
 const PLAYER_DEBOUNCE_MS = 700;
 const SAVED_FLASH_MS = 1800;
-
-const STATUS_LABEL: Record<BookingStatus, string> = {
-  reserved: "Reserved",
-  checked_in: "Checked In",
-  paid: "Paid",
-  cancelled: "Cancelled",
-  no_show: "No Show",
-  blocked: "Blocked",
-};
-
-const STATUS_PILL: Record<BookingStatus, string> = {
-  reserved: "border-[#c7c7cc] bg-[#ececf0] text-[#4e5560]",
-  checked_in: "border-[#168a3c] bg-[#e7f7ec] text-[#168a3c]",
-  paid: "border-[#4533ff] bg-[#ebe8ff] text-[#4533ff]",
-  cancelled: "border-[#8a3f26] bg-[#fbeae5] text-[#8a3f26]",
-  no_show: "border-[#8a3f26] bg-[#fbeae5] text-[#8a3f26]",
-  blocked: "border-[#8b93a1] bg-[#e2e5ea] text-[#3f4650]",
-};
 
 const CANCEL_PRESETS = [
   "Weather / course closed",
@@ -51,12 +42,31 @@ const CANCEL_PRESETS = [
   "No contact — released slot",
 ];
 
+/**
+ * 요금제 목록. 백엔드의 `ratePlan` 은 자유 문자열이지만 화면에서는 고르게 한다 —
+ * 레퍼런스가 드롭다운이고, 무엇보다 `tone.ts` 의 색 규칙이 "Full Member" 라는
+ * **정확한 접두사**를 보기 때문이다. 자유 입력이면 "full member" 같은 오타 하나로
+ * 격자의 색이 조용히 달라진다.
+ *
+ * 서버가 목록에 없는 값을 들고 있으면 그 값을 그대로 한 항목 더 붙인다(아래 참고) —
+ * 고르지 않았는데 저장 버튼 한 번에 값이 바뀌어 버리는 일이 없어야 한다.
+ */
+const RATE_PLANS = [
+  "Public",
+  "Public Senior",
+  "Weekday Member - Single",
+  "Weekday Member - Single with Weekday Cart",
+  "Full Member - Single with 7 Day Cart",
+  "GolfNow",
+];
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // ===== local helpers =====
 
 type PlayerDraft = { firstName: string; lastName: string; phone: string; email: string };
-type BookingDraft = { title: string; holes: 9 | 18; rate: string; cartCount: number; notes: string };
+/** 예약 단위로 남은 편집 대상. Title·Carts 는 레퍼런스 패널에 없어서 빠졌다. */
+type BookingDraft = { holes: 9 | 18; rate: string; notes: string };
 type SaveState = { kind: "idle" | "saving" | "saved"; nonce: number };
 type PanelMode = "none" | "cancel" | "delete";
 
@@ -71,18 +81,10 @@ function playerDraftOf(player: Player): PlayerDraft {
 
 function bookingDraftOf(booking: TeeBooking): BookingDraft {
   return {
-    title: booking.title,
     holes: booking.holes,
     rate: String(booking.rate),
-    cartCount: booking.cartCount,
     notes: booking.notes ?? "",
   };
-}
-
-function clampCarts(value: number, playerCount: number): number {
-  const cap = Math.min(MAX_CARTS, Math.max(0, playerCount));
-  if (!Number.isFinite(value)) return 0;
-  return Math.max(0, Math.min(cap, Math.round(value)));
 }
 
 function playerPatchFrom(player: Player, draft: PlayerDraft): PatchPlayerInput {
@@ -96,17 +98,10 @@ function playerPatchFrom(player: Player, draft: PlayerDraft): PatchPlayerInput {
 
 function bookingPatchFrom(booking: TeeBooking, draft: BookingDraft): PatchBookingInput {
   const patch: PatchBookingInput = {};
-  const title = draft.title.trim();
-  if (title && title !== booking.title) patch.title = title;
   if (draft.holes !== booking.holes) patch.holes = draft.holes;
   const rate = Number(draft.rate);
   if (draft.rate.trim() !== "" && Number.isFinite(rate) && rate >= 0 && rate !== booking.rate) {
     patch.rate = rate;
-  }
-  // 값이 실제로 바뀐 경우에만 보낸다. 여기서 clamp 결과와 서버값을 비교하면
-  // (예: 서버 cartCount 2 + 플레이어 1명) 손대지 않은 예약이 dirty 로 뜬다.
-  if (draft.cartCount !== booking.cartCount) {
-    patch.cartCount = clampCarts(draft.cartCount, booking.players.length);
   }
   if (draft.notes !== (booking.notes ?? "")) patch.notes = draft.notes;
   return patch;
@@ -133,6 +128,52 @@ function relativeTime(ts: string): string {
   return years === 1 ? "1 year ago" : `${years} years ago`;
 }
 
+/** 확인 코드 — 레퍼런스의 `6HOR-4M6L` 자리. id 를 사람이 읽고 부를 수 있는 모양으로 자른다. */
+function confirmationCode(bookingId: string): string {
+  const clean = bookingId.replace(/[^a-z0-9]/gi, "").toUpperCase();
+  const head = clean.slice(0, 8).padEnd(8, "0");
+  return `${head.slice(0, 4)}-${head.slice(4, 8)}`;
+}
+
+const CHIP =
+  "flex items-center gap-1.5 border border-[#c7c7cc] bg-white px-2 py-1 text-[11px] outline-none focus:border-[#4533ff]";
+
+// ===== 글리프 =====
+//
+// 이모지를 쓰지 않는다. 두 가지 이유가 있다:
+//   1) 레퍼런스의 아이콘은 전부 **단색 선 아이콘**이다. 컬러 이모지를 섞으면 이 패널만
+//      튀어 보인다.
+//   2) 🏷 · 🗑 는 폰트에 따라 그냥 빈 네모로 떨어진다 — 실제로 그렇게 나왔다.
+//      "삭제" 버튼이 빈 네모인 화면을 프로 샵에 내보낼 수는 없다.
+// 전부 장식이므로 aria-hidden 이고, 뜻은 감싸는 버튼의 이름/툴팁이 전달한다.
+const GLYPH_PATH: Record<string, string> = {
+  phone: "M3 2.6h3l1 3-1.6 1.2a8 8 0 0 0 3.8 3.8L10.4 9l3 1v3a1 1 0 0 1-1.1 1A11.4 11.4 0 0 1 2 3.7 1 1 0 0 1 3 2.6z",
+  calendar: "M2.5 3.6h11v9.8h-11zM2.5 6.4h11M5.4 1.8v2.4M10.6 1.8v2.4",
+  clock: "M8 2.4a5.6 5.6 0 1 1 0 11.2 5.6 5.6 0 0 1 0-11.2zM8 5.2V8l2 1.4",
+  people: "M6 3.2a2.3 2.3 0 1 1 0 4.6 2.3 2.3 0 0 1 0-4.6zM1.8 13.2c0-2.3 1.9-3.8 4.2-3.8s4.2 1.5 4.2 3.8M11 3.6a2.2 2.2 0 0 1 0 4.4M12.2 9.9c1.4.5 2.3 1.7 2.3 3.3",
+  tag: "M2.4 2.4h5l6.2 6.2-5 5L2.4 7.4zM4.9 4.9h.01",
+  copy: "M5.4 5.4h8.2v8.2H5.4zM10.6 5.4V2.4H2.4v8.2h3",
+  trash: "M2.8 4.4h10.4M6.2 4.4V2.6h3.6v1.8M4.2 4.4l.7 9h6.2l.7-9M6.6 6.6v4.6M9.4 6.6v4.6",
+  card: "M1.8 4.2h12.4v7.6H1.8zM1.8 6.8h12.4M4 9.6h2.4",
+};
+
+function Glyph({ name, className = "h-3.5 w-3.5" }: { name: keyof typeof GLYPH_PATH; className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={`${className} shrink-0`}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.4"
+      viewBox="0 0 16 16"
+    >
+      <path d={GLYPH_PATH[name]} />
+    </svg>
+  );
+}
+
 // ===== component =====
 
 export default function ReservationDetail({ controller }: ReservationDetailProps) {
@@ -144,6 +185,10 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
   const [saveState, setSaveState] = useState<SaveState>({ kind: "idle", nonce: 0 });
   const [mode, setMode] = useState<PanelMode>("none");
   const [cancelReason, setCancelReason] = useState("");
+  // 날짜 칩은 draft 를 거친다. <input type="date"> 의 change 는 값이 완성될 때마다
+  // — 화살표로 연도를 한 칸 올릴 때마다 한 번씩 — 터지는데, 그때마다 moveBooking 을
+  // 부르면 예약이 중간 날짜들을 하나씩 밟고 지나간다. blur 에서 한 번만 커밋한다.
+  const [dateDraft, setDateDraft] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
 
   // 최신 값을 debounce 타이머 콜백에서 읽기 위한 미러 ref 들.
@@ -176,6 +221,7 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
     setPlayerDrafts({});
     setMode("none");
     setCancelReason("");
+    setDateDraft(null);
     setHistoryOpen(false);
     setSaveState({ kind: "idle", nonce: 0 });
   }, [bookingId, clearTimers]);
@@ -356,102 +402,135 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
 
   const draft = effectiveBookingDraft;
   const players = booking.players;
-  const cartCap = Math.min(MAX_CARTS, players.length);
-  const carts = clampCarts(draft.cartCount, players.length);
   const busy = controller.busy;
-
-  const dueFor = (player: Player) => (player.paid || player.cancelled ? 0 : booking.rate);
-  const collected = players.reduce((sum, p) => sum + (p.paid ? booking.rate : 0), 0);
-  const outstanding = players.reduce((sum, p) => sum + dueFor(p), 0);
-  const total = collected + outstanding;
-
   const audit: AuditEntry[] = [...(booking.audit ?? [])].reverse();
 
-  const statusActions: Array<{ label: string; target: BookingStatus }> = [
-    { label: "Check In All", target: "checked_in" },
-    { label: "Collect All", target: "paid" },
-    { label: "Mark No Show", target: "no_show" },
-    { label: "Reopen", target: "reserved" },
-  ];
+  const dueFor = (player: Player) => (player.paid || player.cancelled ? 0 : booking.rate);
+
+  // 시각 선택지는 그날의 실제 티타임 목록이다. 서버가 아직 슬롯을 안 줬거나 이 예약이
+  // 목록에 없는 시각을 갖고 있으면(레거시 레코드) 현재 값을 한 항목 더 붙인다 —
+  // 안 그러면 <select> 가 제멋대로 첫 항목을 고른 것처럼 보이고, 저장 한 번에
+  // 예약이 다른 시각으로 옮겨 간다.
+  const slotTimes = controller.slots.map((slot) => slot.time);
+  const timeOptions = slotTimes.includes(booking.time) ? slotTimes : [booking.time, ...slotTimes];
+
+  /**
+   * 예약을 옮기고 **시트를 따라가게** 한다.
+   * 따라가지 않으면 다른 주로 옮긴 순간 그 예약이 `visibleBookings` 에서 빠지고,
+   * `selected` 가 풀리면서 상세 패널이 사용자 손 밑에서 그냥 닫힌다.
+   */
+  const moveTo = async (date: string, time: string) => {
+    const moved = await controller.moveBooking(booking.id, date, time);
+    if (moved) controller.setFocusedDate(moved.date);
+  };
 
   const saveLabel =
-    saveState.kind === "saving" ? "saving…" : saveState.kind === "saved" ? "saved" : dirty ? "unsaved changes" : "";
+    saveState.kind === "saving" ? "saving…" : saveState.kind === "saved" ? "saved" : dirty ? "unsaved" : "";
 
   return (
-    <section className="min-w-0 border-t border-[#d4d4d8] bg-[#dedee2] px-4 py-3 text-xs text-[#1f2328]">
-      {/* ===== header ===== */}
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-bold">● {booking.id.toUpperCase().slice(0, 10)}</span>
-          <span className={`rounded border px-2 py-1 font-bold ${STATUS_PILL[booking.status]}`}>
-            {STATUS_LABEL[booking.status]}
-          </span>
-          <span className="rounded border border-[#c7c7cc] bg-white px-2 py-1">{longDate(booking.date)}</span>
-          <span className="rounded border border-[#c7c7cc] bg-white px-2 py-1">{booking.time}</span>
-          <span className="rounded border border-[#c7c7cc] bg-white px-2 py-1">
-            {players.length} {players.length === 1 ? "player" : "players"}
-          </span>
-          {booking.cancelReason ? (
-            <span className="rounded border border-[#c47a63] bg-[#fbeae5] px-2 py-1 text-[#8a3f26]">
-              Reason: {booking.cancelReason}
-            </span>
-          ) : null}
-        </div>
+    <section className="min-w-0 border-t border-[#d4d4d8] bg-[#dedee2] text-xs text-[#1f2328]">
+      {/* ===== 헤더 줄 ===== */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-[#c7c7cc] bg-white px-3 py-2">
+        <span className="flex items-center gap-1.5 font-bold" title={`Reservation ${booking.id}`}>
+          <Glyph className="h-3.5 w-3.5 text-[#4e5560]" name="phone" />
+          {confirmationCode(booking.id)}
+        </span>
 
-        <div className="flex items-center gap-2">
-          <span
-            className={`min-w-[92px] text-right ${
-              saveState.kind === "saved"
-                ? "text-[#168a3c]"
-                : saveState.kind === "saving"
-                  ? "text-[#4e5560]"
-                  : dirty
-                    ? "font-bold text-[#8a3f26]"
-                    : "text-transparent"
-            }`}
-            aria-live="polite"
+        <label className={CHIP}>
+          <span className="sr-only">Holes</span>
+          <select
+            className="bg-transparent outline-none"
+            onChange={(event) => setBookingDraft({ ...draft, holes: Number(event.target.value) === 9 ? 9 : 18 })}
+            value={String(draft.holes)}
           >
-            {saveLabel}
-          </span>
-          {/* 선택 해제 — 상세를 닫으면 티 시트가 다시 화면 전체를 쓴다. */}
-          <button
-            className="border border-[#c7c7cc] bg-white px-3 py-2 font-bold text-[#4e5560] hover:border-[#4533ff]"
-            onClick={() => controller.select(null)}
-            title="Close and expand the tee sheet"
-            type="button"
-          >
-            Close <span aria-hidden>×</span>
-          </button>
-          <button
-            className="border border-[#c47a63] bg-white px-3 py-2 font-bold text-[#8a3f26] disabled:opacity-40"
-            disabled={busy || booking.status === "cancelled"}
-            onClick={() => setMode(mode === "cancel" ? "none" : "cancel")}
-            type="button"
-          >
-            Cancel Reservation
-          </button>
-          <button
-            className="border border-[#8a3f26] bg-[#8a3f26] px-3 py-2 font-bold text-white disabled:opacity-40"
+            <option value="9">9 holes</option>
+            <option value="18">18 holes</option>
+          </select>
+        </label>
+
+        {/* 날짜·시각은 draft 가 아니라 즉시 이동이다. `moveBooking` 은 목적지가 가득 찼는지
+            서버가 판정해야 하므로 (좌석 정원 4명) Save 까지 미뤄 두면 실패를 늦게 알게 된다. */}
+        <label className={CHIP} title="Move this reservation to another date">
+          <Glyph className="h-3.5 w-3.5 text-[#4e5560]" name="calendar" />
+          <span className="sr-only">Date</span>
+          <input
+            className="bg-transparent outline-none"
             disabled={busy}
-            onClick={() => setMode(mode === "delete" ? "none" : "delete")}
-            type="button"
+            onBlur={() => {
+              const next = dateDraft;
+              setDateDraft(null);
+              // 연도 자리를 다 채우기 전에 포커스가 빠지면 `0001-09-08` 같은 값이 남는다.
+              // 실제로 그렇게 옮겨진 예약을 되돌려 본 적이 있다 — 그러니 커밋 전에 거른다.
+              if (next && next !== booking.date && /^\d{4}-\d{2}-\d{2}$/.test(next) && next >= "1900-01-01") {
+                void moveTo(next, booking.time);
+              }
+            }}
+            onChange={(event) => setDateDraft(event.target.value)}
+            type="date"
+            value={dateDraft ?? booking.date}
+          />
+        </label>
+
+        <label className={CHIP} title="Move this reservation to another tee time">
+          <Glyph className="h-3.5 w-3.5 text-[#4e5560]" name="clock" />
+          <span className="sr-only">Tee time</span>
+          <select
+            className="bg-transparent outline-none"
+            disabled={busy}
+            onChange={(event) => void moveTo(booking.date, event.target.value)}
+            value={booking.time}
           >
-            Delete
-          </button>
-          <button
-            className="bg-[#4533ff] px-5 py-2 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#b1a8ff]"
-            disabled={busy || !dirty}
-            onClick={() => void saveAll()}
-            type="button"
-          >
-            Save
-          </button>
-        </div>
+            {timeOptions.map((time) => (
+              <option key={time} value={time}>
+                {time}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {booking.cancelReason ? (
+          <span className="border border-[#c47a63] bg-[#fbeae5] px-2 py-1 text-[#8a3f26]">
+            Cancelled: {booking.cancelReason}
+          </span>
+        ) : null}
+
+        <span
+          aria-live="polite"
+          className={`ml-auto min-w-[64px] text-right ${
+            saveState.kind === "saved"
+              ? "text-[#168a3c]"
+              : saveState.kind === "saving"
+                ? "text-[#4e5560]"
+                : dirty
+                  ? "font-bold text-[#8a3f26]"
+                  : "text-transparent"
+          }`}
+        >
+          {saveLabel}
+        </span>
+
+        <button
+          className="border border-[#c7c7cc] bg-white px-4 py-1.5 font-bold text-[#4e5560] hover:border-[#4533ff] disabled:opacity-40"
+          disabled={busy || booking.status === "cancelled"}
+          onClick={() => setMode(mode === "cancel" ? "none" : "cancel")}
+          title="Cancel this reservation"
+          type="button"
+        >
+          Cancel
+        </button>
+        <button
+          className="bg-[#4533ff] px-5 py-1.5 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#b1a8ff]"
+          disabled={busy || !dirty}
+          onClick={() => void saveAll()}
+          type="button"
+        >
+          Save
+        </button>
       </div>
 
       {/* ===== inline cancel form (window.prompt 대체) ===== */}
       {mode === "cancel" ? (
-        <div className="mb-2 border border-[#c47a63] bg-white p-3">
+        <div className="border-b border-[#c47a63] bg-white p-3">
           <p className="font-bold text-[#8a3f26]">Cancel “{booking.title}” — why?</p>
           <div className="mt-2 flex flex-wrap gap-1">
             {CANCEL_PRESETS.map((preset) => (
@@ -495,9 +574,9 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
         </div>
       ) : null}
 
-      {/* ===== inline delete confirm ===== */}
+      {/* ===== inline delete confirm (레일의 🗑) ===== */}
       {mode === "delete" ? (
-        <div className="mb-2 border border-[#8a3f26] bg-[#fbeae5] p-3">
+        <div className="border-b border-[#8a3f26] bg-[#fbeae5] p-3">
           <p className="font-bold text-[#8a3f26]">
             Delete “{booking.title}” at {booking.time} on {longDate(booking.date)}?
           </p>
@@ -528,270 +607,249 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
         </div>
       ) : null}
 
-      {/* ===== editable booking fields + status actions ===== */}
-      <div className="mb-2 grid gap-2 border border-[#c7c7cc] bg-white p-3 lg:grid-cols-[minmax(0,1fr)_auto]">
-        <div className="grid gap-2 sm:grid-cols-[minmax(0,2fr)_auto_auto_auto]">
-          <label className="block">
-            <span className="text-[#5c6270]">Title</span>
-            <input
-              className="mt-1 w-full border-b border-[#d7d7dc] px-1 py-1 outline-none focus:border-[#4533ff]"
-              onChange={(event) => setBookingDraft({ ...draft, title: event.target.value })}
-              placeholder="Reservation name"
-              value={draft.title}
-            />
-            {draft.title.trim() === "" ? (
-              <span className="mt-1 block text-[#8a3f26]">Title is required — it will not be saved empty</span>
-            ) : null}
-          </label>
+      {/* ===== 아이콘 레일 + 플레이어 카드 ===== */}
+      <div className="flex items-stretch">
+        <IconRail
+          historyOpen={historyOpen}
+          onClose={() => controller.select(null)}
+          onDelete={() => setMode(mode === "delete" ? "none" : "delete")}
+          onToggleHistory={() => setHistoryOpen((open) => !open)}
+          playerCount={players.length}
+        />
 
-          <label className="block">
-            <span className="text-[#5c6270]">Holes</span>
-            <select
-              className="mt-1 w-full border-b border-[#d7d7dc] bg-white px-1 py-1 outline-none focus:border-[#4533ff]"
-              onChange={(event) =>
-                setBookingDraft({ ...draft, holes: Number(event.target.value) === 9 ? 9 : 18 })
-              }
-              value={String(draft.holes)}
-            >
-              <option value="9">9 holes</option>
-              <option value="18">18 holes</option>
-            </select>
-          </label>
+        <div className="flex min-w-0 flex-1 items-stretch gap-2 overflow-x-auto p-2">
+          {players.map((player) => {
+            const pd = playerDrafts[player.id] ?? playerDraftOf(player);
+            const emailInvalid = pd.email.trim() !== "" && !EMAIL_RE.test(pd.email.trim());
+            // 서버 값이 목록에 없으면 그 값도 항목으로 붙인다 (RATE_PLANS 주석 참고).
+            const plan = player.ratePlan?.trim() || "Public";
+            const planOptions = RATE_PLANS.includes(plan) ? RATE_PLANS : [plan, ...RATE_PLANS];
 
-          <label className="block">
-            <span className="text-[#5c6270]">Rate</span>
-            <input
-              className="mt-1 w-full border-b border-[#d7d7dc] px-1 py-1 outline-none focus:border-[#4533ff]"
-              inputMode="decimal"
-              onChange={(event) => setBookingDraft({ ...draft, rate: event.target.value })}
-              value={draft.rate}
-            />
-            {draft.rate.trim() !== "" && !Number.isFinite(Number(draft.rate)) ? (
-              <span className="mt-1 block text-[#8a3f26]">Not a number — rate will not be saved</span>
-            ) : null}
-          </label>
-
-          <div>
-            <span className="text-[#5c6270]">Carts</span>
-            <div className="mt-1 flex items-center gap-1">
-              <button
-                className="h-7 w-7 border border-[#d7d7dc] bg-white font-bold disabled:opacity-30"
-                disabled={busy || carts <= 0}
-                onClick={() => setBookingDraft({ ...draft, cartCount: carts - 1 })}
-                type="button"
-                aria-label="Fewer carts"
+            return (
+              <article
+                className="flex w-[212px] shrink-0 flex-col border border-[#c7c7cc] bg-white p-1.5"
+                key={player.id}
               >
-                −
-              </button>
-              <span className="w-8 text-center font-bold tabular-nums">{carts}</span>
-              <button
-                className="h-7 w-7 border border-[#d7d7dc] bg-white font-bold disabled:opacity-30"
-                disabled={busy || carts >= cartCap}
-                onClick={() => setBookingDraft({ ...draft, cartCount: carts + 1 })}
-                type="button"
-                aria-label="More carts"
-              >
-                +
-              </button>
-              <span className="text-[#9aa0a6]">/ {cartCap}</span>
-            </div>
-          </div>
+                <div className="mb-1.5 flex items-center gap-1.5">
+                  <span
+                    aria-hidden
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#ececf0] text-[10px] text-[#6b7280]"
+                  >
+                    {player.type === "Guest" ? "G" : "●"}
+                  </span>
+                  <span className="truncate font-bold">{player.type}</span>
+                  <button
+                    className="ml-auto px-1 text-[#8a3f26] disabled:opacity-30"
+                    disabled={busy}
+                    onClick={() => void controller.removePlayer(booking.id, player.id)}
+                    title="Remove this player from the reservation"
+                    type="button"
+                  >
+                    ×
+                  </button>
+                </div>
 
-          <label className="block sm:col-span-4">
-            <span className="text-[#5c6270]">Notes</span>
-            <textarea
-              className="mt-1 h-12 w-full resize-none border border-[#ececf0] p-2 outline-none focus:border-[#4533ff]"
-              onChange={(event) => setBookingDraft({ ...draft, notes: event.target.value })}
-              placeholder="Starter notes, special requests…"
-              value={draft.notes}
-            />
-          </label>
-        </div>
+                <div className="grid grid-cols-2 gap-1">
+                  <label className="block">
+                    <span className="sr-only">Last Name</span>
+                    <input
+                      className="w-full border-b border-[#d7d7dc] px-1 py-1 font-bold outline-none focus:border-[#4533ff]"
+                      onBlur={() => void flushPlayer(player.id)}
+                      onChange={(event) => setPlayerField(player, "lastName", event.target.value)}
+                      placeholder="Last Name"
+                      value={pd.lastName}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="sr-only">First Name</span>
+                    <input
+                      className="w-full border-b border-[#d7d7dc] px-1 py-1 outline-none focus:border-[#4533ff]"
+                      onBlur={() => void flushPlayer(player.id)}
+                      onChange={(event) => setPlayerField(player, "firstName", event.target.value)}
+                      placeholder="First Name"
+                      value={pd.firstName}
+                    />
+                  </label>
+                </div>
 
-        <div className="flex flex-wrap content-start gap-1 lg:w-[190px]">
-          {statusActions.map((action) => (
+                {/* Postal / Mem # 은 레퍼런스에 있는 칸이지만 우리 Player 모델에는 없다.
+                    입력을 받아 두고 조용히 버리면 프런트 데스크가 적어 넣은 회원번호가
+                    사라지므로, 칸만 두고 `disabled` 로 잠근다. 백엔드에 필드가 생기면
+                    여기만 풀면 된다. */}
+                <div className="mt-1 grid grid-cols-[1.4fr_1fr_1fr] gap-1">
+                  <label className="block">
+                    <span className="sr-only">Phone</span>
+                    <input
+                      className="w-full border-b border-[#d7d7dc] px-1 py-1 outline-none focus:border-[#4533ff]"
+                      inputMode="tel"
+                      onBlur={() => void flushPlayer(player.id)}
+                      onChange={(event) => setPlayerField(player, "phone", event.target.value)}
+                      placeholder="Phone"
+                      value={pd.phone}
+                    />
+                  </label>
+                  <input
+                    className="w-full cursor-not-allowed border-b border-[#ececf0] px-1 py-1 text-[#b6b6c0]"
+                    disabled
+                    placeholder="Postal"
+                    title="No postal code field on the reservation record yet"
+                  />
+                  <input
+                    className="w-full cursor-not-allowed border-b border-[#ececf0] px-1 py-1 text-[#b6b6c0]"
+                    disabled
+                    placeholder="Mem #"
+                    title="No membership number field on the reservation record yet"
+                  />
+                </div>
+
+                <label className="mt-1 block">
+                  <span className="sr-only">Email</span>
+                  <input
+                    className={`w-full border-b px-1 py-1 outline-none focus:border-[#4533ff] ${
+                      emailInvalid ? "border-[#8a3f26]" : "border-[#d7d7dc]"
+                    }`}
+                    inputMode="email"
+                    onBlur={() => void flushPlayer(player.id)}
+                    onChange={(event) => setPlayerField(player, "email", event.target.value)}
+                    placeholder="Email"
+                    value={pd.email}
+                  />
+                </label>
+                {emailInvalid ? (
+                  <span className="mt-1 block text-[10px] text-[#8a3f26]">Check this email address</span>
+                ) : null}
+
+                {/* 요금제. 격자의 셀 색이 여기서 정해진다 (tone.ts) — 그래서 바로 저장한다. */}
+                <label className="mt-1.5 flex items-center gap-1 border border-[#c7c7cc] px-1.5 py-0.5">
+                  <span aria-hidden className="text-[8px] leading-none text-[#4533ff]">
+                    &#9679;
+                  </span>
+                  <span className="sr-only">Rate plan</span>
+                  <select
+                    className="w-full bg-transparent outline-none"
+                    disabled={busy}
+                    onChange={(event) =>
+                      void controller.patchPlayer(booking.id, player.id, { ratePlan: event.target.value })
+                    }
+                    value={plan}
+                  >
+                    {planOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <div className="mt-1.5 grid grid-cols-2 gap-1">
+                  <button
+                    className={`border px-1 py-1 font-bold disabled:opacity-40 ${
+                      player.arrived ? "border-[#168a3c] bg-[#ecfff1] text-[#168a3c]" : "border-[#d7d7dc]"
+                    }`}
+                    disabled={busy}
+                    onClick={() => void controller.patchPlayer(booking.id, player.id, { arrived: !player.arrived })}
+                    type="button"
+                  >
+                    Arrived
+                  </button>
+                  <button
+                    className={`border px-1 py-1 font-bold disabled:opacity-40 ${
+                      player.no_show ? "border-[#8a3f26] bg-[#fff1ee] text-[#8a3f26]" : "border-[#d7d7dc]"
+                    }`}
+                    disabled={busy}
+                    onClick={() => void controller.patchPlayer(booking.id, player.id, { no_show: !player.no_show })}
+                    type="button"
+                  >
+                    No show
+                  </button>
+                </div>
+
+                {/* 그린피 한 줄. 금액은 예약 단위 `rate` 라서 한 카드에서 고치면 모든
+                    카드가 같이 바뀐다 — title 로 그 사실을 말해 둔다. 레퍼런스처럼
+                    글자로 보이지만 실제로는 입력칸이다 (요금 편집을 잃지 않으려고). */}
+                <div className="mt-1.5 flex items-center gap-1 border border-[#d7d7dc] px-1.5 py-1">
+                  <span className="truncate">{booking.holes} Hole Green Fee</span>
+                  <span aria-hidden className="ml-auto text-[#9aa0a6]">
+                    $
+                  </span>
+                  <input
+                    aria-label="Green fee for every player on this reservation"
+                    className="w-12 bg-transparent text-right tabular-nums outline-none focus:text-[#4533ff]"
+                    inputMode="decimal"
+                    onChange={(event) => setBookingDraft({ ...draft, rate: event.target.value })}
+                    title="Green fee — one rate for the whole reservation"
+                    value={draft.rate}
+                  />
+                  <span
+                    aria-hidden
+                    className={`h-2 w-2 shrink-0 rounded-full border ${
+                      player.paid ? "border-[#168a3c] bg-[#168a3c]" : "border-[#c7c7cc]"
+                    }`}
+                  />
+                </div>
+                {draft.rate.trim() !== "" && !Number.isFinite(Number(draft.rate)) ? (
+                  <span className="mt-1 block text-[10px] text-[#8a3f26]">Not a number — will not be saved</span>
+                ) : null}
+                {player.cancelled ? (
+                  <div className="mt-1 flex justify-between text-[#8a3f26]">
+                    <span>Cancelled</span>
+                    <span>−{money(booking.rate)}</span>
+                  </div>
+                ) : null}
+
+                <div className="mt-1.5 flex justify-between border-t border-[#ececf0] pt-1.5 font-bold">
+                  <span>Subtotal Due</span>
+                  <span className="tabular-nums">{money(dueFor(player))}</span>
+                </div>
+
+                <div className="mt-1.5 grid grid-cols-2 gap-1">
+                  {/* 할인 API 가 아직 없다. 생김새만 맞추고 눌리지 않게 잠근다 —
+                      눌러도 아무 일이 없는 버튼보다 잠긴 버튼이 정직하다. */}
+                  <button
+                    className="cursor-not-allowed border border-[#ececf0] px-1 py-1 font-bold text-[#b6b6c0]"
+                    disabled
+                    title="No discount API yet"
+                    type="button"
+                  >
+                    Discount
+                  </button>
+                  <button
+                    className={`flex items-center justify-center gap-1 px-1 py-1 font-bold text-white disabled:opacity-40 ${
+                      player.paid ? "bg-[#4533ff]" : "bg-[#b1a8ff]"
+                    }`}
+                    disabled={busy}
+                    onClick={() => void controller.patchPlayer(booking.id, player.id, { paid: !player.paid })}
+                    title={player.paid ? "Mark unpaid" : "Take payment"}
+                    type="button"
+                  >
+                    Payment
+                    <Glyph className="h-3 w-3" name="card" />
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+
+          {/* 자리를 더 파는 길. 레퍼런스는 격자의 ⊕ 로만 사람을 넣지만 그것은 **새 예약**을
+              여는 버튼이라, 이 카드를 없애면 기존 예약에 세 번째 사람을 붙일 방법이 사라진다. */}
+          {players.length < MAX_PLAYERS ? (
             <button
-              className="border border-[#c7c7cc] bg-[#f2f2f4] px-2 py-1.5 font-bold hover:border-[#4533ff] disabled:cursor-not-allowed disabled:opacity-35"
-              disabled={busy || booking.status === action.target}
-              key={action.target}
-              onClick={() => void controller.setStatus(booking.id, action.target)}
+              className="w-[52px] shrink-0 border border-dashed border-[#aeb2bb] bg-[#d5d5da] text-2xl text-[#9297a1] disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={busy}
+              onClick={() => void controller.addPlayer(booking.id)}
+              title="Add a player to this reservation"
               type="button"
             >
-              {action.label}
+              +
             </button>
-          ))}
+          ) : null}
         </div>
       </div>
 
-      {/* ===== player cards ===== */}
-      <div className="relative flex items-stretch gap-3 overflow-x-auto pb-1">
-        {players.map((player) => {
-          const pd = playerDrafts[player.id] ?? playerDraftOf(player);
-          const emailInvalid = pd.email.trim() !== "" && !EMAIL_RE.test(pd.email.trim());
-          const due = dueFor(player);
-          const canRemove = Boolean(player.id) && !busy;
-
-          return (
-            <article
-              className="flex w-[186px] shrink-0 flex-col border border-[#c7c7cc] bg-white p-2"
-              key={player.id}
-            >
-              <div className="mb-2 flex items-center justify-between">
-                <span className="truncate font-bold">{player.type}</span>
-                <button
-                  className="px-1 text-[#8a3f26] disabled:opacity-30"
-                  disabled={!canRemove}
-                  onClick={() => void controller.removePlayer(booking.id, player.id)}
-                  title={canRemove ? "Remove player" : "This player has no id yet"}
-                  type="button"
-                >
-                  ×
-                </button>
-              </div>
-
-              <div className="grid grid-cols-2 gap-1">
-                <label className="block">
-                  <span className="text-[#5c6270]">Last Name</span>
-                  <input
-                    className="mt-1 w-full border-b border-[#d7d7dc] px-1 py-1 outline-none focus:border-[#4533ff]"
-                    onBlur={() => void flushPlayer(player.id)}
-                    onChange={(event) => setPlayerField(player, "lastName", event.target.value)}
-                    value={pd.lastName}
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-[#5c6270]">First Name</span>
-                  <input
-                    className="mt-1 w-full border-b border-[#d7d7dc] px-1 py-1 outline-none focus:border-[#4533ff]"
-                    onBlur={() => void flushPlayer(player.id)}
-                    onChange={(event) => setPlayerField(player, "firstName", event.target.value)}
-                    value={pd.firstName}
-                  />
-                </label>
-              </div>
-
-              <label className="mt-2 block">
-                <span className="sr-only">Phone</span>
-                <input
-                  className="w-full border-b border-[#d7d7dc] px-1 py-1 outline-none focus:border-[#4533ff]"
-                  inputMode="tel"
-                  onBlur={() => void flushPlayer(player.id)}
-                  onChange={(event) => setPlayerField(player, "phone", event.target.value)}
-                  placeholder="Phone"
-                  value={pd.phone}
-                />
-              </label>
-
-              <label className="mt-1 block">
-                <span className="sr-only">Email</span>
-                <input
-                  className={`w-full border-b px-1 py-1 outline-none focus:border-[#4533ff] ${
-                    emailInvalid ? "border-[#8a3f26]" : "border-[#d7d7dc]"
-                  }`}
-                  inputMode="email"
-                  onBlur={() => void flushPlayer(player.id)}
-                  onChange={(event) => setPlayerField(player, "email", event.target.value)}
-                  placeholder="Email"
-                  value={pd.email}
-                />
-              </label>
-              {emailInvalid ? (
-                <span className="mt-1 block text-[10px] text-[#8a3f26]">Check this email address</span>
-              ) : null}
-
-              <button
-                className={`mt-2 w-full border px-2 py-1 font-bold disabled:opacity-40 ${
-                  player.arrived ? "border-[#168a3c] bg-[#ecfff1] text-[#168a3c]" : "border-[#d7d7dc]"
-                }`}
-                disabled={busy}
-                onClick={() => void controller.patchPlayer(booking.id, player.id, { arrived: !player.arrived })}
-                type="button"
-              >
-                {player.arrived ? "Arrived" : "Check In"}
-              </button>
-
-              <button
-                className={`mt-1 w-full border px-2 py-1 font-bold disabled:opacity-40 ${
-                  player.no_show ? "border-[#8a3f26] bg-[#fff1ee] text-[#8a3f26]" : "border-[#d7d7dc]"
-                }`}
-                disabled={busy}
-                onClick={() => void controller.patchPlayer(booking.id, player.id, { no_show: !player.no_show })}
-                type="button"
-              >
-                {player.no_show ? "No Show" : "Mark No Show"}
-              </button>
-
-              <div className="mt-2 bg-[#ffe5e2] p-1 text-[#9e2f20]">{player.ratePlan || "Public"}</div>
-
-              <div className="mt-2 flex justify-between">
-                <span>{booking.holes} Hole Gr.</span>
-                <span>{money(booking.rate)}</span>
-              </div>
-              {player.cancelled ? (
-                <div className="mt-1 flex justify-between text-[#8a3f26]">
-                  <span>Cancelled</span>
-                  <span>−{money(booking.rate)}</span>
-                </div>
-              ) : null}
-
-              <div className="mt-2 flex justify-between border-t border-[#ececf0] pt-2 font-bold">
-                <span>Subtotal Due</span>
-                <span>{money(due)}</span>
-              </div>
-
-              <button
-                className={`mt-2 w-full px-2 py-1 font-bold text-white disabled:opacity-40 ${
-                  player.paid ? "bg-[#4533ff]" : "bg-[#b1a8ff]"
-                }`}
-                disabled={busy}
-                onClick={() => void controller.patchPlayer(booking.id, player.id, { paid: !player.paid })}
-                type="button"
-              >
-                {player.paid ? "Paid" : "Collect"}
-              </button>
-            </article>
-          );
-        })}
-
-        <button
-          className="grid min-h-[240px] w-[186px] shrink-0 place-items-center rounded border border-dashed border-[#aeb2bb] bg-[#d5d5da] text-4xl text-[#9297a1] disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={busy || players.length >= MAX_PLAYERS}
-          onClick={() => void controller.addPlayer(booking.id)}
-          title={players.length >= MAX_PLAYERS ? "A tee time holds at most 4 players" : "Add player"}
-          type="button"
-        >
-          +
-        </button>
-      </div>
-
-      {/* ===== money footer ===== */}
-      <div className="mt-2 flex flex-wrap items-center gap-4 border border-[#c7c7cc] bg-white px-3 py-2 font-bold">
-        <span>
-          Reservation total <span className="ml-1 font-normal tabular-nums">{money(total)}</span>
-        </span>
-        <span className="text-[#168a3c]">
-          Collected <span className="ml-1 font-normal tabular-nums">{money(collected)}</span>
-        </span>
-        <span className={outstanding > 0 ? "text-[#8a3f26]" : "text-[#4e5560]"}>
-          Outstanding <span className="ml-1 font-normal tabular-nums">{money(outstanding)}</span>
-        </span>
-        <span className="text-[#4e5560]">
-          Carts <span className="ml-1 font-normal tabular-nums">{booking.cartCount}</span>
-        </span>
-      </div>
-
-      {/* ===== history ===== */}
-      <div className="mt-2 border border-[#c7c7cc] bg-white">
-        <button
-          aria-expanded={historyOpen}
-          className="flex w-full items-center justify-between px-3 py-2 font-bold"
-          onClick={() => setHistoryOpen((open) => !open)}
-          type="button"
-        >
-          <span>History ({audit.length})</span>
-          <span className="text-[#5c6270]">{historyOpen ? "▲" : "▼"}</span>
-        </button>
-        {historyOpen ? (
+      {/* ===== history (레일의 🕐) ===== */}
+      {historyOpen ? (
+        <div className="border-t border-[#c7c7cc] bg-white">
+          <p className="px-3 py-1.5 font-bold">History ({audit.length})</p>
           <ul className="max-h-40 overflow-y-auto border-t border-[#ececf0]">
             {audit.length === 0 ? (
               <li className="px-3 py-2 text-[#9aa0a6]">No activity recorded yet.</li>
@@ -804,8 +862,82 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
               ))
             )}
           </ul>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
+
+      {/* ===== 노란 메모 줄 ===== */}
+      <textarea
+        aria-label="Reservation note"
+        className="block h-8 w-full resize-none border-t border-[#c7c7cc] bg-[#fffbd5] px-3 py-2 leading-4 outline-none focus:h-16 focus:bg-[#fffde8]"
+        onChange={(event) => setBookingDraft({ ...draft, notes: event.target.value })}
+        placeholder="Type a note concerning this reservation..."
+        value={draft.notes}
+      />
     </section>
+  );
+}
+
+/**
+ * 상세 패널 왼쪽의 세로 아이콘 레일.
+ *
+ * 실제로 무언가 하는 것은 셋뿐이다 — 히스토리 · 삭제 · 닫기. 나머지 글리프는
+ * 레퍼런스의 자리를 지키는 **표시**이고 버튼이 아니다(`<span>`). 눌러도 아무 일이
+ * 없는 과녁을 일곱 개 만들어 두면 사용자는 앱이 고장 났다고 생각한다 — 사이드바의
+ * Golf 드롭다운, 상단바 글리프와 같은 판단이다.
+ */
+function IconRail({
+  playerCount,
+  historyOpen,
+  onToggleHistory,
+  onDelete,
+  onClose,
+}: {
+  playerCount: number;
+  historyOpen: boolean;
+  onToggleHistory: () => void;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  const cell = "flex h-7 w-9 items-center justify-center";
+  return (
+    <div className="flex shrink-0 flex-col items-center gap-0.5 border-r border-[#c7c7cc] bg-[#d5d5da] py-2">
+      <span className={`${cell} text-[#4e5560]`} title={`${playerCount} player(s)`}>
+        <Glyph name="people" />
+      </span>
+      <button
+        aria-pressed={historyOpen}
+        className={`${cell} ${historyOpen ? "bg-white text-[#4533ff]" : "text-[#4e5560] hover:bg-white/60"}`}
+        onClick={onToggleHistory}
+        title="Reservation history"
+        type="button"
+      >
+        <Glyph name="clock" />
+      </button>
+      <span className={`${cell} text-[#9297a1]`}>
+        <Glyph name="tag" />
+      </span>
+      <span aria-hidden className={`${cell} text-[13px] text-[#9297a1]`}>
+        ?
+      </span>
+      <span className={`${cell} text-[#9297a1]`}>
+        <Glyph name="copy" />
+      </span>
+      <button
+        className={`${cell} text-[15px] text-[#4e5560] hover:bg-white/60`}
+        onClick={onClose}
+        title="Close and expand the tee sheet"
+        type="button"
+      >
+        <span aria-hidden>&times;</span>
+      </button>
+      <button
+        className={`${cell} text-[#8a3f26] hover:bg-white/60`}
+        onClick={onDelete}
+        title="Delete this reservation"
+        type="button"
+      >
+        <Glyph name="trash" />
+      </button>
+    </div>
   );
 }
