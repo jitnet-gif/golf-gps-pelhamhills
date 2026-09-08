@@ -10,10 +10,21 @@ import {
   SyncStatus,
   CourseIntro,
   OfflineCourse,
+  OfflineNarration,
+  PromoBanner,
+  TeeSelector,
+  HoleCard,
+  GreenDistances,
+  HoleNarration,
+  RoundSummary,
+  PinSurveyor,
 } from '@/components';
 import { Menu, X, TrendingUp } from 'lucide-react';
 import { PELHAM_HILLS, PELHAM_HILLS_HOLES } from '@/data/pelhamHills';
 import { fetchCourseData, type CourseData } from '@/lib/courseData';
+import type { TeeSet } from '@/data/pelhamHillsBook';
+import { isRoundComplete } from '@/lib/roundSummary';
+import { loadSurveys } from '@/lib/pinSurvey';
 
 // Render from the bundled copy immediately, then swap in Supabase's rows when
 // they land. The map is useful on the first frame and never blanks out if the
@@ -37,6 +48,13 @@ export default function Golf() {
   // Start out tracking the player; picking a hole hands the frame to that hole.
   const [followGps, setFollowGps] = useState(true);
 
+  // Which scorecard column the player is playing. White is the club's standard
+  // men's card; everything else is a selector in the side menu.
+  const [teeSet, setTeeSet] = useState<TeeSet>('white');
+  // The round summary is shown once the 18th score lands, and can be dismissed
+  // back to the card - dismissing must not make it pop up again on every render.
+  const [summaryDismissed, setSummaryDismissed] = useState(false);
+
   const [{ course, holes }, setCourseData] = useState<CourseData>(BUNDLED);
 
   useEffect(() => {
@@ -50,6 +68,21 @@ export default function Golf() {
       });
     return () => ac.abort();
   }, []);
+
+  // Surveyed pins decide whether the map shows a live distance or the printed
+  // yardage, so they load with the page - not with the side menu that captures
+  // them, or a player who surveyed yesterday would open on the 1st tee and be
+  // told the pin is unsurveyed.
+  const setPinSurveys = useAppStore((s) => s.setPinSurveys);
+  useEffect(() => {
+    let alive = true;
+    loadSurveys(courseId || PELHAM_HILLS.id).then((rows) => {
+      if (alive) setPinSurveys(rows);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [courseId, setPinSurveys]);
 
   const { isTracking, startTracking, stopTracking } = useGPS();
   const { createRound, currentRound } = useScorecard();
@@ -106,6 +139,16 @@ export default function Golf() {
     };
   }, [isTracking, startTracking]);
 
+  // The round is over when all 18 holes carry a score. Surfacing the card is the
+  // point of keeping score, so the app goes there by itself rather than waiting
+  // for a player walking off the 18th green to find the tab.
+  const scores = useAppStore((s) => s.scores);
+  const roundComplete = useMemo(() => isRoundComplete(scores), [scores]);
+
+  useEffect(() => {
+    if (roundComplete && !summaryDismissed) setViewMode('scorecard');
+  }, [roundComplete, summaryDismissed]);
+
   const handleHoleSelect = (hole: number) => {
     if (holes.some((h) => h.holeNumber === hole)) {
       selectHole(hole);
@@ -158,10 +201,19 @@ export default function Golf() {
                 />
               </div>
 
+              {/* Live yardage to the green, from the book when the pin is not
+                  surveyed - see PIN_COORDINATES_VERIFIED. */}
+              <GreenDistances
+                holeNumber={selectedHole.holeNumber}
+                tee={teeSet}
+                className="border-t border-border px-4 py-3"
+              />
+
               {/* Hole-by-hole guide */}
               <HoleGuide
-                hole={selectedHole}
+                holeNumber={selectedHole.holeNumber}
                 holeCount={holes.length}
+                teeSet={teeSet}
                 followGps={followGps}
                 onSelectHole={handleHoleSelect}
                 onToggleFollow={() => setFollowGps((on) => !on)}
@@ -171,7 +223,21 @@ export default function Golf() {
             <>
               {/* Scorecard view */}
               <div className="flex-1 overflow-y-auto p-4">
+                {roundComplete && !summaryDismissed && (
+                  <RoundSummary
+                    scores={scores}
+                    teeSet={teeSet}
+                    courseName={course.name}
+                    onClose={() => setSummaryDismissed(true)}
+                    className="mb-4"
+                  />
+                )}
+
                 <ScoreCard courseId={courseId} />
+
+                {/* 배너는 스코어카드 아래에만 둡니다. 지도 화면은 거리를 보는
+                    곳이라 무엇으로도 가리지 않습니다. */}
+                <PromoBanner placement="scorecard" className="mt-4 mx-auto" />
               </div>
             </>
           )}
@@ -205,8 +271,33 @@ export default function Golf() {
         {showSideMenu && (
           <div className="w-80 border-l border-border bg-card overflow-y-auto flex flex-col">
             <div className="flex-1 p-4 space-y-6">
+              {/* Which card you are playing - drives every yardage on screen */}
+              <div>
+                <h2 className="text-sm font-semibold mb-3">Tees</h2>
+                <TeeSelector value={teeSet} onChange={setTeeSet} />
+              </div>
+
+              {/* The selected hole's page from the club's printed book */}
+              <HoleCard holeNumber={selectedHole.holeNumber} teeSet={teeSet} />
+
+              {/* The club's own commentary for this hole, read aloud */}
+              <HoleNarration
+                holeNumber={selectedHole.holeNumber}
+                teeSet={teeSet}
+              />
+
+              {/* Capture this hole's pin on site - the only thing that turns
+                  live distances on, hole by hole */}
+              <PinSurveyor
+                courseId={courseId || course.id}
+                holeNumber={selectedHole.holeNumber}
+              />
+
               {/* Pull the basemap down before teeing off */}
               <OfflineCourse courseId={courseId || course.id} holes={holes} />
+
+              {/* And the recorded voice that reads the holes */}
+              <OfflineNarration />
 
               {/* Spoken course introduction */}
               <CourseIntro />

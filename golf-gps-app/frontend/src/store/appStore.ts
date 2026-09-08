@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { PinSurvey } from '@/db';
 
 export interface Round {
   id: string;
@@ -28,6 +29,13 @@ interface AppState {
   syncStatus: 'idle' | 'syncing' | 'error';
   isOnline: boolean;
   currentCourseId: string | null;
+  /**
+   * Pins and tees surveyed on site, by hole number. A hole present here is a
+   * hole whose live distances are trustworthy; every other hole falls back to
+   * the printed yardage. Hydrated from Dexie, kept here so a capture re-renders
+   * the distance readout immediately.
+   */
+  pinSurveys: Map<number, PinSurvey>;
   uiState: {
     selectedHole: number | null;
     showScoreSheet: boolean;
@@ -38,6 +46,9 @@ interface AppState {
   setCurrentRound: (round: Round | null) => void;
   setScore: (holeNumber: number, score: number) => void;
   setGPSPosition: (position: GPSPosition | null) => void;
+  setPinSurveys: (surveys: PinSurvey[]) => void;
+  setPinSurvey: (survey: PinSurvey) => void;
+  removePinSurvey: (holeNumber: number) => void;
   setSyncStatus: (status: 'idle' | 'syncing' | 'error') => void;
   setIsOnline: (online: boolean) => void;
   setCurrentCourseId: (courseId: string | null) => void;
@@ -54,6 +65,7 @@ export const useAppStore = create<AppState>((set) => ({
   syncStatus: 'idle',
   isOnline: typeof navigator !== 'undefined' && navigator.onLine,
   currentCourseId: null,
+  pinSurveys: new Map(),
   uiState: {
     selectedHole: null,
     showScoreSheet: false,
@@ -68,6 +80,20 @@ export const useAppStore = create<AppState>((set) => ({
       return { scores: newScores };
     }),
   setGPSPosition: (position) => set({ gpsPosition: position }),
+  setPinSurveys: (surveys) =>
+    set({ pinSurveys: new Map(surveys.map((s) => [s.holeNumber, s])) }),
+  setPinSurvey: (survey) =>
+    set((state) => {
+      const next = new Map(state.pinSurveys);
+      next.set(survey.holeNumber, survey);
+      return { pinSurveys: next };
+    }),
+  removePinSurvey: (holeNumber) =>
+    set((state) => {
+      const next = new Map(state.pinSurveys);
+      next.delete(holeNumber);
+      return { pinSurveys: next };
+    }),
   setSyncStatus: (status) => set({ syncStatus: status }),
   setIsOnline: (online) => set({ isOnline: online }),
   setCurrentCourseId: (courseId) => set({ currentCourseId: courseId }),

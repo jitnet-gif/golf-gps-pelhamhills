@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Safari pinned-tab icon: one path, solid black, no fills of its own.
+       Same flag-on-a-green mark as the PWA icons, as a silhouette. -->
+  <ellipse cx="50" cy="85" rx="44" ry="13"/>
+  <rect x="38" y="10" width="5" height="76" rx="2.5"/>
+  <path d="M42 12 L42 40 L84 26 Z"/>
+  <circle cx="72" cy="74" r="14"/>
+</svg>

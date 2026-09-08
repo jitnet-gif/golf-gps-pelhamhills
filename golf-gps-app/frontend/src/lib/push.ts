@@ -39,11 +39,13 @@ export function getDeviceId(): string {
  * applicationServerKey는 문자열도 받지만, 사파리를 포함한 몇몇 구현이
  * 여전히 BufferSource만 확실히 받습니다.
  */
-function decodeVapidKey(base64url: string): Uint8Array {
+function decodeVapidKey(base64url: string): BufferSource {
   const padded = base64url.padEnd(base64url.length + ((4 - (base64url.length % 4)) % 4), '=');
   const binary = atob(padded.replace(/-/g, '+').replace(/_/g, '/'));
 
-  const bytes = new Uint8Array(binary.length);
+  // new Uint8Array(length)는 SharedArrayBuffer도 담을 수 있는 타입이라
+  // BufferSource로 넘어가지 않습니다. ArrayBuffer를 먼저 잡아 둡니다.
+  const bytes = new Uint8Array(new ArrayBuffer(binary.length));
   for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
   return bytes;
 }

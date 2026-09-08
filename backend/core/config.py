@@ -66,7 +66,22 @@ class Settings(BaseSettings):
     COPILOT_API_KEY: str = "" # GitHub 또는 Azure Copilot 용
 
     # localhost 와 127.0.0.1 은 브라우저가 서로 다른 오리진으로 취급하므로 둘 다 허용한다.
-    ALLOWED_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,https://bepu.app"
+    # 5173/4173 은 golf-gps-app 의 Vite 개발/미리보기 서버다. GPS 앱의 티타임
+    # 예약 화면(/book)이 이 백엔드의 /tee-sheet/* 를 직접 부르므로, 없으면
+    # 브라우저가 CORS 로 막고 화면에는 "예약 서버에 닿지 못했다"만 남는다.
+    ALLOWED_ORIGINS: str = (
+        "http://localhost:3000,http://127.0.0.1:3000,"
+        "http://localhost:5173,http://127.0.0.1:5173,"
+        "http://localhost:4173,http://127.0.0.1:4173,"
+        # 배포된 두 사이트. Vercel 프로젝트 golf-gps-pelhamhills(GPS 앱)와
+        # frontend(pelhamhills.vercel.app). 둘 다 이 백엔드의 /tee-sheet/* 를
+        # 브라우저에서 직접 부른다. 프리뷰 배포는 매번 주소가 달라 여기 못 넣는다 —
+        # 프리뷰에서 예약을 시험하려면 그 주소를 ALLOWED_ORIGINS 에 임시로 넣는다.
+        "https://golf-gps-pelhamhills.vercel.app,"
+        "https://golf-gps-pelhamhills-seven.vercel.app,"
+        "https://pelhamhills.vercel.app,"
+        "https://bepu.app"
+    )
 
     @property
     def OPENAI_API_KEY_LIST(self) -> list[str]:

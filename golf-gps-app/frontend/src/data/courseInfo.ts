@@ -1,10 +1,15 @@
 // Pelham Hills Golf Club - the club's own course introduction, read aloud in-app.
 // Source: https://pelhamhills.com/ and https://pelhamhills.com/about/ (fetched 2026-09-07).
 //
-// Every string below is quoted from the club's pages. The site publishes no
-// hole-by-hole commentary, so none is invented here - the narration speaks in the
-// club's voice and must only say what the club says. Keep all spoken copy in this
-// file so a translated locale can be added as data, not as new component logic.
+// Every string below is quoted from the club's pages - the narration speaks in
+// the club's voice and must only say what the club says. Keep all spoken copy in
+// this file so a translated locale can be added as data, not as new component logic.
+//
+// This file is the course-level introduction only. The club's website carries no
+// hole-by-hole commentary, but its printed yardage book does, and that text is
+// transcribed in pelhamHillsBook.ts (PELHAM_HILLS_BOOK[].description) and spoken
+// by the per-hole narration. So "the club publishes nothing hole-by-hole" is no
+// longer a reason to leave hole narration out - just keep quoting, not writing.
 
 export interface CourseInfoSection {
   id: string;

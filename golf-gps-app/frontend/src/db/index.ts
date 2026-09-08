@@ -46,12 +46,43 @@ export interface TileMeta {
   lastUpdated: string;
 }
 
+/**
+ * One surveyed point, captured by standing on it. `accuracy` is the device's
+ * own estimate in metres and is stored with the fix, because a coordinate is
+ * only as good as the fix that produced it and a later reader has no other way
+ * to tell a 3 m capture from a 40 m one.
+ */
+export interface SurveyedPoint {
+  latitude: number;
+  longitude: number;
+  accuracy: number;
+  capturedAt: string;
+}
+
+/**
+ * Pin and tee for one hole, surveyed on site.
+ *
+ * This is what makes a hole's live distances trustworthy: the coordinates that
+ * shipped with the app came from OpenStreetMap and are not known to belong to
+ * the hole numbers the club uses, so nothing is measured against them. A row
+ * here is a coordinate someone physically stood on.
+ */
+export interface PinSurvey {
+  /** `${courseId}:${holeNumber}` - one row per hole per course. */
+  id: string;
+  courseId: string;
+  holeNumber: number;
+  pin?: SurveyedPoint;
+  tee?: SurveyedPoint;
+}
+
 export class GolfGpsDB extends Dexie {
   rounds!: Table<Round>;
   scores!: Table<Score>;
   syncQueue!: Table<SyncQueueItem>;
   tileMeta!: Table<TileMeta>;
   promotions!: Table<CachedPromotion>;
+  pinSurveys!: Table<PinSurvey>;
 
   constructor() {
     super('GolfGpsDB');
@@ -65,6 +96,11 @@ export class GolfGpsDB extends Dexie {
     // 라운드/점수 데이터는 건드리지 않고 올라갑니다.
     this.version(2).stores({
       promotions: 'id, placement, priority',
+    });
+    // v3: on-course pin survey. Additive like v2 - an install mid-round keeps
+    // its rounds, scores and cached tiles.
+    this.version(3).stores({
+      pinSurveys: 'id, courseId, holeNumber',
     });
   }
 }

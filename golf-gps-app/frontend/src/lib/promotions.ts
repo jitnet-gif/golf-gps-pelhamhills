@@ -67,7 +67,7 @@ async function readCache(placement: PromotionPlacement): Promise<Promotion[]> {
 
     return cached
       .sort((a, b) => b.priority - a.priority)
-      .map(({ placement: _p, cachedAt: _c, ...promotion }) => promotion);
+      .map(({ cachedAt: _cachedAt, ...promotion }) => promotion);
   } catch {
     // Dexie가 열리지 않는 브라우저(사파리 프라이빗 등)에서도 앱은 살아야 합니다.
     return [];

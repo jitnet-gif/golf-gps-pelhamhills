@@ -48,19 +48,45 @@ export default defineConfig({
             purpose: 'maskable',
           },
         ],
-        screenshots: [
-          {
-            src: '/screenshot-1.png',
-            sizes: '540x720',
-            type: 'image/png',
-            form_factor: 'narrow',
-          },
-        ],
       },
       workbox: {
         importScripts: ['/push-sw.js'],
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // maximumFileSizeToCacheInBytes is left at Workbox's default: the
+        // narration mp3s are deliberately NOT precached. They are ~4.7 MB all
+        // told, and a first visit should not spend that before the player has
+        // decided to use the app - the runtime rule below plus the pre-round
+        // download in OfflineCourse is the same bargain the map tiles get.
         runtimeCaching: [
+          // Hole narration cut with ElevenLabs. CacheFirst because a clip is
+          // immutable: rewriting a hole's commentary changes the manifest hash
+          // and the generator re-cuts that file, but the file at a given path
+          // never changes meaning, so there is nothing to revalidate.
+          {
+            // Unanchored on purpose, unlike the tile rule below: these are
+            // same-origin requests, where Workbox does match a RegExp mid-URL.
+            urlPattern: /\/audio\/holes\/[^/]+\.mp3$/,
+            handler: 'CacheFirst',
+            options: {
+              // Keep in step with NARRATION_CACHE_NAME in
+              // src/data/narrationAudio.ts.
+              cacheName: 'narration-cache',
+              expiration: {
+                // 126 clips is the whole course (108 card + 18 commentary);
+                // the headroom absorbs a re-cut hole without evicting a
+                // neighbour. A round is four hours, a season is not - 90 days
+                // means one download lasts the summer.
+                maxEntries: 160,
+                maxAgeSeconds: 90 * 24 * 60 * 60,
+              },
+              cacheableResponse: {
+                statuses: [0, 200],
+              },
+              // Audio is fetched with Range requests by some browsers; without
+              // this the partial responses never land in the cache.
+              rangeRequests: true,
+            },
+          },
           // Map tiles. Esri World Imagery serves them extension-less
           // (/MapServer/tile/{z}/{y}/{x}), so matching on ".png" cached nothing
           // at all - which is the whole offline story on a fairway with no bars.
@@ -99,6 +125,17 @@ export default defineConfig({
                 statuses: [0, 200],
               },
             },
+          },
+          // 티 시트 예약 API 는 캐시하지 않는다. 아래 NetworkFirst 규칙에 잡히면
+          // 남은 자리 수를 최대 5분 묵은 값으로 보여주고, 손님은 이미 찬 시간을
+          // 눌러 409 를 맞는다. 예약 화면은 "못 닿았다" 를 전화 안내로 착지시키므로,
+          // 오래된 답을 주느니 실패하는 편이 낫다.
+          // 규칙 순서가 곧 우선순위다 - 이 항목이 반드시 아래 /api/ 규칙보다 앞에 온다.
+          // 위의 타일 규칙과 같은 이유로 ^ 에 앵커한다: 예약 서버는 교차 출처라
+          // (VITE_TEE_SHEET_API_URL), Workbox 는 URL 중간부터 걸리는 RegExp 를 무시한다.
+          {
+            urlPattern: /^https?:\/\/[^/]+\/.*tee-sheet\/.*/,
+            handler: 'NetworkOnly',
           },
           // Network-first for API calls
           {

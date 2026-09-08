@@ -3,8 +3,12 @@
 // Reference: https://tailwindcss.com/docs/configuration
 
 export default {
-  // Dark mode using class strategy (data-theme attribute or .dark class)
-  darkMode: ['class'],
+  // Follow the OS setting, because that is what the theme tokens already do:
+  // index.css defines its dark values under `@media (prefers-color-scheme: dark)`
+  // and nothing in the app ever applies a `.dark` class. Under the previous
+  // `class` strategy every `dark:*` utility was dead code - status pills kept
+  // their light-mode colours on a near-black background.
+  darkMode: 'media',
 
   // Content paths for detecting class names
   content: [
@@ -21,6 +25,15 @@ export default {
         background: 'hsl(var(--background) / <alpha-value>)',
         foreground: 'hsl(var(--foreground) / <alpha-value>)',
         border: 'hsl(var(--border) / <alpha-value>)',
+
+        // Panel surfaces that sit on top of the background - the header, the
+        // bottom bars and the side menu, all of which overlay the map. Six
+        // components already used `bg-card`; without this entry the class
+        // produced nothing and those panels were transparent over the map.
+        card: {
+          DEFAULT: 'hsl(var(--card) / <alpha-value>)',
+          foreground: 'hsl(var(--card-foreground) / <alpha-value>)',
+        },
 
         primary: {
           DEFAULT: 'hsl(var(--primary) / <alpha-value>)',

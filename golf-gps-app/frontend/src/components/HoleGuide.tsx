@@ -1,35 +1,44 @@
 import React from 'react';
 import { ChevronLeft, ChevronRight, Crosshair, Flag } from 'lucide-react';
-import { DistanceIndicator } from './DistanceIndicator';
-import type { Hole } from '@/data/pelhamHills';
+import { bookHole, PELHAM_HILLS_TEES, type TeeSet } from '@/data/pelhamHillsBook';
 
 interface HoleGuideProps {
-  hole: Hole;
+  holeNumber: number;
   holeCount: number;
+  /** Which scorecard column the yardage is quoted from. */
+  teeSet: TeeSet;
   /** Whether the map is tracking the player rather than holding this hole. */
   followGps: boolean;
   onSelectHole: (holeNumber: number) => void;
   onToggleFollow: () => void;
 }
 
-const yards = (metres: number) => Math.round(metres * 1.09361);
-
 /**
- * Per-hole panel under the satellite map: how the hole is scored, how long it
- * plays from the tee, and how far the player still is from the pin.
+ * Hole navigation strip under the satellite map: which hole you are on, how it
+ * scores, and how long it plays from the tee you picked.
  *
- * Everything here is derived from the surveyed hole data - the club publishes no
- * hole-by-hole commentary, so none is written for it.
+ * Par, stroke index and yardage come from the club's printed book, never from
+ * the coordinate data - OpenStreetMap's tags for this course disagree with the
+ * club's own card on 8 of 18 pars and on every handicap, and the panel a player
+ * glances at while standing on the tee has to match the card in their pocket.
+ *
+ * The live distance readout deliberately lives in GreenDistances instead, which
+ * checks whether the hole's pin has actually been surveyed. This strip must not
+ * grow one of its own.
  */
 export const HoleGuide: React.FC<HoleGuideProps> = ({
-  hole,
+  holeNumber,
   holeCount,
+  teeSet,
   followGps,
   onSelectHole,
   onToggleFollow,
 }) => {
-  const prev = hole.holeNumber > 1 ? hole.holeNumber - 1 : null;
-  const next = hole.holeNumber < holeCount ? hole.holeNumber + 1 : null;
+  const hole = bookHole(holeNumber);
+  const prev = holeNumber > 1 ? holeNumber - 1 : null;
+  const next = holeNumber < holeCount ? holeNumber + 1 : null;
+  const teeLabel =
+    PELHAM_HILLS_TEES.find((t) => t.id === teeSet)?.label ?? teeSet;
 
   return (
     <div className="border-t border-border bg-card p-4">
@@ -46,27 +55,33 @@ export const HoleGuide: React.FC<HoleGuideProps> = ({
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline gap-2">
             <Flag className="w-4 h-4 text-primary shrink-0" />
-            <span className="text-xl font-bold">Hole {hole.holeNumber}</span>
+            <span className="text-xl font-bold">Hole {holeNumber}</span>
             <span className="text-xs text-muted-foreground">
               of {holeCount}
             </span>
           </div>
 
-          <div className="mt-1.5 flex flex-wrap gap-1.5 text-xs">
-            <span className="px-2 py-1 rounded-md bg-accent font-medium">
-              Par {hole.par}
-            </span>
-            <span className="px-2 py-1 rounded-md bg-accent font-medium">
-              HCP {hole.handicap}
-            </span>
-            <span className="px-2 py-1 rounded-md bg-accent font-medium">
-              {yards(hole.length)} yds
-              <span className="text-muted-foreground font-normal">
-                {' '}
-                · {hole.length} m
+          {hole ? (
+            <div className="mt-1.5 flex flex-wrap gap-1.5 text-xs">
+              <span className="px-2 py-1 rounded-md bg-accent font-medium">
+                Par {hole.par}
               </span>
-            </span>
-          </div>
+              <span className="px-2 py-1 rounded-md bg-accent font-medium">
+                Stroke {hole.handicap}
+              </span>
+              <span className="px-2 py-1 rounded-md bg-accent font-medium">
+                {hole.yards[teeSet]} yds
+                <span className="text-muted-foreground font-normal">
+                  {' '}
+                  · {teeLabel}
+                </span>
+              </span>
+            </div>
+          ) : (
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              Not in the printed yardage book.
+            </p>
+          )}
 
           <button
             onClick={onToggleFollow}
@@ -81,15 +96,6 @@ export const HoleGuide: React.FC<HoleGuideProps> = ({
             {followGps ? 'Following my position' : 'Follow my position'}
           </button>
         </div>
-
-        <DistanceIndicator
-          pin={{
-            latitude: hole.latitude,
-            longitude: hole.longitude,
-            holeNumber: hole.holeNumber,
-          }}
-          className="shrink-0"
-        />
 
         <button
           onClick={() => next && onSelectHole(next)}

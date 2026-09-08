@@ -12,6 +12,11 @@
   --foreground: 0 0% 3.6%;
   --border: 0 0% 88.6%;
 
+  /* Panel surfaces over the map: lifted just enough to read as chrome rather
+     than as part of the imagery, without competing with it. */
+  --card: 0 0% 98%;
+  --card-foreground: 0 0% 3.6%;
+
   /* Primary colors (main action color - golf green theme) */
   --primary: 142 71.8% 29.2%;
   --primary-foreground: 0 0% 100%;
@@ -35,6 +40,11 @@
     --background: 0 0% 3.6%;
     --foreground: 0 0% 98.2%;
     --border: 0 0% 14.3%;
+
+    /* Lifted above the background here too - in dark the panel is the lighter
+       of the two, which is the direction that reads as "surface". */
+    --card: 0 0% 9%;
+    --card-foreground: 0 0% 98.2%;
 
     --primary: 142 71.8% 29.2%;
     --primary-foreground: 0 0% 98.2%;
