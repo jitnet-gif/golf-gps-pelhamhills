@@ -4,6 +4,7 @@
  */
 
 import { Context } from 'hono'
+import { ZodError } from 'zod'
 import type { Env } from '../types/env'
 
 export interface ErrorResponse {
@@ -67,6 +68,25 @@ export function errorHandler(env: Env) {
         message: err.message,
         status: err.status,
         ...(isDev && err.details && { details: err.details }),
+      }
+    } else if (err instanceof ZodError) {
+      // 스키마 검증 실패는 보낸 쪽 잘못이므로 400입니다. 이 분기가 없으면
+      // 필드 하나를 빠뜨린 요청이 500으로 돌아와, 부르는 쪽은 서버가
+      // 고장난 줄 알고 그대로 재시도합니다.
+      errorResponse = {
+        error: 'ValidationError',
+        code: 'VALIDATION_ERROR',
+        message: err.issues[0]?.message ?? 'Request validation failed',
+        status: 400,
+        // 어느 필드가 문제인지는 개발 환경에서만 알려줍니다.
+        ...(isDev && {
+          details: {
+            issues: err.issues.map((issue) => ({
+              path: issue.path.join('.'),
+              message: issue.message,
+            })),
+          },
+        }),
       }
     } else if (err instanceof SyntaxError && err.message.includes('JSON')) {
       errorResponse = {

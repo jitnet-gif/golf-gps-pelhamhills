@@ -51,9 +51,16 @@ ENVIRONMENT = "production"
 # preview_id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 # 스케줄된 작업 (크론 잡)
-# 예: 매일 UTC 2:00 AM에 데이터 동기화
-# [triggers]
-# crons = ["0 2 * * *"]
+#
+# 예약 발송용입니다. 5분마다 깨어나서 보낼 때가 된 캠페인이 있는지 봅니다.
+# 더 자주 돌린다고 나아지지 않습니다 - 예약 발송의 정밀도가 분 단위일 이유가
+# 없고, 빈손으로 깨는 횟수만 늘어납니다.
+#
+# 이 트리거가 실제로 동작하려면 src/index.ts가 scheduled 핸들러를 함께
+# 내보내야 합니다. Hono 앱만 default export하면 크론은 조용히 아무 일도
+# 하지 않습니다.
+[triggers]
+crons = ["*/5 * * * *"]
 
 # ============================================================
 # Staging 환경

@@ -18,6 +18,10 @@ import scoresRouter from './routes/scores'
 import leaderboardRouter from './routes/leaderboard'
 import promotionsRouter from './routes/promotions'
 import pushRouter from './routes/push'
+import analyticsRouter from './routes/analytics'
+import adminRouter from './routes/admin'
+import campaignsRouter from './routes/campaigns'
+import { handleScheduled } from './scheduled'
 
 // TypeScript 타입 지정: Bindings 타입 사용
 type HonoEnv = {
@@ -62,6 +66,15 @@ app.route('/', promotionsRouter)
 // 발송만 라우트 안에서 X-Admin-Key로 막습니다.
 app.route('/', pushRouter)
 
+// 집계 수집(공개) + 집계 조회(관리자).
+// adminRouter보다 먼저 붙입니다. 나중에 그쪽에 GET /api/admin/promotions/:id가
+// 생기면 :id가 문자열 "stats"를 먼저 삼켜 이 라우트가 영영 실행되지 않습니다.
+app.route('/', analyticsRouter)
+
+// 관리자 전용. 각 라우터가 스스로 requireAdminKey()를 겁니다.
+app.route('/', adminRouter)
+app.route('/', campaignsRouter)
+
 // 인증 필요 라우트
 app.route('/', roundsRouter)
 app.route('/', scoresRouter)
@@ -92,4 +105,19 @@ app.onError((err, c) => errorHandler(c.env)(err, c))
 // Workers 내보내기
 // ============================================================
 
-export default app
+/*
+ * Hono 앱만 default export하면 크론 트리거가 조용히 아무 일도 하지 않습니다.
+ * wrangler.toml의 [triggers]가 부를 수 있는 것은 scheduled 핸들러뿐이고,
+ * 그것은 이 객체에 함께 실려 있어야 합니다.
+ */
+export default {
+  fetch: app.fetch,
+  scheduled: async (
+    _event: ScheduledController,
+    env: Env,
+    ctx: ExecutionContext
+  ): Promise<void> => {
+    // waitUntil로 감싸야 핸들러가 반환된 뒤에도 발송이 끝까지 갑니다.
+    ctx.waitUntil(handleScheduled(env, ctx))
+  },
+}

@@ -13,19 +13,19 @@ export class PromotionService {
   /**
    * 지금 노출할 배너 목록
    *
-   * 기간/활성 필터를 여기서 한 번 더 거는 이유: RLS의 promotions_read_live가
-   * 같은 조건을 이미 걸지만, 그 정책은 anon 키에만 적용됩니다.
-   * service_role로 호출될 때도 예약된 배너가 새지 않도록 쿼리에서 막습니다.
+   * 반드시 anon 클라이언트(createSupabaseClient)로 호출해야 합니다.
+   * active와 노출 기간을 거르는 것은 RLS의 promotions_read_live 정책이고,
+   * 그 정책은 anon에만 걸립니다. service_role로 부르면 아직 시작하지 않은
+   * 배너까지 딸려 나옵니다.
+   *
+   * 같은 조건을 쿼리에 한 번 더 쓰지 않습니다. PostgREST에서 .or()를 연달아
+   * 부르면 같은 이름의 파라미터가 겹쳐 한쪽이 묻히고, 무엇보다 규칙이 두
+   * 군데로 갈라져 서로 어긋나기 시작합니다.
    */
   async listLive(placement?: PromotionPlacement, limit = 5): Promise<Promotion[]> {
-    const now = new Date().toISOString()
-
     let query = this.supabase
       .from('promotions')
       .select('id, title, body, image_url, link_url, placement, priority, starts_at, ends_at')
-      .eq('active', true)
-      .or(`starts_at.is.null,starts_at.lte.${now}`)
-      .or(`ends_at.is.null,ends_at.gt.${now}`)
 
     if (placement) {
       query = query.eq('placement', placement)

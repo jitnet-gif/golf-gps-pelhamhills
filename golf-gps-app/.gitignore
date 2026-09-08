@@ -27,6 +27,9 @@ build/
 # Wrangler/Cloudflare
 .wrangler/
 .env.*.vars
+# Wrangler 로컬 시크릿 (VAPID 개인키, 관리자 키가 들어갑니다)
+.dev.vars
+.dev.vars.*
 
 # TypeScript
 *.tsbuildinfo

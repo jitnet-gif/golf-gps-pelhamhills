@@ -18,7 +18,8 @@ import {
   SubscribeRequestSchema,
   UnsubscribeRequestSchema,
 } from '../schemas/push'
-import { ApiError, UnauthorizedError, ValidationError } from '../middleware/errorHandler'
+import { ApiError, ValidationError } from '../middleware/errorHandler'
+import { verifyAdminKey } from '../middleware/adminAuth'
 
 type HonoEnv = {
   Bindings: Env
@@ -47,35 +48,6 @@ function getVapidConfig(env: Env) {
     publicKey: VAPID_PUBLIC_KEY,
     privateKey: VAPID_PRIVATE_KEY,
     subject: VAPID_SUBJECT,
-  }
-}
-
-/**
- * 관리자 키 검증
- *
- * 길이가 다르면 곧바로 탈락시키되, 같은 길이일 때는 전체를 다 비교합니다.
- * 첫 글자에서 빠져나오면 응답 시간이 키를 한 글자씩 흘립니다.
- */
-function requireAdminKey(env: Env, provided: string | undefined): void {
-  const expected = env.ADMIN_API_KEY
-
-  if (!expected) {
-    throw new ApiError(
-      'ADMIN_KEY_NOT_CONFIGURED',
-      'ADMIN_API_KEY is not configured on this deployment',
-      503
-    )
-  }
-  if (!provided || provided.length !== expected.length) {
-    throw new UnauthorizedError('Invalid admin key')
-  }
-
-  let mismatch = 0
-  for (let i = 0; i < expected.length; i += 1) {
-    mismatch |= expected.charCodeAt(i) ^ provided.charCodeAt(i)
-  }
-  if (mismatch !== 0) {
-    throw new UnauthorizedError('Invalid admin key')
   }
 }
 
@@ -163,7 +135,7 @@ router.post('/api/push/unsubscribe', async (c) => {
  * ```
  */
 router.post('/api/push/send', async (c) => {
-  requireAdminKey(c.env, c.req.header('X-Admin-Key'))
+  verifyAdminKey(c.env, c.req.header('X-Admin-Key'))
 
   const body = await c.req.json().catch(() => {
     throw new ValidationError('Invalid JSON body')
