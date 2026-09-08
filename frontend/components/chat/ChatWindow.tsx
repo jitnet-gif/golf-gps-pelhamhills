@@ -12,6 +12,7 @@ import type { Message, EmotionState } from "@/lib/types"
 import { askGeminiStream, type GeminiMessage } from "@/lib/gemini"
 import AgentSelector from "./AgentSelector"
 import { AGENTS } from "@/constants/agents"
+import { apiHost } from "@/lib/apiHost"
 
 // 캐릭터별 인사말 생성 헬퍼
 function getAgentGreeting(agentId: string, userName: string) {
@@ -71,7 +72,8 @@ export default function ChatWindow({
 
   const CONVERSATION_ID = "11111111-1111-1111-1111-111111111111"
   const STORAGE_KEY = `BEPU_CHAT_HISTORY_${CONVERSATION_ID}`
-  const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  // 빈 문자열이면 이 사이트엔 백엔드가 없다는 뜻 — 히스토리는 localStorage 캐시로만 채운다.
+  const API_BASE_URL = apiHost()
 
   const addDebugLog = (level: "info" | "warn" | "error", category: string, message: string, data?: any) => {
     const newLog: DebugLog = {
@@ -185,8 +187,12 @@ export default function ChatWindow({
           }
         }
 
-        const res = await fetch(`${API_BASE_URL}/api/v1/chat/${CONVERSATION_ID}`)
-        if (res.ok) {
+        // 백엔드가 없는 배포에서는 아예 요청하지 않는다. 예전에는 방문자 브라우저가
+        // 자기 컴퓨터의 localhost:8000 을 두드리다 실패했다.
+        const res = API_BASE_URL
+          ? await fetch(`${API_BASE_URL}/api/v1/chat/${CONVERSATION_ID}`)
+          : null
+        if (res?.ok) {
           const data = await res.json()
           if (data.messages && data.messages.length > 0) {
             // DB 형식(dict)을 프론트엔드 Message 타입으로 변환
