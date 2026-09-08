@@ -11,6 +11,11 @@ import {
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useAppStore } from '@/store/appStore';
+import {
+  TILE_ATTRIBUTION,
+  TILE_MAX_ZOOM,
+  TILE_URL_TEMPLATE,
+} from '@/lib/tiles';
 
 // Fix default marker icons for Vite
 const DefaultIcon = L.icon({
@@ -48,10 +53,13 @@ const TeeIcon = L.icon({
 
 L.Marker.prototype.options.icon = DefaultIcon;
 
-/** Esri World Imagery serves real detail down to z20 over Pelham Hills. */
-const MAX_ZOOM = 20;
+/**
+ * Deepest zoom the map asks for, shared with the offline download so that
+ * everything reachable on screen is also everything that gets cached.
+ */
+const MAX_ZOOM = TILE_MAX_ZOOM;
 /** Framing a 120 m par 3 would otherwise push past the crisp imagery. */
-const HOLE_MAX_ZOOM = 19;
+const HOLE_MAX_ZOOM = TILE_MAX_ZOOM;
 
 export interface MapHole {
   holeNumber: number;
@@ -133,7 +141,7 @@ const MapContent: React.FC<{
     <>
       <TileLayer
         url={tileUrl}
-        attribution="Imagery &copy; Esri, Maxar, Earthstar Geographics"
+        attribution={TILE_ATTRIBUTION}
         maxZoom={MAX_ZOOM}
         maxNativeZoom={MAX_ZOOM}
         crossOrigin="anonymous"
@@ -220,12 +228,6 @@ const MapContent: React.FC<{
   );
 };
 
-// Leaflet needs a {z}/{x}/{y} template, not a resolved URL. Esri World Imagery
-// serves {z}/{y}/{x} - note the swapped order.
-const TILE_URL =
-  import.meta.env.VITE_TILE_URL ||
-  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
-
 export const HoleMap: React.FC<HoleMapProps> = ({
   courseId,
   holes,
@@ -234,7 +236,7 @@ export const HoleMap: React.FC<HoleMapProps> = ({
   followGps = false,
   onHoleClick,
 }) => {
-  const tileUrl = TILE_URL;
+  const tileUrl = TILE_URL_TEMPLATE;
 
   return (
     <div className="w-full h-full rounded-lg overflow-hidden border border-border">

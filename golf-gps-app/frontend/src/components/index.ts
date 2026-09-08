@@ -7,3 +7,4 @@ export { OnlineStatus } from './OnlineStatus';
 export { SyncStatus } from './SyncStatus';
 export { CourseIntro } from './CourseIntro';
 export { HoleGuide } from './HoleGuide';
+export { OfflineCourse } from './OfflineCourse';

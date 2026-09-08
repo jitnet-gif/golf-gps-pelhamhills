@@ -9,6 +9,7 @@ import {
   OnlineStatus,
   SyncStatus,
   CourseIntro,
+  OfflineCourse,
 } from '@/components';
 import { Menu, X, TrendingUp } from 'lucide-react';
 import { PELHAM_HILLS, PELHAM_HILLS_HOLES } from '@/data/pelhamHills';
@@ -204,6 +205,9 @@ export default function Golf() {
         {showSideMenu && (
           <div className="w-80 border-l border-border bg-card overflow-y-auto flex flex-col">
             <div className="flex-1 p-4 space-y-6">
+              {/* Pull the basemap down before teeing off */}
+              <OfflineCourse courseId={courseId || course.id} holes={holes} />
+
               {/* Spoken course introduction */}
               <CourseIntro />
 

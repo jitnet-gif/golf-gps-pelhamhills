@@ -60,14 +60,38 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         runtimeCaching: [
-          // Cache tiles first (but with expiration)
+          // Map tiles. Esri World Imagery serves them extension-less
+          // (/MapServer/tile/{z}/{y}/{x}), so matching on ".png" cached nothing
+          // at all - which is the whole offline story on a fairway with no bars.
+          // Anchored at ^: Workbox ignores a RegExp route on a cross-origin
+          // request unless the match starts at the very beginning of the URL.
+          {
+            urlPattern: /^https?:\/\/[^/]+\/.*\/MapServer\/tile\/\d+\/\d+\/\d+(?:\?.*)?$/,
+            handler: 'CacheFirst',
+            options: {
+              // Keep in step with TILE_CACHE_NAME in src/lib/tiles.ts.
+              cacheName: 'tile-cache',
+              expiration: {
+                // A whole-course download is ~536 tiles at zoom 15-19; the rest
+                // is headroom for panning, so a pre-round download does not
+                // evict itself. Satellite imagery does not go stale in a week.
+                maxEntries: 800,
+                maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
+              },
+              cacheableResponse: {
+                statuses: [0, 200],
+              },
+            },
+          },
+          // Everything else pictorial: app artwork, or a self-hosted tile
+          // pyramid if VITE_TILE_URL is ever pointed at one.
           {
             urlPattern: /.*\.(?:png|jpg|jpeg|gif|webp)$/,
             handler: 'CacheFirst',
             options: {
-              cacheName: 'tile-cache',
+              cacheName: 'image-cache',
               expiration: {
-                maxEntries: 500,
+                maxEntries: 200,
                 maxAgeSeconds: 7 * 24 * 60 * 60, // 7 days
               },
               cacheableResponse: {
