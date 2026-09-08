@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "concurrently \"npm:dev:*\"",
     "dev:frontend": "npm run dev --workspace=frontend",
-    "dev:backend": "cd backend && python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000",
+    "dev:backend": "python -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000",
     "dev:docker": "docker-compose -f docker-compose.yml up",
     "build": "npm run build:frontend && npm run build:backend",
     "build:frontend": "npm run build --workspace=frontend",
