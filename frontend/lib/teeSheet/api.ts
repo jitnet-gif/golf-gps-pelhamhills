@@ -1,6 +1,8 @@
 // The one tee sheet API client. Do not add a second fetch wrapper elsewhere.
 // Base URL comes from NEXT_PUBLIC_API_BASE_URL (Next.js convention) and must
 // include the version prefix, e.g. "http://localhost:8000/api/v1".
+// 주소 해석 자체는 `lib/apiHost.ts` 가 맡는다 — 배포된 사이트에 localhost 가
+// 굳어 나가는 사고를 한 군데서 막기 위해서다.
 
 import type {
   AddPlayerInput,
@@ -15,17 +17,13 @@ import type {
   WeekReport,
 } from "./types";
 
-// `NEXT_PUBLIC_API_BASE_URL` wins; otherwise we derive the versioned path from the
-// host-only `NEXT_PUBLIC_API_URL` that the rest of the app already sets.
-function resolveBaseUrl(): string {
-  const explicit = process.env.NEXT_PUBLIC_API_BASE_URL;
-  if (explicit) return explicit.replace(/\/+$/, "");
-  const host = process.env.NEXT_PUBLIC_API_URL;
-  if (host) return `${host.replace(/\/+$/, "")}/api/v1`;
-  return "http://localhost:8000/api/v1";
-}
+// `NEXT_PUBLIC_API_BASE_URL` wins; otherwise the versioned path is derived from the
+// host-only `NEXT_PUBLIC_API_URL` that the rest of the app already sets. 값을 모듈
+// 상수로 굳히지 않는다 — 정적 export 는 서버에서 한 번, 브라우저에서 다시
+// 평가되는데 "쓸 수 있는 주소인가" 는 브라우저에서만 판단할 수 있다.
+import { apiBaseUrl } from "../apiHost";
 
-export const API_BASE_URL = resolveBaseUrl();
+export { apiBaseUrl };
 
 export class ApiError extends Error {
   readonly status: number;
@@ -38,9 +36,16 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const base = apiBaseUrl();
+  // 주소가 없으면 요청을 흉내내지 않는다. status 0 은 `useTeeSheet` 가 이미
+  // "offline" 으로 읽는 값이라, 티 시트는 그대로 로컬 모드로 넘어간다.
+  if (!base) {
+    throw new ApiError(0, "no booking server is configured for this site");
+  }
+
   let response: Response;
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
+    response = await fetch(`${base}${path}`, {
       ...init,
       headers: { "Content-Type": "application/json", ...init?.headers },
     });

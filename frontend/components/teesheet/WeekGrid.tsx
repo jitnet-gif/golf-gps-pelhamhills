@@ -3,8 +3,24 @@
 // 티 시트 그리드. 예약 막대는 절대 좌표(px)가 아니라 실제 CSS grid 자식으로
 // `gridColumn` / `gridRow`에 배치된다 — 컬럼 폭이나 행 높이가 뷰포트에 따라
 // 변해도 정렬이 구조적으로 유지된다. 매직 픽셀 오프셋은 하나도 없다.
+//
+// 이 파일은 성격이 다른 두 화면을 담는다. 훅(useMemo 캐스케이드)은 공유하고
+// 본문 JSX만 갈라진다 — 훅을 조건부로 부를 수 없기 때문이다.
+//
+//   * 주간 뷰(week): 컬럼 = 날짜, 셀 하나 = 예약 막대(BookingBar). 예약 단위 색
+//     `booking.color` 가 COLOR_CLASS 로 그대로 쓰인다.
+//   * 일간 시트(day): Chronogolf/Lightspeed 관리자 시트의 복제.
+//     구조가 **행 → 세그먼트 → 셀** 3단계라는 점이 핵심이고, 이걸 2단계로
+//     접으면 화면이 틀린다.
+//       - 행(row)      = 티타임 하나. 트랙: Time | Rate | 플레이어 4칸 | Cart | Timer.
+//       - 세그먼트     = 예약 하나. players.length 만큼의 플레이어 칸을 span 하고,
+//         **예약 단위 크롬**(9홀 배지 · 메모 아이콘 · 선택 링 · 클릭 타깃)을 소유한다.
+//       - 셀(cell)     = 세그먼트 안의 플레이어 하나. 이름과 **플레이어 단위 배경톤**을
+//         소유한다. 그래서 분홍 그룹 안에 마젠타 플레이어 한 명이 섞일 수 있다.
+//     한 행에 예약이 둘일 수 있다 — 백엔드가 합계 4명 이하면 같은 티타임 공유를
+//     허용한다. 세그먼트는 좌→우로 깔리고 남는 칸은 기존 `+` 생성 버튼이 채운다.
 
-import { Fragment, useMemo } from "react";
+import { Fragment, useMemo, useSyncExternalStore } from "react";
 import type { CSSProperties } from "react";
 
 import {
@@ -12,11 +28,13 @@ import {
   dayIndexIn,
   isWeekend,
   longDate,
+  minutesToTime,
   money,
   timeToMinutes,
   toDate,
   todayIso,
 } from "@/lib/teeSheet/dates";
+import { TONE_CLASS, isDeadPlayer, playerLabel, playerTone } from "@/lib/teeSheet/tone";
 import type {
   BookingColor,
   BookingStatus,
@@ -69,22 +87,103 @@ function bookingCapacity(booking: TeeBooking): number {
   return Math.max(4, booking.players.length);
 }
 
-/** 아직 결제되지 않은 플레이어 기준 미수금. */
-function amountDue(booking: TeeBooking): number {
-  if (booking.status === "cancelled" || booking.status === "blocked") return 0;
-  const unpaid = booking.players.filter((player) => !player.paid && !player.cancelled);
-  const heads = booking.players.length === 0 ? 1 : unpaid.length;
-  return heads * booking.rate;
-}
-
 function isDead(booking: TeeBooking): boolean {
   return booking.status === "cancelled" || booking.status === "no_show";
 }
+
+// ===================== 일간 시트 전용 상수 =====================
+
+/** 한 티타임의 플레이어 칸 수. 백엔드 정원과 같은 값. */
+const DAY_SEATS = 4;
+/** 트랙 라인 번호: 1=Time, 2=Rate, 3..6=플레이어, 7=Cart, 8=Timer, 9=끝 라인. */
+const DAY_PLAYER_COL = 3;
+const DAY_CART_COL = DAY_PLAYER_COL + DAY_SEATS;
+const DAY_TIMER_COL = DAY_CART_COL + 1;
+const DAY_ROW_END = DAY_TIMER_COL + 1;
+/** Time 열 폭. gridTemplateColumns 와 Rate 열의 sticky `left` 오프셋이 **같은 값**을
+ *  써야 한다 — 어긋나면 Rate 열이 조용히 고정 해제된다. 그래서 상수 하나로 둔다. */
+const DAY_TIME_COL_PX = 88;
+const DAY_RATE_COL_PX = 64;
+/** 셀에 이름이 들어가므로 행이 주간 뷰보다 넉넉해야 한다. */
+// 일간 뷰 행 높이. 실제 값은 CSS 변수 `--day-row` 가 정하고 이 상수는 폴백이다.
+// 인라인 style 로 그리드 트랙을 만들기 때문에 Tailwind 브레이크포인트가 닿지 않는데,
+// 데스크톱은 한 화면에 슬롯을 많이 보여 주는 밀도가 중요하고 휴대폰은 손가락으로
+// 정확히 누르는 것이 더 중요하다. CSS 변수면 한 줄로 둘 다 만족한다
+// (globals.css 에서 1023px 이하일 때만 44px 로 키운다).
+const DAY_ROW_PX = 36;
+const DAY_BAND_PX = 22;
+
+/** 시(hour) 밴드용. 파싱 불가 슬롯(minutes=MAX_SAFE_INTEGER 폴백)은 밴드를 만들지 않는다. */
+function slotHour(slot: TeeSlot): number | null {
+  if (!Number.isFinite(slot.minutes) || slot.minutes < 0 || slot.minutes >= 1440) return null;
+  return Math.floor(slot.minutes / 60);
+}
+
+/**
+ * 한 행 안의 세그먼트 순서. visibleBookings 배열 순서에 기대면 새로고침마다
+ * 두 예약의 좌우가 뒤바뀐다 — 그래서 생성 시각(동률이면 id)으로 확정한다.
+ */
+function bySeatOrder(a: TeeBooking, b: TeeBooking): number {
+  if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? -1 : 1;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+type DayLine =
+  | { kind: "band"; key: string; label: string }
+  | { kind: "slot"; key: string; slot: TeeSlot };
+
+type DaySegment = { booking: TeeBooking; start: number; width: number };
+type DayPack = {
+  segments: DaySegment[];
+  free: number[];
+  overflow: TeeBooking[];
+  /** 좌석을 하나도 잡지 않는 예약(취소됨 · 플레이어 0명). 행에는 놓을 수 없고 아래 스트립으로 간다. */
+  unseated: TeeBooking[];
+};
+
+const EMPTY_PACK: DayPack = { segments: [], free: [0, 1, 2, 3], overflow: [], unseated: [] };
+
+/**
+ * 백엔드 `tee_time_players()` 와 **글자 그대로 같은** 좌석 산술.
+ * 취소된 예약은 자리를 반납하고(취소 후 그 자리는 다시 팔 수 있어야 한다),
+ * 플레이어가 0명인 예약은 애초에 자리를 잡지 않는다.
+ * 여기서 백엔드와 1이라도 어긋나면 서버가 받아 준 새 예약이 화면에서는
+ * "자리 없음" 으로 밀려나는(혹은 그 반대의) 유령 불일치가 생긴다.
+ */
+function daySeats(booking: TeeBooking): number {
+  if (booking.status === "cancelled") return 0;
+  // 정원을 넘는 인원(백엔드상 불가능하지만 레거시 레코드는 있을 수 있다)도
+  // 사라지면 안 되므로 4칸까지는 그린다.
+  return Math.min(booking.players.length, DAY_SEATS);
+}
+
+/**
+ * 일간 시트에서 "예약 한 건의 배경색" 을 정하는 단일 규칙.
+ * 그리드 세그먼트와 오버플로 스트립이 **같은 함수**를 부르게 강제한다 —
+ * 두 곳이 각자 색을 고르면 스트립의 색이 채널을 뜻하는지 요금제를 뜻하는지
+ * 읽는 사람이 알 수 없게 된다. (tone.ts: 일간 시트에서 booking.color 는
+ * "blue" 만 의미가 있고 gold/gray 는 무시된다.)
+ */
+function daySurfaceClass(booking: TeeBooking): string {
+  if (booking.status === "blocked") return "bg-[#ececf0] text-[#4e5560]";
+  const first = booking.players[0];
+  return first ? TONE_CLASS[playerTone(booking, first)] : "bg-[#ececf0] text-[#4e5560]";
+}
+
+// 서버 렌더에서는 false, 하이드레이션 이후 true. DateNav 이 쓰는 것과 같은 장치를
+// 여기에도 둔다 — 정적 export 라 프리렌더된 HTML 은 **빌드 날짜**를 담고 있어서,
+// 다음 날 페이지를 열면 클라이언트 첫 렌더와 텍스트가 어긋나(hydration mismatch) 버린다.
+const subscribeNever = () => () => {};
+const getClient = () => true;
+const getServer = () => false;
 
 export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
   const { view, weekDates, focusedDate, weekStart, visibleBookings, slots, selectedId } = controller;
   const isDayView = view === "day";
   const today = todayIso();
+
+  // 일간 헤더의 날짜 텍스트는 마운트 이후에만 그린다 (아래 렌더 참고).
+  const mounted = useSyncExternalStore(subscribeNever, getClient, getServer);
 
   // ===== 컬럼: 실제 ISO 날짜. 하드코딩된 요일 배열은 쓰지 않는다. =====
   // useTeeSheet이 weekDates를 매 렌더 새로 만들 수도 있으므로 배열 identity가 아니라
@@ -171,22 +270,109 @@ export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
     return map;
   }, [visibleBookings, colIndex]);
 
-  // 그리드 라인 좌표. 트랙: [Time, Rate, ...days, Cart]
+  // ===== 일간 시트: 시(hour) 밴드를 섞은 "라인" 목록 =====
+  // Chronogolf 는 매 시각의 첫 티타임 **앞에** 전폭 회색 밴드(7:00 AM …)를 깐다.
+  // 즉 6:58 은 6시대이므로 그 아래에 7:00 AM 밴드가 온다. 화면 맨 첫 행 위에는
+  // 밴드를 두지 않는다 (index > 0 조건).
+  const dayLines = useMemo<DayLine[]>(() => {
+    if (!isDayView) return [];
+    const lines: DayLine[] = [];
+    let prevHour: number | null = null;
+    rows.forEach((slot, index) => {
+      const hour = slotHour(slot);
+      if (hour !== null && index > 0 && hour !== prevHour) {
+        lines.push({ kind: "band", key: `band-${slot.time}`, label: minutesToTime(hour * 60) });
+      }
+      if (hour !== null) prevHour = hour;
+      lines.push({ kind: "slot", key: `slot-${slot.time}`, slot });
+    });
+    return lines;
+  }, [isDayView, rows]);
+
+  // grid row 번호는 `dayLines` 인덱스 + 2 다 (1행은 헤더). 밴드가 섞여 있으므로
+  // 슬롯 인덱스가 아니라 **라인 인덱스**를 써야 한다 — 렌더에서 그대로 계산한다.
+
+  // ===== 일간 시트: 행마다 세그먼트를 좌→우로 패킹 =====
+  // 한 티타임에 예약이 둘 이상 올 수 있다(합계 4명 이하면 백엔드가 허용). 자리는
+  // 한 번만 계산하고 렌더와 오버플로 스트립이 같은 결과를 읽는다 — 두 번 계산하면
+  // 화면과 "사라진 예약" 목록이 어긋난다.
+  //
+  // 규칙은 한 문장이다: **세그먼트의 span 은 언제나 그 예약의 백엔드 좌석 수와 같다.**
+  //   - 좌석 수가 0인 예약(취소됨 · 플레이어 0명)은 세그먼트가 될 수 없다 → `unseated`
+  //     로 빼서 아래 전용 스트립에 드러낸다. 남는 칸에 한 칸씩 끼워 넣지 않는 이유:
+  //     그러면 `free`(= 새로 팔 수 있는 자리)가 백엔드 잔여 정원과 다시 어긋난다.
+  //   - 남은 칸보다 인원이 많으면 **잘라서 넣지 않고** overflow 로 뺀다. 잘라 넣으면
+  //     안쪽 flex-1 플레이어 셀이 플레이어 컬럼 경계와 어긋난다.
+  const dayPacks = useMemo(() => {
+    const map = new Map<string, DayPack>();
+    if (!isDayView) return map;
+    for (const slot of rows) {
+      const list = [...(buckets.get(`${focusedDate}|${slot.time}`) ?? [])].sort(bySeatOrder);
+      const segments: DaySegment[] = [];
+      const overflow: TeeBooking[] = [];
+      const unseated: TeeBooking[] = [];
+      let used = 0;
+      for (const booking of list) {
+        const seats = daySeats(booking);
+        if (seats === 0) {
+          unseated.push(booking);
+          continue;
+        }
+        if (used + seats > DAY_SEATS) {
+          overflow.push(booking);
+          continue;
+        }
+        segments.push({ booking, start: used, width: seats });
+        used += seats;
+      }
+      // 여기까지의 `used` 는 백엔드 tee_time_players() 결과와 같은 값이다.
+      const free: number[] = [];
+      for (let seat = used; seat < DAY_SEATS; seat += 1) free.push(seat);
+      map.set(slot.time, { segments, free, overflow, unseated });
+    }
+    return map;
+  }, [isDayView, rows, buckets, focusedDate]);
+
+  // 4칸을 넘겨 자리를 못 받은 예약 — 아래 스트립으로 반드시 드러낸다.
+  const dayOverflow = useMemo(() => {
+    const out: TeeBooking[] = [];
+    for (const pack of dayPacks.values()) out.push(...pack.overflow);
+    return out;
+  }, [dayPacks]);
+
+  // 좌석을 잡지 않는 예약(취소됨 · 플레이어 0명). 행에서는 자리를 비워 두지만
+  // 예약 자체가 사라지면 안 되므로 전용 스트립에서 계속 선택·편집할 수 있다.
+  const dayUnseated = useMemo(() => {
+    const out: TeeBooking[] = [];
+    for (const pack of dayPacks.values()) out.push(...pack.unseated);
+    return out;
+  }, [dayPacks]);
+
+  // 그리드 라인 좌표. 주간 트랙: [Time, Rate, ...days, Cart]
   const dayColStart = 3;
   const cartCol = dayColStart + columns.length;
   const fullRowEnd = cartCol + 1; // 마지막 라인 (= 트랙 수 + 1)
   const bodyRowEnd = rows.length + 2;
+  const dayBodyRowEnd = dayLines.length + 2;
 
   const gridTemplateColumns = isDayView
-    ? "96px 64px minmax(280px, 1fr) 72px"
+    ? `${DAY_TIME_COL_PX}px ${DAY_RATE_COL_PX}px repeat(${DAY_SEATS}, minmax(112px, 1fr)) 56px 44px`
     : `86px 48px repeat(${columns.length}, minmax(120px, 1fr)) 64px`;
 
-  const gridTemplateRows =
-    rows.length > 0
-      ? `auto repeat(${rows.length}, minmax(${isDayView ? 40 : 29}px, auto))`
+  const gridTemplateRows = isDayView
+    ? dayLines.length > 0
+      ? [
+          "auto",
+          ...dayLines.map((line) =>
+            line.kind === "band" ? `${DAY_BAND_PX}px` : `minmax(var(--day-row, ${DAY_ROW_PX}px), auto)`,
+          ),
+        ].join(" ")
+      : "auto"
+    : rows.length > 0
+      ? `auto repeat(${rows.length}, minmax(29px, auto))`
       : "auto";
 
-  const cellAlign = isDayView ? "items-start pt-2" : "items-center";
+  const cellAlign = "items-center";
 
   // 예약이 차지한 칸에는 "빈 칸" 버튼을 그리지 않는다.
   const covered = useMemo(() => {
@@ -207,30 +393,33 @@ export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
   }, [buckets, rowIndex, colIndex, isDayView, columns.length]);
 
   // Time 열 폭 — Rate 열의 sticky left 오프셋 계산에 쓴다.
-  const timeColWidth = isDayView ? 96 : 86;
+  const timeColWidth = isDayView ? DAY_TIME_COL_PX : 86;
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       {/* 스크롤 컨테이너는 반드시 하나. 가로·세로를 한 컨테이너가 잡아야
           헤더 행과 Time/Rate 열을 position:sticky 로 고정("프리즈")할 수 있다.
           페이지 본문은 여전히 가로로 밀리지 않는다. */}
-      <div className="min-h-0 min-w-0 flex-1 overflow-auto rounded border border-[#d6d6dc] bg-white">
-        <div className={isDayView ? "min-w-[560px]" : "min-w-[1050px]"}>
+      <div className="min-h-0 min-w-0 flex-1 overflow-auto border-t border-[#d6d6dc] bg-white">
+        <div className={isDayView ? "min-w-[700px]" : "min-w-[1050px]"}>
           <div className="grid text-xs" style={{ gridTemplateColumns, gridTemplateRows }}>
             {/* ---------- 헤더 행 (grid row 1) ---------- */}
             <div
-              className="sticky top-0 left-0 z-40 border-b border-[#d6d6dc] bg-[#d7d5da] p-2 text-left font-bold"
+              className="sticky top-0 left-0 z-40 border-b border-[#d6d6dc] bg-[#d7d5da] px-2 py-1 text-left font-bold"
               style={{ gridColumn: 1, gridRow: 1 }}
             >
               Time
             </div>
             <div
-              className="sticky top-0 z-40 border-b border-[#d6d6dc] bg-[#d7d5da] p-2 text-center font-bold"
+              className="sticky top-0 z-40 border-b border-[#d6d6dc] bg-[#d7d5da] px-2 py-1 text-center font-bold"
               style={{ gridColumn: 2, gridRow: 1, left: timeColWidth }}
             >
               Rate
             </div>
 
+            {/* ================= 주간 뷰 본문 (그대로 유지) ================= */}
+            {!isDayView && (
+              <>
             {columns.map((iso, index) => {
               const isToday = iso === today;
               const weekend = isWeekend(iso);
@@ -243,7 +432,7 @@ export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
                   aria-label={`Show ${longDate(iso)}`}
                   aria-pressed={isFocused}
                   title={longDate(iso)}
-                  className={`sticky top-0 z-30 border-b border-[#d6d6dc] p-2 text-center font-bold ${FOCUS_RING} ${
+                  className={`sticky top-0 z-30 border-b border-[#d6d6dc] px-2 py-1 text-center font-bold ${FOCUS_RING} ${
                     isToday
                       ? "bg-[#4533ff] text-white"
                       : weekend
@@ -258,7 +447,7 @@ export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
             })}
 
             <div
-              className="sticky top-0 z-30 border-b border-[#d6d6dc] bg-[#d7d5da] p-2 text-center font-bold"
+              className="sticky top-0 z-30 border-b border-[#d6d6dc] bg-[#d7d5da] px-2 py-1 text-center font-bold"
               style={{ gridColumn: cartCol, gridRow: 1 }}
             >
               Cart
@@ -367,45 +556,221 @@ export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
               const [date, time] = key.split("|");
               const rowIdx = rowIndex.get(time)!;
               const colIdx = colIndex.get(date)!;
-              const span = isDayView
-                ? 1
-                : Math.min(
-                    Math.max(1, ...list.map((booking) => Math.max(1, booking.span || 1))),
-                    columns.length - colIdx,
-                  );
+              const span = Math.min(
+                Math.max(1, ...list.map((booking) => Math.max(1, booking.span || 1))),
+                columns.length - colIdx,
+              );
               return (
                 <div
                   key={`bucket-${key}`}
                   // scroll-mt: 고정된 헤더 행 뒤로 숨은 채 스크롤되지 않도록
                   // (키보드 포커스/프로그램 스크롤이 헤더 아래에 멈추게 한다).
-                  className={`relative z-10 flex min-w-0 scroll-mt-10 gap-[2px] px-[3px] py-[4px] ${
-                    isDayView ? "flex-col" : "items-center"
-                  }`}
+                  className="relative z-10 flex min-w-0 scroll-mt-10 items-center gap-[2px] px-[3px] py-[4px]"
                   style={{
                     gridColumn: `${dayColStart + colIdx} / span ${span}`,
                     gridRow: rowIdx + 2,
                   }}
                 >
-                  {list.map((booking) =>
-                    isDayView ? (
-                      <DayBookingRow
-                        key={booking.id}
-                        booking={booking}
-                        selected={booking.id === selectedId}
-                        onSelect={controller.select}
-                      />
-                    ) : (
-                      <BookingBar
-                        key={booking.id}
-                        booking={booking}
-                        selected={booking.id === selectedId}
-                        onSelect={controller.select}
-                      />
-                    ),
-                  )}
+                  {list.map((booking) => (
+                    <BookingBar
+                      key={booking.id}
+                      booking={booking}
+                      selected={booking.id === selectedId}
+                      onSelect={controller.select}
+                    />
+                  ))}
                 </div>
               );
             })}
+              </>
+            )}
+
+            {/* ================= 일간 시트 본문 ================= */}
+            {isDayView && (
+              <>
+                {/* 헤더: 플레이어 4칸을 한 덩어리로 묶어 날짜를 보여준다.
+                    (같은 날짜를 다시 고르는 버튼은 아무 일도 하지 않으므로 버튼이 아니라 라벨이다.) */}
+                <div
+                  className="sticky top-0 z-30 border-b border-[#d6d6dc] bg-[#d7d5da] px-2 py-1 text-center font-bold text-[#1f2328]"
+                  style={{ gridColumn: `${DAY_PLAYER_COL} / span ${DAY_SEATS}`, gridRow: 1 }}
+                >
+                  {/* focusedDate 는 todayIso() 에서 파생된다. 정적 export 의 프리렌더 HTML 은
+                      **빌드 날짜**를 담으므로, 다음 날 열면 클라이언트 첫 렌더와 글자가 달라져
+                      하이드레이션이 깨진다. 그래서 첫 렌더는 서버와 똑같이 날짜와 무관한
+                      자리표시자(nbsp — 헤더 높이 유지)를 그리고, 마운트 후 진짜 날짜로 바꾼다.
+                      DateNav 의 요일 탭이 쓰는 것과 같은 useSyncExternalStore 스위치다. */}
+                  {mounted ? longDate(focusedDate) : <>&nbsp;</>}
+                </div>
+                <div
+                  className="sticky top-0 z-30 border-b border-[#d6d6dc] bg-[#d7d5da] px-2 py-1 text-center font-bold"
+                  style={{ gridColumn: DAY_CART_COL, gridRow: 1 }}
+                >
+                  Cart
+                </div>
+                <div
+                  className="sticky top-0 z-30 border-b border-[#d6d6dc] bg-[#d7d5da] px-2 py-1 text-center font-bold"
+                  style={{ gridColumn: DAY_TIMER_COL, gridRow: 1 }}
+                  title="Check in"
+                >
+                  <span aria-hidden>⏱</span>
+                  <span className="sr-only">Check in</span>
+                </div>
+
+                {/* 세로 구분선 (본문 전체 높이) */}
+                {dayLines.length > 0 &&
+                  Array.from({ length: DAY_SEATS + 2 }, (_, index) => (
+                    <div
+                      key={`day-col-bg-${index}`}
+                      aria-hidden
+                      className="pointer-events-none border-l border-[#ececf0]"
+                      style={{
+                        gridColumn: DAY_PLAYER_COL + index,
+                        gridRow: `2 / ${dayBodyRowEnd}`,
+                      }}
+                    />
+                  ))}
+
+                {dayLines.map((line, lineIdx) => {
+                  const gridRow = lineIdx + 2;
+
+                  if (line.kind === "band") {
+                    return (
+                      <div
+                        key={line.key}
+                        className="z-[15] flex items-center border-y border-[#d6d6dc] bg-[#e8e8ec]"
+                        style={{ gridColumn: `1 / ${DAY_ROW_END}`, gridRow }}
+                      >
+                        {/* 가로 스크롤 시에도 시각 라벨이 보이도록 라벨만 sticky. */}
+                        <span className="sticky left-0 px-2 text-[11px] font-semibold text-[#4e5560]">
+                          {line.label}
+                        </span>
+                      </div>
+                    );
+                  }
+
+                  const slot = line.slot;
+                  const pack = dayPacks.get(slot.time) ?? EMPTY_PACK;
+                  const carts = cartsByTime.get(slot.time) ?? 0;
+                  // 행 밑줄은 셀마다 그린다. 빈 자리 버튼에도 반드시 붙여야
+                  // 선이 플레이어 칸 구간에서 끊겼다가 다시 나타나지 않는다.
+                  // 바로 아래가 시(hour) 밴드면 밴드의 border-t 와 겹쳐 2px 이 되므로 생략.
+                  const last = lineIdx === dayLines.length - 1;
+                  const nextIsBand = dayLines[lineIdx + 1]?.kind === "band";
+                  const rule = last || nextIsBand ? "" : "border-b border-[#ececf0]";
+                  // Timer 는 실제 동작하는 컨트롤이다: 이 행의 첫 "체크인 가능한" 예약을
+                  // 체크인한다. 취소/노쇼/blocked 는 체크인할 사람이 없으므로 건너뛴다.
+                  const checkInTarget = pack.segments.find(
+                    ({ booking }) => !isDead(booking) && booking.status !== "blocked",
+                  )?.booking;
+
+                  return (
+                    <Fragment key={line.key}>
+                      <div
+                        className={`sticky left-0 z-20 flex items-center bg-white px-2 font-bold text-[#1f2328] ${rule}`}
+                        style={{ gridColumn: 1, gridRow }}
+                      >
+                        {slot.time}
+                      </div>
+                      <div
+                        className={`sticky z-20 flex items-center justify-center bg-white text-[#9aa0a6] ${rule}`}
+                        style={{ gridColumn: 2, gridRow, left: DAY_TIME_COL_PX }}
+                      >
+                        {money(slot.rate)}
+                      </div>
+
+                      {/* 세그먼트 = 예약 하나. 좌→우 순서는 dayPacks 가 확정해 둔다. */}
+                      {pack.segments.map(({ booking, start, width }) => (
+                        <DaySegmentCard
+                          key={booking.id}
+                          booking={booking}
+                          selected={booking.id === selectedId}
+                          onSelect={controller.select}
+                          rule={rule}
+                          style={{
+                            gridColumn: `${DAY_PLAYER_COL + start} / span ${width}`,
+                            gridRow,
+                          }}
+                        />
+                      ))}
+
+                      {/* 남는 칸 = 새 예약 자리. */}
+                      {pack.free.map((seat) => (
+                        <button
+                          key={`day-empty-${slot.time}-${seat}`}
+                          type="button"
+                          onClick={() => onCreateAt(focusedDate, slot.time)}
+                          aria-label={`Create reservation on ${shortDate(focusedDate)} at ${slot.time}`}
+                          title={`Create reservation at ${slot.time}`}
+                          className={`group relative flex scroll-mt-10 items-center justify-center hover:bg-[#f0efff] ${rule} ${FOCUS_RING}`}
+                          style={{ gridColumn: DAY_PLAYER_COL + seat, gridRow }}
+                        >
+                          <span
+                            aria-hidden
+                            className="text-[13px] leading-none font-bold text-[#b6b6c0] opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                          >
+                            +
+                          </span>
+                        </button>
+                      ))}
+
+                      {/* Cart: 0이면 아예 아무것도 그리지 않는다 (스크린샷과 동일). */}
+                      <div
+                        className={`flex items-center justify-center gap-1 text-[11px] text-[#3f4650] ${rule}`}
+                        style={{ gridColumn: DAY_CART_COL, gridRow }}
+                        title={carts > 0 ? `${carts} cart(s) booked at ${slot.time}` : undefined}
+                      >
+                        {carts > 0 && (
+                          <>
+                            <span aria-hidden>🚗</span>
+                            <span
+                              className={
+                                slot.cartsTotal > 0 && carts > slot.cartsTotal
+                                  ? "font-bold text-[#8a3f26]"
+                                  : "font-semibold"
+                              }
+                            >
+                              {carts}
+                            </span>
+                          </>
+                        )}
+                      </div>
+
+                      <div
+                        className={`flex items-center justify-center ${rule}`}
+                        style={{ gridColumn: DAY_TIMER_COL, gridRow }}
+                      >
+                        <button
+                          type="button"
+                          disabled={!checkInTarget}
+                          onClick={
+                            checkInTarget
+                              ? () => void controller.setStatus(checkInTarget.id, "checked_in")
+                              : undefined
+                          }
+                          aria-label={
+                            checkInTarget
+                              ? `Check in ${checkInTarget.title}`
+                              : `Nothing to check in at ${slot.time}`
+                          }
+                          title={
+                            checkInTarget
+                              ? `Check in ${checkInTarget.title}`
+                              : `Nothing to check in at ${slot.time}`
+                          }
+                          className={`flex h-11 w-11 items-center justify-center rounded-sm border border-[#c7c7cc] text-[11px] leading-none lg:h-[22px] lg:w-[22px] ${FOCUS_RING} ${
+                            checkInTarget
+                              ? "text-[#3f4650] hover:border-[#4533ff] hover:bg-[#f0efff]"
+                              : "text-[#c7c7cc]"
+                          }`}
+                        >
+                          <span aria-hidden>⏱</span>
+                        </button>
+                      </div>
+                    </Fragment>
+                  );
+                })}
+              </>
+            )}
           </div>
 
           {/* rows가 0이면 grid 본문 자체를 그리지 않는다 (repeat(0, …)는 무효 CSS). */}
@@ -430,12 +795,32 @@ export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
           </p>
         )}
 
+        {/* 일간 시트는 한 티타임에 4칸뿐이다. 넘친 예약도 조용히 잘리면 안 된다. */}
+        <OffGridStrip
+          title="Too many players for the tee time"
+          hint="This tee time already has 4 player columns filled, so these reservations could not be laid out. Move them to another tee time or remove players."
+          bookings={dayOverflow}
+          selectedId={selectedId}
+          onSelect={controller.select}
+          dayTone={isDayView}
+        />
+        {/* 좌석을 잡지 않는 예약(취소됨 · 플레이어 0명). 백엔드도 이들을 정원에서 빼므로
+            격자에서 칸을 차지하면 안 되지만, 예약 자체는 계속 보이고 편집 가능해야 한다. */}
+        <OffGridStrip
+          title="Holding no player column"
+          hint="Cancelled reservations release their seats, and a reservation with no players never took one — so the four player columns stay available for bookings that do hold a seat. These are still selectable and editable here."
+          bookings={dayUnseated}
+          selectedId={selectedId}
+          onSelect={controller.select}
+          dayTone={isDayView}
+        />
         <OffGridStrip
           title="Unscheduled / off-grid — no matching tee time"
           hint="These reservations have a time that is not on the current tee sheet. They are still open and editable."
           bookings={offGrid.noSlot}
           selectedId={selectedId}
           onSelect={controller.select}
+          dayTone={isDayView}
         />
         <OffGridStrip
           title="Other days this week"
@@ -443,6 +828,7 @@ export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
           bookings={offGrid.otherDays}
           selectedId={selectedId}
           onSelect={controller.select}
+          dayTone={isDayView}
         />
         <OffGridStrip
           title="Outside the visible range"
@@ -450,6 +836,7 @@ export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
           bookings={offGrid.outOfRange}
           selectedId={selectedId}
           onSelect={controller.select}
+          dayTone={isDayView}
         />
       </div>
     </div>
@@ -489,47 +876,101 @@ function BookingBar({ booking, selected, onSelect }: BookingButtonProps) {
   );
 }
 
-/** 일간 뷰의 넓은 행 — 플레이어 이름 / 상태 / 카트 / 미수금을 모두 보여준다. */
-function DayBookingRow({ booking, selected, onSelect }: BookingButtonProps) {
+/**
+ * 일간 시트의 **세그먼트** = 예약 하나.
+ * 예약 단위 크롬(9홀 배지 · 메모 아이콘 · 선택 링 · 클릭 타깃)만 소유하고,
+ * 이름과 배경톤은 안쪽 **셀**(플레이어 하나)이 소유한다. 이 두 층을 합치면
+ * "분홍 그룹 안의 마젠타 플레이어" 같은 표현이 불가능해진다.
+ *
+ * 배경을 첫 플레이어 톤으로 깔아두는 이유: 배지/메모가 붙는 왼쪽 크롬 띠가
+ * 흰 구멍처럼 보이지 않도록. 각 셀은 자기 톤으로 다시 덮는다.
+ */
+function DaySegmentCard({
+  booking,
+  selected,
+  onSelect,
+  rule,
+  style,
+}: BookingButtonProps & { rule: string; style: CSSProperties }) {
   const blocked = booking.status === "blocked";
   const cancelled = isDead(booking);
-  const names = booking.players.map((player) => player.name || `${player.firstName} ${player.lastName}`.trim());
-  const due = amountDue(booking);
+  const hasChrome = booking.holes === 9 || booking.notes.trim().length > 0;
+
   return (
     <button
       type="button"
       onClick={() => onSelect(booking.id)}
       aria-pressed={selected}
-      style={blocked ? HATCH_STYLE : undefined}
-      className={`w-full rounded-sm px-2 py-1.5 text-left text-[11px] shadow-sm ${FOCUS_RING} ${
-        blocked ? "text-[#4e5560]" : COLOR_CLASS[booking.color]
-      } ${cancelled ? "opacity-60" : ""} ${selected ? "ring-2 ring-[#111315]" : ""}`}
+      // 9홀 배지와 메모 아이콘은 시각 정보이므로 aria-hidden 이다 — 대신 그 내용을
+      // 버튼 이름에 넣어야 스크린리더 사용자가 같은 정보를 얻는다.
+      aria-label={[
+        booking.title,
+        booking.time,
+        STATUS_LABEL[booking.status],
+        `${booking.players.length} of ${bookingCapacity(booking)} players`,
+        `${booking.holes} holes`,
+        booking.notes.trim() ? `Note: ${booking.notes.trim()}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")}
+      title={`${booking.title} · ${booking.time} · ${STATUS_LABEL[booking.status]}`}
+      style={{ ...style, ...(blocked ? HATCH_STYLE : undefined) }}
+      // scroll-mt: 고정 헤더 뒤에 숨은 채로 스크롤되지 않게.
+      // 세그먼트가 셀을 꽉 채우므로 행 밑줄도 스스로 그린다 — 안 그리면 위아래
+      // 행의 같은 색 세그먼트가 한 덩어리로 뭉쳐 보인다.
+      className={`z-10 flex min-w-0 scroll-mt-10 items-stretch overflow-hidden rounded-sm text-left text-[11px] leading-none ${rule} ${FOCUS_RING} ${daySurfaceClass(
+        booking,
+      )} ${cancelled ? "opacity-60" : ""} ${selected ? "ring-2 ring-[#111315] ring-inset" : ""}`}
     >
-      <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className={`font-bold ${cancelled ? "line-through" : ""}`}>
-          {blocked ? "Blocked" : booking.title}
-        </span>
-        <span className="rounded-sm bg-black/15 px-1 text-[10px] font-bold">
-          {booking.players.length}/{bookingCapacity(booking)}
-        </span>
-        <span className="rounded-sm border border-current px-1 text-[10px] font-semibold opacity-80">
-          {STATUS_LABEL[booking.status]}
-        </span>
-        <span className="text-[10px] opacity-90">{booking.holes} holes</span>
-        <span className="text-[10px] opacity-90">🚗 {booking.cartCount}</span>
-        <span className="ml-auto text-[10px] font-bold">
-          {due > 0 ? `${money(due)} due` : "Settled"}
-        </span>
-      </span>
-      {names.length > 0 && (
-        <span className={`mt-1 block truncate text-[10px] opacity-85 ${cancelled ? "line-through" : ""}`}>
-          {names.join(" · ")}
+      {hasChrome && (
+        <span className="flex shrink-0 flex-col items-center justify-center gap-[2px] px-[3px]">
+          {booking.holes === 9 && (
+            <span
+              aria-hidden
+              title="9 holes"
+              className="rounded-[2px] bg-[#2b2f38] px-[3px] py-px text-[9px] font-bold text-white"
+            >
+              9
+            </span>
+          )}
+          {booking.notes.trim().length > 0 && (
+            <span aria-hidden title={booking.notes} className="text-[10px] leading-none">
+              🗒
+            </span>
+          )}
         </span>
       )}
-      {cancelled && booking.cancelReason && (
-        <span className="mt-1 block truncate text-[10px] font-semibold opacity-90">
-          {booking.cancelReason}
+
+      {booking.players.length === 0 ? (
+        // 방어용 경로. dayPacks 가 좌석 0인 예약(플레이어 0명 · 취소됨)을 세그먼트로
+        // 만들지 않으므로 지금은 도달하지 않지만, 그런 예약이 이 컴포넌트까지 오더라도
+        // 이름 없이 빈 칸으로 그려지는 일은 없어야 한다.
+        <span className="flex min-w-0 flex-1 items-center px-1 font-bold">
+          <span className={`truncate ${cancelled ? "line-through" : ""}`}>
+            {blocked ? "Blocked" : booking.title}
+          </span>
         </span>
+      ) : (
+        booking.players.map((player) => {
+          const tone = playerTone(booking, player);
+          const dead = cancelled || isDeadPlayer(player);
+          return (
+            <span
+              key={player.id}
+              className={`flex min-w-0 flex-1 items-center gap-1 px-1 ${TONE_CLASS[tone]} ${
+                dead ? "line-through opacity-70" : ""
+              }`}
+            >
+              <span
+                aria-hidden
+                className="h-[7px] w-[7px] shrink-0 rounded-full border border-current opacity-70"
+              />
+              <span className="truncate">
+                {player.type === "Guest" ? <em>Guest</em> : playerLabel(player)}
+              </span>
+            </span>
+          );
+        })
       )}
     </button>
   );
@@ -541,10 +982,19 @@ type OffGridStripProps = {
   bookings: TeeBooking[];
   selectedId: string | null;
   onSelect: (bookingId: string | null) => void;
+  /** 일간 시트에서 렌더 중인가. 색 체계가 뷰마다 다르므로 반드시 넘겨야 한다 (아래 참고). */
+  dayTone: boolean;
 };
 
-/** 그리드에 놓을 수 없는 예약을 드러내는 스트립. 절대 조용히 버리지 않는다. */
-function OffGridStrip({ title, hint, bookings, selectedId, onSelect }: OffGridStripProps) {
+/**
+ * 그리드에 놓을 수 없는 예약을 드러내는 스트립. 절대 조용히 버리지 않는다.
+ *
+ * 칩 색은 **위 격자와 같은 뜻이어야** 한다. 주간 뷰는 예약 단위 색(COLOR_CLASS)을
+ * 쓰지만 일간 시트는 그 체계를 무의미하다고 선언했으므로(tone.ts) 같은 스트립이라도
+ * 일간에서는 daySurfaceClass 를 쓴다 — 안 그러면 gold 회원 예약이 스트립에서만
+ * 게스트 노랑(#ffd400)으로 보여 읽는 사람이 색의 의미를 알 수 없다.
+ */
+function OffGridStrip({ title, hint, bookings, selectedId, onSelect, dayTone }: OffGridStripProps) {
   if (bookings.length === 0) return null;
   return (
     <section className="mt-3 rounded border border-[#d6d6dc] bg-white p-3 text-xs">
@@ -563,7 +1013,7 @@ function OffGridStrip({ title, hint, bookings, selectedId, onSelect }: OffGridSt
               onClick={() => onSelect(booking.id)}
               aria-pressed={booking.id === selectedId}
               className={`flex items-center gap-2 rounded-sm border border-[#d6d6dc] px-2 py-1 text-left text-[11px] ${FOCUS_RING} ${
-                COLOR_CLASS[booking.color]
+                dayTone ? daySurfaceClass(booking) : COLOR_CLASS[booking.color]
               } ${isDead(booking) ? "line-through opacity-60" : ""} ${
                 booking.id === selectedId ? "ring-2 ring-[#111315]" : ""
               }`}

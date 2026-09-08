@@ -744,7 +744,7 @@ export default function OrchestrationPanel({ controller }: OrchestrationPanelPro
         onClick={toggleOpen}
         aria-expanded={open}
         aria-controls={open ? bodyId : undefined}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#f7f7f9]"
+        className="flex min-h-11 w-full items-center gap-2 px-3 text-left hover:bg-[#f7f7f9] lg:min-h-0 lg:py-2"
       >
         <span aria-hidden="true" className="text-[#4e5560]">
           {open ? "▾" : "▸"}

@@ -20,7 +20,7 @@ import tempfile
 import threading
 from contextlib import contextmanager
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 from uuid import uuid4
@@ -33,6 +33,7 @@ __all__ = [
     "mutate",
     "reset",
     "seed_bookings",
+    "split_name",
 ]
 
 ENV_VAR = "TEE_SHEET_DATA_FILE"
@@ -63,9 +64,31 @@ def _iso_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def split_name(name: str) -> tuple[str, str]:
+    """전체 이름을 (firstName, lastName) 으로 쪼갠다. **성은 마지막 토큰**이다.
+
+    이름은 토큰이 두 개라는 보장이 없다. 마지막 공백을 기준으로 자른다.
+
+        "Marie Predote"      -> ("Marie", "Predote")
+        "Betty Lou DiMattio" -> ("Betty Lou", "DiMattio")   # 성은 "DiMattio"
+        "Guest"              -> ("Guest", "")               # ("", "Guest") 가 아니다
+
+    프론트는 셀을 `${lastName}, ${firstName}` 로 그린다. 여기서 틀리면
+    시트에 "Lou DiMattio, Betty" 처럼 잘못된 성이 찍힌다.
+
+    `backend/api/routes/tee_sheet.py` 의 `_split_name` 이 이 함수를 그대로 쓴다.
+    시드와 API 가 서로 다르게 쪼개면 안 되므로 구현은 여기 하나뿐이다.
+    """
+    head, sep, tail = name.strip().rpartition(" ")
+    if not sep:
+        # 토큰이 하나뿐. rpartition 은 ("", "", "Guest") 를 돌려주므로
+        # 그대로 쓰면 성/이름이 뒤집힌다.
+        return name.strip(), ""
+    return head.strip(), tail.strip()
+
+
 def _player(name: str, rate_plan: str, existing: bool = True) -> dict[str, Any]:
-    first, _, last = name.partition(" ")
-    first, last = first.strip(), last.strip()
+    first, last = split_name(name)
     return {
         "id": str(uuid4()),
         "name": f"{first} {last}".strip(),
@@ -96,19 +119,21 @@ def _booking(
     cart_count: int,
     players: list[dict[str, Any]],
     audit_message: str,
+    holes: int = 18,
+    notes: str = "",
 ) -> dict[str, Any]:
     return {
         "id": booking_id,
         "date": date,
         "time": time,
-        "holes": 18,
+        "holes": holes,
         "rate": rate,
         "span": 1,
         "color": color,
         "title": title,
         "status": "reserved",
         "cartCount": cart_count,
-        "notes": "",
+        "notes": notes,
         "players": players,
         "audit": [{"id": str(uuid4()), "ts": _NOW_ISO, "message": audit_message}],
         "cancelReason": None,
@@ -120,135 +145,155 @@ def _booking(
 _WEEKDAY_CART = "Weekday Member - Single with Weekday Cart"
 _WEEKDAY_SINGLE = "Weekday Member - Single"
 _FULL_7DAY = "Full Member - Single with 7 Day Cart"
+_GOLFNOW = "GolfNow"
 
-_SEP10 = "Imported from Chronogolf tee sheet for September 10, 2026."
-_SEP11 = "Imported from visible Chronogolf tee sheet for September 11, 2026."
+_SEP08 = "Imported from the Chronogolf tee sheet for September 8, 2026."
+
+_SEED_DATE = "2026-09-08"          # 화요일
+_SEED_RATE = 47.79                 # 평일 요금
+_GOLFNOW_NOTE = "Booked through GolfNow — confirm payment at check-in."
+
+
+def _stamp_booking_order(bookings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """예약 목록에 "만들어진 순서"를 1분 간격 createdAt 으로 찍는다.
+
+    티 시트 격자는 한 티 타임 안에서 예약을 createdAt 순으로 왼쪽부터 앉힌다
+    (`bySeatOrder`). 시드가 모든 예약에 같은 타임스탬프를 쓰면 그 정렬 키가 무의미해져
+    id 알파벳순이라는 엉뚱한 기준이 자리를 정한다 — 실제로 7:43 AM 에서 b-carlsson 이
+    b-unrau 앞에 앉아, 클론 대상 스크린샷과 좌우가 뒤집혔다.
+
+    그래서 시드 리스트의 순서 = 예약이 들어온 순서로 보고 그대로 타임스탬프에 새긴다.
+    """
+    for index, booking in enumerate(bookings):
+        stamped = _iso_at_offset(index)
+        booking["createdAt"] = stamped
+        booking["updatedAt"] = stamped
+        for entry in booking["audit"]:
+            entry["ts"] = stamped
+    return bookings
+
+
+def _iso_at_offset(minutes: int) -> str:
+    """_NOW_ISO 로부터 `minutes` 분 뒤의 ISO 타임스탬프."""
+    base = datetime.fromisoformat(_NOW_ISO)
+    return (base + timedelta(minutes=minutes)).isoformat()
 
 
 def seed_bookings() -> list[dict[str, Any]]:
-    """최초 1회 파일에 심는 예약 목록 (Chronogolf 실측 데이터)."""
-    return [
+    """최초 1회 파일에 심는 예약 목록.
+
+    클론 대상 Chronogolf 스크린샷 그대로: 2026-09-08 (화) 하루치.
+    7:43 AM 과 7:52 AM 은 예약이 **두 건씩** 있고 합계가 정확히 4명이다.
+    (회원 예약 + GolfNow 온라인 예약이 같은 티 타임을 나눠 갖는 실제 케이스)
+    """
+    return _stamp_booking_order(
+[
         _booking(
-            "b-predote", "2026-09-10", "6:58 AM", "gold", "Predote, Marie", 47.79, 2,
+            "b-predote", _SEED_DATE, "6:58 AM", "gold", "Predote, Marie", _SEED_RATE, 2,
             [
                 _player("Marie Predote", _WEEKDAY_CART),
                 _player("Betty Lou DiMattio", _WEEKDAY_CART),
                 _player("Roseann Norton", _WEEKDAY_CART),
                 _player("Steve Murphy", _FULL_7DAY),
             ],
-            _SEP10,
+            _SEP08,
         ),
         _booking(
-            "b-wheeland", "2026-09-10", "7:07 AM", "blue", "Wheeland, Bryan", 47.79, 0,
+            "b-wheeland", _SEED_DATE, "7:07 AM", "gold", "Wheeland, Alf", _SEED_RATE, 0,
             [
-                _player("Bryan Wheeland", _WEEKDAY_SINGLE),
                 _player("Alf Wheeland", _WEEKDAY_CART),
                 _player("Colin Scott", _WEEKDAY_SINGLE),
                 _player("David Neville", _WEEKDAY_CART),
             ],
-            _SEP10,
+            _SEP08,
         ),
         _booking(
-            "b-marshall", "2026-09-10", "7:16 AM", "gold", "Marshall, Dan", 47.79, 1,
+            "b-marshall", _SEED_DATE, "7:16 AM", "gold", "Marshall, Dan", _SEED_RATE, 0,
             [
                 _player("Dan Marshall", _WEEKDAY_SINGLE),
-                _player("Leslie Reid", _WEEKDAY_SINGLE),
-                _player("Joe Grdovich", _WEEKDAY_SINGLE),
                 _player("Peter Catti", _WEEKDAY_SINGLE),
+                _player("Joe Grdovich", _WEEKDAY_SINGLE),
+                _player("Leslie Reid", _WEEKDAY_SINGLE),
             ],
-            _SEP10,
+            _SEP08,
         ),
         _booking(
-            "b-nicalou", "2026-09-10", "7:25 AM", "blue", "Nicalou, Chris", 47.79, 1,
+            "b-nicalou", _SEED_DATE, "7:25 AM", "gold", "Nicalou, Chris", _SEED_RATE, 1,
             [
                 _player("Chris Nicalou", _FULL_7DAY),
                 _player("Triada Nicolou", _FULL_7DAY),
             ],
-            _SEP10,
+            _SEP08,
         ),
         _booking(
-            "b-carlsson", "2026-09-10", "8:01 AM", "gold", "Carlsson, James", 47.79, 0,
-            [
-                _player("James Carlsson", "GolfNow"),
-                _guest("GolfNow"),
-                _guest("GolfNow"),
-            ],
-            _SEP10,
-        ),
-        _booking(
-            "b-costea", "2026-09-10", "8:10 AM", "blue", "Costea, Rick", 47.79, 2,
-            [
-                _player("Rick Costea", _WEEKDAY_SINGLE),
-                _player("Rudy Videchak", _WEEKDAY_SINGLE),
-                _player("Roger Denis", _WEEKDAY_SINGLE),
-            ],
-            _SEP10,
-        ),
-        _booking(
-            "b-sep11-predote", "2026-09-11", "6:58 AM", "gold", "Predote, Marie", 58.41, 2,
-            [
-                _player("Marie Predote", _WEEKDAY_CART),
-                _player("Roseann Norton", _WEEKDAY_CART),
-                _player("Betty Lou DiMattio", _WEEKDAY_CART),
-                _player("Steve Murphy", _FULL_7DAY),
-            ],
-            _SEP11,
-        ),
-        _booking(
-            "b-sep11-marshall", "2026-09-11", "7:07 AM", "blue", "Marshall, Dan", 58.41, 1,
-            [
-                _player("Dan Marshall", _WEEKDAY_SINGLE),
-                _player("Colin Scott", _WEEKDAY_SINGLE),
-                _player("David Neville", _WEEKDAY_CART),
-                _guest("Public"),
-            ],
-            _SEP11,
-        ),
-        _booking(
-            "b-sep11-nicalou", "2026-09-11", "7:16 AM", "gold", "Nicalou, Chris", 58.41, 1,
-            [
-                _player("Chris Nicalou", _FULL_7DAY),
-                _player("Triada Nicolou", _FULL_7DAY),
-            ],
-            _SEP11,
-        ),
-        _booking(
-            "b-sep11-kicul", "2026-09-11", "7:25 AM", "blue", "Kicul, Marty", 58.41, 0,
+            "b-kicul", _SEED_DATE, "7:34 AM", "gold", "Kicul, Marty", _SEED_RATE, 0,
             [
                 _player("Marty Kicul", _WEEKDAY_SINGLE),
-                _player("Wayne Armstrong", _WEEKDAY_SINGLE),
                 _player("David Kaufmann", _WEEKDAY_SINGLE),
+                _player("Wayne Armstrong", _WEEKDAY_SINGLE),
+                _guest(_WEEKDAY_SINGLE),
             ],
-            _SEP11,
+            _SEP08,
         ),
+        # --- 7:43 AM: 회원 9홀 2인 + GolfNow 2인 = 4자리 ---
         _booking(
-            "b-sep11-buckley", "2026-09-11", "7:34 AM", "gold", "buckley, jami", 58.41, 2,
-            [
-                _player("Jami Buckley", "Public"),
-                _guest("Public"),
-                _guest("Public"),
-                _guest("Public"),
-            ],
-            _SEP11,
-        ),
-        _booking(
-            "b-sep11-unrau", "2026-09-11", "7:43 AM", "blue", "Unrau, Ruth", 58.41, 1,
+            "b-unrau", _SEED_DATE, "7:43 AM", "gold", "Unrau, Ruth", _SEED_RATE, 0,
             [
                 _player("Ruth Unrau", "Public Senior"),
                 _guest("Public Senior"),
             ],
-            _SEP11,
+            _SEP08,
+            holes=9,
         ),
         _booking(
-            "b-sep11-costea", "2026-09-11", "8:10 AM", "gold", "Costea, Rick", 58.41, 2,
+            "b-carlsson", _SEED_DATE, "7:43 AM", "blue", "Carlsson, James", _SEED_RATE, 0,
+            [
+                _player("James Carlsson", _GOLFNOW),
+                _guest(_GOLFNOW),
+            ],
+            _SEP08,
+            notes=_GOLFNOW_NOTE,
+        ),
+        # --- 7:52 AM: 회원 3인 + GolfNow 1인 = 4자리 ---
+        _booking(
+            "b-costea", _SEED_DATE, "7:52 AM", "gold", "Costea, Rick", _SEED_RATE, 2,
             [
                 _player("Rick Costea", _WEEKDAY_SINGLE),
                 _player("Rudy Videchak", _WEEKDAY_SINGLE),
                 _player("Roger Denis", _WEEKDAY_SINGLE),
             ],
-            _SEP11,
+            _SEP08,
         ),
-    ]
+        _booking(
+            "b-pattemore", _SEED_DATE, "7:52 AM", "blue", "Pattemore, Gregory", _SEED_RATE, 0,
+            [
+                _player("Gregory Pattemore", _GOLFNOW),
+            ],
+            _SEP08,
+            notes=_GOLFNOW_NOTE,
+        ),
+        _booking(
+            "b-hollingworth", _SEED_DATE, "8:01 AM", "gold", "hollingworth, Norm", _SEED_RATE, 0,
+            [
+                _player("Norm hollingworth", "Public"),
+                _guest("Public"),
+                _guest("Public"),
+                _guest("Public"),
+            ],
+            _SEP08,
+            holes=9,
+        ),
+        _booking(
+            "b-allison", _SEED_DATE, "8:10 AM", "gold", "Allison, Glenn", _SEED_RATE, 0,
+            [
+                _player("Glenn Allison", _WEEKDAY_CART),
+                _player("Wanda Allison", _WEEKDAY_CART),
+                _player("Paul McLean", _WEEKDAY_SINGLE),
+            ],
+            _SEP08,
+        ),
+        ]
+    )
 
 
 # ===== 파일 I/O ========================================================

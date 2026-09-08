@@ -37,18 +37,33 @@ function emptyPlayer(): PlayerDraft {
   return { firstName: "", lastName: "", email: "", phone: "", type: "Existing Customer", ratePlan: "" };
 }
 
-/** 해당 날짜에서 이미 잡혀 있는 슬롯 시각들. 취소된 예약은 슬롯을 막지 않는다. */
-function takenTimesFor(
+/** 한 티타임이 가진 좌석 수. 백엔드의 PLAYERS_PER_TEE_TIME 과 같은 값이어야 한다. */
+const SEATS_PER_TEE_TIME = 4;
+
+/**
+ * 해당 날짜의 "티타임별로 이미 찬 좌석 수". 취소된 예약은 좌석을 잡지 않는다.
+ *
+ * 예전에는 시각의 Set 이었다 — 한 티타임에 예약이 하나라도 있으면 통째로 막았다.
+ * 하지만 티타임은 예약 단위가 아니라 **좌석 4개 단위**다 (Chronogolf 도 그렇고,
+ * 백엔드의 require_tee_time_capacity 도 그렇다). 2인 멤버 그룹이 잡힌 7:43 에
+ * 2인 온라인 예약이 더 붙는 것은 정상이므로, 남은 좌석으로 판정해야 한다.
+ */
+function seatsTakenFor(
   bookings: TeeSheetController["bookings"],
   date: string,
-): Set<string> {
-  const taken = new Set<string>();
+): Map<string, number> {
+  const seats = new Map<string, number>();
   for (const booking of bookings) {
     if (booking.date !== date) continue;
     if (booking.status === "cancelled") continue;
-    taken.add(booking.time);
+    seats.set(booking.time, (seats.get(booking.time) ?? 0) + booking.players.length);
   }
-  return taken;
+  return seats;
+}
+
+/** 그 티타임에 아직 남은 좌석 수 (0 이면 꽉 참). */
+function seatsFree(seats: Map<string, number>, time: string): number {
+  return Math.max(0, SEATS_PER_TEE_TIME - (seats.get(time) ?? 0));
 }
 
 export default function BookingDialog({ open, controller, initial, onClose }: BookingDialogProps) {
@@ -88,9 +103,9 @@ export default function BookingDialog({ open, controller, initial, onClose }: Bo
 
     const seedDate = initialDate ?? focusedDate;
     setDate(seedDate);
-    // WeekGrid가 이미 찬 슬롯을 넘겨줄 수도 있으므로 시드 단계에서 걸러낸다.
-    const taken = takenTimesFor(bookings, seedDate);
-    setTime(initialTime && !taken.has(initialTime) ? initialTime : "");
+    // WeekGrid가 이미 꽉 찬 슬롯을 넘겨줄 수도 있으므로 시드 단계에서 걸러낸다.
+    const seats = seatsTakenFor(bookings, seedDate);
+    setTime(initialTime && seatsFree(seats, initialTime) > 0 ? initialTime : "");
     setHoles(18);
     setRateInput("");
     setRateTouched(false);
@@ -155,7 +170,7 @@ export default function BookingDialog({ open, controller, initial, onClose }: Bo
     };
   }, [open]);
 
-  const taken = useMemo(() => takenTimesFor(bookings, date), [bookings, date]);
+  const seatsTaken = useMemo(() => seatsTakenFor(bookings, date), [bookings, date]);
 
   const selectedSlot = useMemo(() => slots.find((slot) => slot.time === time) ?? null, [slots, time]);
 
@@ -196,7 +211,9 @@ export default function BookingDialog({ open, controller, initial, onClose }: Bo
     players.length >= 1 &&
     players.length <= 4 &&
     players.every((player) => player.firstName.trim() !== "" || player.lastName.trim() !== "");
-  const timeValid = time !== "" && selectedSlot !== null && !taken.has(time);
+  // 남은 좌석 판정은 인원 수에 달려 있다 — 1인은 들어가지만 3인은 못 들어가는 티타임이 있다.
+  const freeSeats = time === "" ? SEATS_PER_TEE_TIME : seatsFree(seatsTaken, time);
+  const timeValid = time !== "" && selectedSlot !== null && players.length <= freeSeats;
   const canSubmit =
     !busy &&
     date !== "" &&
@@ -298,11 +315,17 @@ export default function BookingDialog({ open, controller, initial, onClose }: Bo
                     <>
                       <option value="">Select a tee time…</option>
                       {slots.map((slot) => {
-                        const isTaken = taken.has(slot.time);
+                        // 꽉 찬 슬롯만 비활성화한다. 일부만 찬 슬롯은 남은 좌석을 알려 주고
+                        // 고를 수 있게 둔다 — 그것이 분할 예약이 생기는 정상 경로다.
+                        const free = seatsFree(seatsTaken, slot.time);
                         return (
-                          <option disabled={isTaken} key={slot.time} value={slot.time}>
+                          <option disabled={free === 0} key={slot.time} value={slot.time}>
                             {slot.time} · {money(slot.rate)}
-                            {isTaken ? " · taken" : ""}
+                            {free === 0
+                              ? " · full"
+                              : free < SEATS_PER_TEE_TIME
+                                ? ` · ${free} of ${SEATS_PER_TEE_TIME} seats left`
+                                : ""}
                           </option>
                         );
                       })}
@@ -463,9 +486,11 @@ export default function BookingDialog({ open, controller, initial, onClose }: Bo
               ))}
             </div>
 
-            {time !== "" && taken.has(time) ? (
+            {time !== "" && players.length > freeSeats ? (
               <p className="text-xs font-semibold text-[#8a3f26]">
-                That tee time is already booked. Pick another slot.
+                {freeSeats === 0
+                  ? `${time} is full — all ${SEATS_PER_TEE_TIME} seats are taken. Pick another tee time.`
+                  : `${time} has only ${freeSeats} of ${SEATS_PER_TEE_TIME} seats left, but you are booking ${players.length} players. Remove a player or pick another tee time.`}
               </p>
             ) : null}
           </div>

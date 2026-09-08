@@ -135,7 +135,19 @@ const FALLBACK_WEEK = weekDatesFor(todayIso());
 const FALLBACK_TODAY = todayIso();
 const FALLBACK_OTHER_DAY = FALLBACK_WEEK[2] ?? FALLBACK_TODAY;
 
-/** 마지막 성공 응답이 없을 때 사용하는 번들 시드. */
+/**
+ * 마지막 성공 응답이 없을 때 사용하는 번들 시드 — 서버 시드(Chronogolf 스크린샷 날)의
+ * **부분집합**이다. 이름·요금제·요금(47.79)을 서버와 맞춰 두는 이유: 오프라인 화면이
+ * 온라인 화면과 다른 사실을 주장하면 프런트 데스크가 어느 쪽을 믿어야 할지 모른다.
+ *
+ * `color` 는 여기서 **판매 채널**을 뜻한다. tone.ts 의 1순위 규칙이
+ * `booking.color === "blue"` → "online" 이고 이게 플레이어 단위 규칙보다 위에 있으므로,
+ * "blue" 는 GolfNow 같은 외부 온라인 채널 예약에만 붙인다. 회원 예약에 blue 를 달면
+ * 일간 시트가 그 예약을 온라인 예약이라고 **틀리게** 말한다.
+ *
+ * 7:43 / 7:52 는 한 티타임을 예약 둘이 나눠 쓰는 행이다(서버 시드와 동일) —
+ * 오프라인에서도 "한 행에 세그먼트 둘" 경로가 실제로 그려지도록 일부러 남긴다.
+ */
 const FALLBACK_BOOKINGS: TeeBooking[] = [
   makeFallbackBooking({
     date: FALLBACK_TODAY,
@@ -145,6 +157,7 @@ const FALLBACK_BOOKINGS: TeeBooking[] = [
     cartCount: 2,
     players: [
       { name: "Marie Predote", type: "Existing Customer", ratePlan: "Weekday Member - Single with Weekday Cart" },
+      { name: "Betty Lou DiMattio", type: "Existing Customer", ratePlan: "Weekday Member - Single with Weekday Cart" },
       { name: "Roseann Norton", type: "Existing Customer", ratePlan: "Weekday Member - Single with Weekday Cart" },
       { name: "Steve Murphy", type: "Existing Customer", ratePlan: "Full Member - Single with 7 Day Cart" },
     ],
@@ -152,12 +165,13 @@ const FALLBACK_BOOKINGS: TeeBooking[] = [
   makeFallbackBooking({
     date: FALLBACK_TODAY,
     time: "7:07 AM",
-    title: "Wheeland, Bryan",
-    color: "blue",
-    cartCount: 0,
+    title: "Wheeland, Alf",
+    color: "gold",
+    cartCount: 1,
     players: [
-      { name: "Bryan Wheeland", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
+      { name: "Alf Wheeland", type: "Existing Customer", ratePlan: "Weekday Member - Single with Weekday Cart" },
       { name: "Colin Scott", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
+      { name: "David Neville", type: "Existing Customer", ratePlan: "Weekday Member - Single with Weekday Cart" },
     ],
   }),
   makeFallbackBooking({
@@ -171,27 +185,62 @@ const FALLBACK_BOOKINGS: TeeBooking[] = [
       { name: "Triada Nicolou", type: "Existing Customer", ratePlan: "Full Member - Single with 7 Day Cart" },
     ],
   }),
+  // ---- 7:43 AM: 티타임 하나를 예약 둘이 나눠 쓴다 (2 + 2 = 정원 4) ----
   makeFallbackBooking({
-    date: FALLBACK_OTHER_DAY,
-    time: "7:16 AM",
-    title: "Marshall, Dan",
-    color: "blue",
+    date: FALLBACK_TODAY,
+    time: "7:43 AM",
+    title: "Unrau, Ruth",
+    color: "gold",
     cartCount: 1,
     players: [
-      { name: "Dan Marshall", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
-      { name: "Leslie Reid", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
-      { name: "Joe Grdovich", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
+      { name: "Ruth Unrau", type: "Existing Customer", ratePlan: "Public Senior" },
+      { name: "Guest", type: "Guest", ratePlan: "Public Senior" },
     ],
   }),
   makeFallbackBooking({
-    date: FALLBACK_OTHER_DAY,
-    time: "8:01 AM",
+    date: FALLBACK_TODAY,
+    time: "7:43 AM",
     title: "Carlsson, James",
-    color: "gold",
+    color: "blue", // GolfNow — 이 시드에서 blue 가 붙는 유일한 이유.
     cartCount: 0,
     players: [
       { name: "James Carlsson", type: "Existing Customer", ratePlan: "GolfNow" },
       { name: "Guest", type: "Guest", ratePlan: "GolfNow" },
+    ],
+  }),
+  // ---- 7:52 AM: 두 번째 분할 티타임 (3 + 1 = 정원 4) ----
+  makeFallbackBooking({
+    date: FALLBACK_TODAY,
+    time: "7:52 AM",
+    title: "Costea, Rick",
+    color: "gold",
+    cartCount: 1,
+    players: [
+      { name: "Rick Costea", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
+      { name: "Rudy Videchak", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
+      { name: "Roger Denis", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
+    ],
+  }),
+  makeFallbackBooking({
+    date: FALLBACK_TODAY,
+    time: "7:52 AM",
+    title: "Pattemore, Gregory",
+    color: "blue", // GolfNow.
+    cartCount: 0,
+    players: [{ name: "Gregory Pattemore", type: "Existing Customer", ratePlan: "GolfNow" }],
+  }),
+  // 다른 날 한 건 — 일간 뷰의 "Other days this week" 스트립 경로를 살려 둔다.
+  makeFallbackBooking({
+    date: FALLBACK_OTHER_DAY,
+    time: "7:16 AM",
+    title: "Marshall, Dan",
+    color: "gold",
+    cartCount: 1,
+    players: [
+      { name: "Dan Marshall", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
+      { name: "Peter Catti", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
+      { name: "Joe Grdovich", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
+      { name: "Leslie Reid", type: "Existing Customer", ratePlan: "Weekday Member - Single" },
     ],
   }),
 ];
@@ -272,7 +321,7 @@ export function useTeeSheet(): TeeSheetController {
   const [bookings, setBookings] = useState<TeeBooking[]>([]);
   const [slots, setSlots] = useState<TeeSlot[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [view, setViewState] = useState<ViewMode>("week");
+  const [view, setViewState] = useState<ViewMode>("day"); // 기본은 일 단위 시트 — Chronogolf 화면이 day sheet다.
   const [focusedDate, setFocusedDateState] = useState<string>(() => todayIso());
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [message, setMessage] = useState<string>("Connecting to the tee sheet service…");

@@ -37,15 +37,16 @@ FIRST_TEE_MINUTES = 6 * 60 + 40      # 06:40
 LAST_TEE_MINUTES = 18 * 60           # 18:00 (경계 포함; 9분 격자에는 안 걸린다)
 SLOT_INTERVAL_MINUTES = 9
 CARTS_PER_SLOT = 4
+# 하나의 티 타임은 플레이어 4자리다. 이 4자리는 **여러 예약이 나눠 가질 수 있다**
+# (예: 7:43 AM 에 회원 2인 예약 + GolfNow 온라인 2인 예약). Chronogolf 와 동일한 규칙.
+PLAYERS_PER_TEE_TIME = 4
 
 WEEKDAY_RATE = 47.79
 WEEKEND_RATE = 58.41
 
-# 특정 날짜 강제 요금 (공휴일 / 이벤트 / 시드 데이터 보존용).
-# 2026-09-11 은 금요일이지만 시드 데이터가 58.41 이므로 오버라이드로 유지한다.
-RATE_OVERRIDES: dict[str, float] = {
-    "2026-09-11": 58.41,
-}
+# 특정 날짜 강제 요금 (공휴일 / 이벤트 / 단체 행사용).
+# 지금은 비어 있다. 날짜를 넣으면 주말/평일 판정보다 우선한다.
+RATE_OVERRIDES: dict[str, float] = {}
 
 ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 SLOT_TIME_RE = re.compile(r"^\d{1,2}:\d{2} (AM|PM)$")
@@ -77,9 +78,13 @@ class TaskState(str, Enum):
 
 
 def _split_name(name: str) -> tuple[str, str]:
-    """"Betty Lou DiMattio" -> ("Betty", "Lou DiMattio"), "Guest" -> ("Guest", "")."""
-    first, _, last = name.strip().partition(" ")
-    return first.strip(), last.strip()
+    """성은 **마지막 토큰**이다. 구현은 `store.split_name` 하나뿐 (시드와 동일해야 한다).
+
+    "Marie Predote" -> ("Marie", "Predote")
+    "Betty Lou DiMattio" -> ("Betty Lou", "DiMattio")
+    "Guest" -> ("Guest", "")
+    """
+    return store.split_name(name)
 
 
 class Player(BaseModel):
@@ -408,17 +413,43 @@ def _audit(booking: TeeBooking, message: str) -> None:
     booking.updatedAt = datetime.now(timezone.utc)
 
 
-def require_free_slot(
+def tee_time_players(
     bookings: list[TeeBooking], iso_date: str, time_label: str, exclude_id: str | None = None
+) -> int:
+    """해당 티 타임이 이미 잡아먹은 플레이어 자리 수.
+
+    취소된 예약은 자리를 잡지 않는다 (취소 후 그 자리는 다시 팔 수 있어야 한다).
+    """
+    return sum(
+        len(other.players)
+        for other in bookings
+        if other.id != exclude_id
+        and other.date == iso_date
+        and other.time == time_label
+        and other.status != BookingStatus.CANCELLED
+    )
+
+
+def require_tee_time_capacity(
+    bookings: list[TeeBooking],
+    iso_date: str,
+    time_label: str,
+    incoming: int,
+    exclude_id: str | None = None,
 ) -> None:
-    for other in bookings:
-        if other.id == exclude_id:
-            continue
-        if other.date == iso_date and other.time == time_label:
-            raise HTTPException(
-                status_code=409,
-                detail=f"{time_label} on {iso_date} is already booked by '{other.title}'",
-            )
+    """티 타임 정원(4명) 검사. 절대 아무것도 변경하지 않는다 (읽기 전용).
+
+    한 티 타임에 예약이 몇 건이든 상관없다. 합계 인원만 4명을 넘지 않으면 된다.
+    """
+    taken = tee_time_players(bookings, iso_date, time_label, exclude_id)
+    if taken + incoming > PLAYERS_PER_TEE_TIME:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{time_label} on {iso_date} only holds {PLAYERS_PER_TEE_TIME} players; "
+                f"{taken} are already taken and {incoming} more were requested"
+            ),
+        )
 
 
 # ===== 슬롯 엔드포인트 =================================================
@@ -466,7 +497,8 @@ def create_booking(body: CreateBookingRequest) -> TeeBooking:
     time_label = body.time.strip()
 
     with bookings_tx() as bookings:
-        require_free_slot(bookings, body.date, time_label)
+        # 생성 엔드포인트는 기본 플레이어를 만들지 않는다. 요청에 실려 온 인원이 곧 정원 소비량.
+        require_tee_time_capacity(bookings, body.date, time_label, incoming=len(body.players))
         booking = TeeBooking(
             date=body.date,
             time=time_label,
@@ -543,7 +575,14 @@ def patch_booking(booking_id: str, body: PatchBookingRequest) -> TeeBooking:
             new_time = (fields.get("time") or booking.time).strip()
             require_slot(new_date, new_time)
             if new_date != booking.date or new_time != booking.time:
-                require_free_slot(bookings, new_date, new_time, exclude_id=booking.id)
+                # 취소된 예약은 어디에서도 자리를 잡지 않는다 (`tee_time_players` 가 제외한다).
+                # 따라서 옮기는 것만으로는 목적지 정원을 한 자리도 먹지 않는다.
+                # 되살릴 때 아래 status 게이트가 (이동 후의) 목적지 정원을 다시 검사한다.
+                if booking.status != BookingStatus.CANCELLED:
+                    require_tee_time_capacity(
+                        bookings, new_date, new_time,
+                        incoming=len(booking.players), exclude_id=booking.id,
+                    )
                 booking.date = new_date
                 booking.time = new_time
                 _audit(booking, f"Moved to {new_date} {new_time}.")
@@ -578,6 +617,13 @@ def patch_booking(booking_id: str, body: PatchBookingRequest) -> TeeBooking:
 
         if "status" in fields and fields["status"] is not None:
             status = BookingStatus(fields["status"])
+            # 취소된 예약은 정원을 차지하지 않으므로 그 사이 자리가 다른 예약에 팔릴 수 있다.
+            # 되살릴 때는 자리가 아직 남아 있는지 반드시 다시 확인해야 한다.
+            if booking.status == BookingStatus.CANCELLED and status != BookingStatus.CANCELLED:
+                require_tee_time_capacity(
+                    bookings, booking.date, booking.time,
+                    incoming=len(booking.players), exclude_id=booking.id,
+                )
             message = _apply_status(booking, status, fields.get("cancelReason"))
             _audit(booking, message)
         elif "cancelReason" in fields:
@@ -601,8 +647,18 @@ def delete_booking(booking_id: str) -> None:
 def add_player(booking_id: str, body: AddPlayerRequest) -> TeeBooking:
     with bookings_tx() as bookings:
         booking = _find(bookings, booking_id)
-        if len(booking.players) >= 4:
+        # 두 개의 서로 다른 한계를 구분한다.
+        # 1) 예약 하나가 담을 수 있는 인원 = 4 -> 422 (요청 자체가 모델 제약 위반)
+        # 2) 티 타임 전체가 담을 수 있는 인원 = 4 -> 409 (다른 예약과의 자원 충돌)
+        # 순서가 중요하다: 둘 다 걸리는 예약(4명짜리 꽉 찬 티 타임)은 422 를 돌려준다.
+        if len(booking.players) >= PLAYERS_PER_TEE_TIME:
             raise HTTPException(status_code=422, detail="A tee time can contain at most 4 players")
+        # 취소된 예약은 자리를 잡지 않으므로 (2) 를 물어볼 이유가 없다. 물어보면
+        # "취소된 예약에 사람을 더할 수 있는가" 가 **무관한 다른 예약**의 인원수에 좌우된다.
+        # 되살릴 때 PATCH status 게이트가 정원을 다시 검사하므로 넘칠 길은 없다.
+        if booking.status != BookingStatus.CANCELLED:
+            # exclude_id 를 주지 않는다: taken 에 이 예약의 인원이 이미 포함돼야 incoming=1 이 맞다.
+            require_tee_time_capacity(bookings, booking.date, booking.time, incoming=1)
         payload = body.model_dump(exclude_none=True)
         player = Player.model_validate(payload)
         booking.players.append(player)
