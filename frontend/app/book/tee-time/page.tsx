@@ -8,8 +8,9 @@
  * 하나만 본다. 그래서 여기에는 격자도 사이드바도 없고, 날짜 → 인원 → 시간 →
  * 이름 네 걸음뿐이다.
  *
- * 가용성 계산(취소 제외 / blocked 숨김 / 지난 시각 숨김)은
- * `components/booking/availability.ts` 가 맡는다 — 이 파일은 화면만 그린다.
+ * 가용성 계산(취소 제외 / blocked 숨김 / 지난 시각 숨김)과 정원 검사는 Supabase 함수
+ * `pelham_tee_availability` / `pelham_tee_book` 이 맡는다(`lib/booking/rpc.ts`).
+ * 다른 손님의 예약 행은 이 화면에 오지 않는다 — 남은 자리 수만 온다.
  */
 
 import Link from "next/link";
@@ -21,7 +22,6 @@ import {
   DAY_PART_LABEL,
   type DayPartFilter,
   type OpenTeeTime,
-  buildOpenTeeTimes,
   dayPartOf,
   describeFailure,
   formatChipDate,
@@ -30,15 +30,17 @@ import {
   todayIso,
   upcomingDates,
 } from "@/components/booking/availability";
-import { NO_API_MESSAGE, apiBaseUrl } from "@/lib/apiHost";
+import { NO_API_MESSAGE } from "@/lib/apiHost";
+import { bookingConfigured, bookingRpc } from "@/lib/booking/rpc";
 import { CLUB, bookNav, lookupHref } from "@/lib/nav";
-import { teeSheetApi } from "@/lib/teeSheet/api";
 import type { TeeBooking } from "@/lib/teeSheet/types";
 
 /** 오늘부터 2주. 그 너머는 프로 샵이 요금·행사를 아직 확정하지 않은 구간이다. */
 const DAYS_AHEAD = 14;
 const PARTY_SIZES = [1, 2, 3, 4] as const;
 const DAY_PARTS: DayPartFilter[] = ["all", "morning", "afternoon", "evening"];
+/** 음성 예약 서버(Fly)가 다시 켜지면 true 로. */
+const VOICE_BOOKING_ENABLED = false;
 
 export default function TeeTimeBookingPage() {
   // `null` 은 "아직 모름"(마운트 전), `false` 는 "이 사이트엔 예약 서버가 없다".
@@ -61,7 +63,7 @@ export default function TeeTimeBookingPage() {
   const dates = useMemo(() => upcomingDates(DAYS_AHEAD), []);
 
   useEffect(() => {
-    setApiReady(Boolean(apiBaseUrl()));
+    setApiReady(bookingConfigured());
   }, []);
 
   useEffect(() => {
@@ -71,12 +73,10 @@ export default function TeeTimeBookingPage() {
     setLoading(true);
     setLoadError("");
 
-    // 슬롯과 예약을 함께 가져와 겹친다. 백엔드에 "예약 가능 시간" 엔드포인트가
-    // 없기 때문이고, 두 요청은 서로를 기다릴 이유가 없다.
-    Promise.all([teeSheetApi.getSlots(date), teeSheetApi.listBookings({ date })])
-      .then(([slotsResponse, bookings]) => {
+    bookingRpc<{ date: string; times: OpenTeeTime[] }>("pelham_tee_availability", { p_date: date })
+      .then((response) => {
         if (cancelled) return;
-        setOpenTimes(buildOpenTeeTimes(slotsResponse.slots, bookings, date));
+        setOpenTimes(response.times);
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -160,8 +160,10 @@ export default function TeeTimeBookingPage() {
     >
       {/* 말로 하는 입구. 폼을 대신하는 게 아니라 **옆에** 둔다 — 마이크를 못 쓰거나
           조용한 곳에 있는 손님에게는 아래 폼이 여전히 유일한 길이다.
-          예약 서버가 없는 배포에서는 음성도 어차피 불가능하므로 아예 그리지 않는다. */}
-      {apiReady === true ? (
+          예약 서버가 없는 배포에서는 음성도 어차피 불가능하므로 아예 그리지 않는다.
+          지금은 꺼 둔다: 음성은 ElevenLabs 키를 든 FastAPI(`/voice/session`)가 있어야 하는데
+          그 서버(Fly)가 멈췄다. 누르면 "쓸 수 없음" 만 뜨는 버튼을 손님에게 보이지 않는다. */}
+      {apiReady === true && VOICE_BOOKING_ENABLED ? (
         <div className="mb-6">
           <VoiceBooking onFinished={refresh} />
         </div>
@@ -453,33 +455,22 @@ function BookingForm({
     setError("");
     try {
       const [firstName, lastName] = splitName(name);
-      const booking = await teeSheetApi.createBooking({
-        date,
-        time: slot.time,
-        // `title` 은 서버 기본값이 없는 필수 필드다 — 비우면 422 다. 어드민 격자에
-        // 이 문자열이 그대로 찍히므로 예약자 이름을 쓴다.
-        title: `${firstName} ${lastName}`.trim(),
-        holes,
-        // `rate` 는 보내지 않는다. 서버가 그날의 슬롯 요금을 매긴다. 화면에 굳어 있던
-        // 값을 보내면 프로 샵이 요금을 바꾼 날 손님이 옛 가격으로 예약해 버린다.
-        cartCount: carts,
-        notes: notes.trim()
-          ? `${notes.trim()}\n\nBooked online at pelhamhills.com.`
-          : "Booked online at pelhamhills.com.",
-        // **인원 = 플레이어 객체 수.** 서버의 정원 검사가 `incoming=len(body.players)`
-        // 라서 빈 배열로 보내면 자리를 하나도 잡지 않은 채 예약만 생긴다 —
-        // 같은 티타임이 몇 번이고 다시 팔린다.
-        players: Array.from({ length: size }, (_, index) =>
-          index === 0
-            ? {
-                firstName,
-                lastName,
-                email: email.trim(),
-                phone: phone.trim(),
-                type: "Guest" as const,
-              }
-            : { firstName: "Guest", lastName: "", type: "Guest" as const },
-        ),
+      // 요금은 보내지 않는다 — 함수가 그날의 요금을 매긴다. `players` 수만큼 자리를
+      // 잡고, 첫 사람이 예약자, 나머지는 Guest 로 만든다. 예약 노트 끝의
+      // "Booked online at pelhamhills.com." 도 함수가 붙인다.
+      const booking = await bookingRpc<TeeBooking>("pelham_tee_book", {
+        p: {
+          date,
+          time: slot.time,
+          holes,
+          cartCount: carts,
+          players: size,
+          firstName,
+          lastName,
+          email: email.trim(),
+          phone: phone.trim(),
+          notes: notes.trim(),
+        },
       });
       onBooked(booking);
     } catch (failure) {

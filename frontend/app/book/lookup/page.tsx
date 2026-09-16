@@ -10,7 +10,8 @@
  * 내용은 `LookupPanel` 로 빼고 이 페이지는 경계만 친다.
  *
  * ## 조회할 수 있는 것과 없는 것
- * 실내 골프(시뮬레이터)에는 `GET /simulator/reservations/{code}` 가 있다.
+ * 실내 골프(시뮬레이터)는 Supabase 함수 `pelham_sim_lookup` 으로 찾는다(`lib/booking/rpc.ts`).
+ * 코드가 맞는 예약 한 건만 돌아오고, 없으면 null 이다.
  * **티타임에는 조회 엔드포인트가 없다.** 예약 응답이 돌려주는 것은 UUID `id`
  * 뿐이고 확인 코드라는 개념 자체가 없다. 없는 기능을 있는 척 흉내내면 손님은
  * 코드를 계속 다시 쳐 보다가 포기한다. 그래서 UUID 모양이 들어오면 정직하게
@@ -23,13 +24,15 @@ import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } fr
 
 import BookingShell from "@/components/booking/BookingShell";
 import { formatLongDate } from "@/components/booking/availability";
-import { NO_API_MESSAGE, apiHost } from "@/lib/apiHost";
+import { NO_API_MESSAGE } from "@/lib/apiHost";
+import { bookingConfigured, bookingRpc } from "@/lib/booking/rpc";
+import { ApiError } from "@/lib/teeSheet/api";
 import { CLUB } from "@/lib/nav";
 
 export default function LookupPage() {
   return (
     <BookingShell
-      subtitle="Enter the confirmation code from your booking email."
+      subtitle="Enter the confirmation code you got when you booked."
       title="My Booking"
     >
       <Suspense fallback={<PanelSkeleton />}>
@@ -69,24 +72,12 @@ const SIM_CODE = /^[0-9a-f]{10}$/i;
 /** 티타임 예약이 돌려주는 것은 UUID `id` 하나뿐이다(확인 코드가 없다). */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** 실패를 한 문구로 뭉개지 않는다. 서버 `detail` 이 있으면 그걸 쓴다. */
-async function readError(response: Response, fallback: string): Promise<string> {
-  try {
-    const body = await response.json();
-    const detail = (body as { detail?: unknown })?.detail;
-    if (typeof detail === "string" && detail) return detail;
-  } catch {
-    // JSON 이 아닌 오류 본문 — 상태 줄로 대신한다.
-  }
-  return `${fallback} (${response.status} ${response.statusText})`;
-}
-
 /** 서버 주소는 문구에 넣지 않는다. 방문자에게 우리 호스트를 알려 줄 이유가 없다. */
 function networkMessage(err: unknown, action: string): string {
-  if (err instanceof TypeError) {
+  if ((err instanceof ApiError && err.status === 0) || err instanceof TypeError) {
     return `Could not reach the booking server. ${action} Please try again in a moment, or call ${CLUB.phone}.`;
   }
-  return err instanceof Error ? err.message : action;
+  return err instanceof Error && err.message ? err.message : action;
 }
 
 function LookupPanel() {
@@ -94,7 +85,8 @@ function LookupPanel() {
   const prefill = params.get("code") ?? "";
 
   const [code, setCode] = useState(prefill);
-  const [backendUrl, setBackendUrl] = useState<string | null>(null);
+  /** 온라인 조회를 열 수 있는가. `null` 은 "아직 모름"(마운트 전). */
+  const [bookingReady, setBookingReady] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   /** 티타임처럼 **조회 자체가 없는** 경우. 오류가 아니라 안내다. */
@@ -102,7 +94,7 @@ function LookupPanel() {
   const [found, setFound] = useState<SimulatorReservation | null>(null);
 
   useEffect(() => {
-    setBackendUrl(apiHost());
+    setBookingReady(bookingConfigured());
   }, []);
 
   const lookup = useCallback(
@@ -121,51 +113,48 @@ function LookupPanel() {
         return;
       }
 
-      if (!backendUrl) {
+      if (!bookingReady) {
         setError(NO_API_MESSAGE);
         return;
       }
 
       setLoading(true);
       try {
-        const response = await fetch(
-          `${backendUrl}/api/v1/simulator/reservations/${encodeURIComponent(wanted.toUpperCase())}`,
-        );
-        if (response.status === 404) {
+        const reservation = await bookingRpc<SimulatorReservation | null>("pelham_sim_lookup", {
+          p_code: wanted,
+        });
+        if (!reservation) {
           setError(
-            "We could not find a booking with that code. Check the code in your confirmation email, or call the pro shop.",
+            "We could not find a booking with that code. Check the code shown when you booked, or call the pro shop.",
           );
           return;
         }
-        if (!response.ok) {
-          throw new Error(await readError(response, "Your booking could not be loaded"));
-        }
-        setFound((await response.json()) as SimulatorReservation);
+        setFound(reservation);
       } catch (err) {
         setError(networkMessage(err, "Your booking could not be loaded."));
       } finally {
         setLoading(false);
       }
     },
-    [backendUrl],
+    [bookingReady],
   );
 
   // `?code=` 로 들어온 링크는 손님이 다시 누를 필요 없이 바로 찾아 준다.
-  // 백엔드 주소를 알게 된 뒤에 한 번만 돈다.
+  // 예약을 열 수 있는지 알게 된 뒤에 한 번만 돈다.
   //
   // `attempted` 가드가 없으면 같은 코드로 요청이 반복된다: `lookup` 은 진입하자마자
   // setState 를 여러 번 하고, 그 렌더로 `lookup` 자체가 다시 만들어지면 이 이펙트가
   // 또 돈다. 코드가 틀렸을 때(404) 특히 잘 드러난다 — 서버를 계속 두드린다.
   const attempted = useRef<string | null>(null);
   useEffect(() => {
-    if (backendUrl === null) return;
+    if (bookingReady === null) return;
     if (!prefill) return;
     if (attempted.current === prefill) return;
     attempted.current = prefill;
     void lookup(prefill);
-  }, [backendUrl, prefill, lookup]);
+  }, [bookingReady, prefill, lookup]);
 
-  const offline = backendUrl === "";
+  const offline = bookingReady === false;
 
   return (
     <div className="min-w-0">
@@ -191,7 +180,7 @@ function LookupPanel() {
           value={code}
         />
         <p className="mt-2 text-xs text-[#5c6459]">
-          Indoor golf codes are 10 characters and appear at the top of your confirmation email.
+          Indoor golf codes are 10 characters and are shown on screen when you book.
         </p>
 
         <button

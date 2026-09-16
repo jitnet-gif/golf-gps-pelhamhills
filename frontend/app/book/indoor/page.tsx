@@ -15,15 +15,17 @@
  * 3. "오늘" 을 현지 날짜로 계산한다. `toISOString()` 은 UTC 라 온타리오 저녁
  *    7시부터 내일이 오늘이 되어, 당일 예약이 통째로 사라졌다.
  *
- * 백엔드 주소는 계속 `apiHost()` 를 쓴다(`/api/v1/...` 를 직접 붙인다).
- * 티 시트용 `teeSheetApi` 는 이 라우터를 모른다.
+ * 가용성·예약은 Supabase 함수 `pelham_sim_availability` / `pelham_sim_reserve` 를
+ * `lib/booking/rpc.ts` 로 부른다. 예전 FastAPI 서버(Fly)는 2026-09-16 에 멈췄다.
  */
 
 import { useState, useEffect } from "react";
 
 import BookingShell from "@/components/booking/BookingShell";
 import { formatLongDate, todayIso } from "@/components/booking/availability";
-import { NO_API_MESSAGE, apiHost } from "@/lib/apiHost";
+import { NO_API_MESSAGE } from "@/lib/apiHost";
+import { bookingConfigured, bookingRpc } from "@/lib/booking/rpc";
+import { ApiError } from "@/lib/teeSheet/api";
 import { CLUB, lookupHref } from "@/lib/nav";
 
 interface TimeSlot {
@@ -55,30 +57,15 @@ interface ReservationResponse {
 }
 
 /**
- * 실패를 하나의 문구로 뭉개지 않는다. 서버가 보낸 `detail`, 네트워크 단절,
- * 그 외 상태 코드를 각각 다른 문장으로 만든다 — 예전에는 셋 다
- * "Failed to load available time slots" 로 보여서 원인을 알 수 없었다.
- */
-async function readError(response: Response, fallback: string): Promise<string> {
-  try {
-    const body = await response.json();
-    const detail = (body as { detail?: unknown })?.detail;
-    if (typeof detail === "string" && detail) return detail;
-  } catch {
-    // JSON 이 아닌 오류 본문 — 상태 줄로 대신한다.
-  }
-  return `${fallback} (${response.status} ${response.statusText})`;
-}
-
-/**
  * 서버 주소는 문구에 넣지 않는다. 예전엔 `${BACKEND_URL}` 을 그대로 끼워 넣어서
  * 배포된 사이트가 방문자에게 "http://localhost:8000" 을 보여줬다.
+ * 연결 실패(status 0)만 "닿지 않았다" 로 쓰고, 그 외에는 함수가 보낸 문장을 그대로 쓴다.
  */
 function networkMessage(err: unknown, action: string): string {
-  if (err instanceof TypeError) {
+  if ((err instanceof ApiError && err.status === 0) || err instanceof TypeError) {
     return `Could not reach the booking server. ${action} Please try again in a moment, or call ${CLUB.phone}.`;
   }
-  return err instanceof Error ? err.message : action;
+  return err instanceof Error && err.message ? err.message : action;
 }
 
 export default function IndoorGolfBooking() {
@@ -106,48 +93,31 @@ export default function IndoorGolfBooking() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  /**
-   * 이 브라우저에서 쓸 수 있는 백엔드 주소. `null` 은 "아직 모름"(마운트 전),
-   * 빈 문자열은 "이 사이트엔 예약 서버가 없다". 브라우저에서만 알 수 있는 값이라
-   * 모듈 상수가 아니라 state 로 둔다 — 정적 export 는 서버에서도 한 번 평가된다.
-   */
-  const [backendUrl, setBackendUrl] = useState<string | null>(null);
-  const bookingOffline = backendUrl === "";
+  /** 온라인 예약을 열 수 있는가. `null` 은 "아직 모름"(마운트 전). */
+  const [bookingReady, setBookingReady] = useState<boolean | null>(null);
+  const bookingOffline = bookingReady === false;
 
   // Set minimum date to today
   useEffect(() => {
     // 현지 날짜다. `new Date().toISOString().split("T")[0]` 은 UTC 라
     // 온타리오 저녁부터 하루 앞선 날짜를 고르게 만든다.
     setSelectedDate(todayIso());
-    setBackendUrl(apiHost());
+    setBookingReady(bookingConfigured());
   }, []);
 
   // Fetch availability when date, bay type, or duration changes
   useEffect(() => {
-    if (!selectedDate || !backendUrl) return;
-    const BACKEND_URL = backendUrl;
+    if (!selectedDate || !bookingReady) return;
 
     const fetchAvailability = async () => {
       setIsLoadingAvailability(true);
       setError("");
       try {
-        const params = new URLSearchParams({
-          date: selectedDate,
-          bay_type: selectedBayType,
-          duration_hours: duration.toString(),
+        const data = await bookingRpc<AvailabilityResponse>("pelham_sim_availability", {
+          p_date: selectedDate,
+          p_bay_type: selectedBayType,
+          p_duration_hours: duration,
         });
-
-        const response = await fetch(
-          `${BACKEND_URL}/api/v1/simulator/availability?${params}`
-        );
-
-        if (!response.ok) {
-          throw new Error(
-            await readError(response, "Failed to load available time slots")
-          );
-        }
-
-        const data: AvailabilityResponse = await response.json();
         setAvailability(data.available_slots);
         // 시간을 고른 뒤 인원/시간을 바꾸면 그 슬롯이 사라질 수 있다.
         // 사라진 시간을 들고 다음 단계로 넘어가지 못하게 여기서 비운다.
@@ -171,14 +141,13 @@ export default function IndoorGolfBooking() {
     };
 
     fetchAvailability();
-  }, [selectedDate, selectedBayType, duration, backendUrl]);
+  }, [selectedDate, selectedBayType, duration, bookingReady]);
 
   const handleCreateReservation = async () => {
-    if (!backendUrl) {
+    if (!bookingReady) {
       setError(NO_API_MESSAGE);
       return;
     }
-    const BACKEND_URL = backendUrl;
 
     setIsSubmitting(true);
     setError("");
@@ -187,12 +156,8 @@ export default function IndoorGolfBooking() {
       // 베이는 서버가 고른다. 예전에는 여기서 `/bays` 목록의 첫 번째를 무조건
       // 집었기 때문에, 우타 베이 3개 중 2개가 비어 있어도 같은 시간대 두 번째
       // 예약이 "이미 예약됨" 으로 막혔다.
-      const response = await fetch(`${BACKEND_URL}/api/v1/simulator/reservations`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+      const data = await bookingRpc<ReservationResponse>("pelham_sim_reserve", {
+        p: {
           bay_type: selectedBayType,
           date: selectedDate,
           start_time: selectedTime,
@@ -202,14 +167,8 @@ export default function IndoorGolfBooking() {
           customer_email: customerEmail,
           phone: customerPhone,
           notes,
-        }),
+        },
       });
-
-      if (!response.ok) {
-        throw new Error(await readError(response, "Booking failed"));
-      }
-
-      const data: ReservationResponse = await response.json();
       setReservation(data);
       setStep(4);
     } catch (err) {
@@ -747,9 +706,10 @@ export default function IndoorGolfBooking() {
             </div>
           </div>
 
+          {/* 확정 메일은 지금 나가지 않는다 — 메일 발송은 멈춘 FastAPI 서버(SMTP)에 있었다.
+              보내지 않은 메일을 보냈다고 쓰지 않는다. */}
           <p className="mb-4 break-words text-sm text-[#5c6459]">
-            A confirmation email has been sent to{" "}
-            <span className="font-semibold">{customerEmail}</span>
+            Save or screenshot this code. You can look up your booking with it any time.
           </p>
 
           <p className="mb-6 text-sm text-[#5c6459]">
@@ -757,8 +717,7 @@ export default function IndoorGolfBooking() {
             any questions.
           </p>
 
-          {/* 확인 코드로 다시 찾아볼 수 있는 자리를 준다. 메일이 스팸함에 가는
-              일이 드물지 않다. */}
+          {/* 확인 코드로 다시 찾아볼 수 있는 자리를 준다. */}
           <a
             className="tap-target flex items-center justify-center rounded-sm bg-[#214d2f] px-6 text-base font-bold text-white transition hover:bg-[#163820]"
             href={lookupHref(reservation.confirmation_code)}
