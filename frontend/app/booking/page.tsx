@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type WantedKind = "one_shot" | "recurring";
+type RequestSchedule = "today" | "tomorrow" | "weekly";
 type WantedStatus = "pending" | "booked" | "expired" | "disabled";
 type Outcome = "booked" | "no_slots" | "auth_failed" | "upstream_error" | "booking_failed";
 
@@ -32,31 +33,66 @@ type WantedSlot = {
 };
 
 type FormState = {
-  kind: WantedKind;
-  target_date: string;
+  schedule: RequestSchedule;
   day_of_week: string;
   end_date: string;
   start_time: string;
   end_time: string;
   num_slots: string;
   partners: string;
-  notify: string;
 };
 
 const storageKey = "pelham-hills-tee-sniper-slots";
+// 알림 수신처는 운영 번호로 고정한다. 화면에는 노출하지 않지만, 생성하는 모든 요청에 저장된다.
+const FIXED_NOTIFICATION_TARGET = "+19057356768";
+const ONTARIO_TIME_ZONE = "America/Toronto";
 const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 const initialForm: FormState = {
-  kind: "one_shot",
-  target_date: new Date().toISOString().slice(0, 10),
+  schedule: "today",
   day_of_week: "5",
   end_date: "",
   start_time: "07:00",
   end_time: "10:30",
   num_slots: "4",
   partners: "",
-  notify: "",
 };
+
+/** 브라우저의 현지 날짜를 YYYY-MM-DD로 만든다. UTC 변환은 온타리오 저녁에 날짜를 하루 앞당긴다. */
+function localDateOffset(days: number): string {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() + days);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+type OntarioTime = { label: string; zone: string; daylightSaving: boolean };
+
+/**
+ * 서버·운영자 브라우저의 시간대와 무관하게 타임라인을 Pelham Hills 현지 시각으로 보인다.
+ * `timeZoneName`은 해당 시점의 EDT/EST를 돌려 주므로, 과거 기록도 당시의 서머타임 여부를 정확히 표시한다.
+ */
+function formatOntarioTime(iso: string): OntarioTime | null {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: ONTARIO_TIME_ZONE,
+    timeZoneName: "short",
+  });
+  const parts = formatter.formatToParts(date);
+  const zone = parts.find((part) => part.type === "timeZoneName")?.value ?? "ET";
+  return { label: formatter.format(date), zone, daylightSaving: zone === "EDT" };
+}
 
 const demoSlots: WantedSlot[] = [
   {
@@ -120,6 +156,7 @@ export default function BookingPage() {
   const [form, setForm] = useState<FormState>(initialForm);
   const [filter, setFilter] = useState<"all" | WantedStatus>("all");
   const [message, setMessage] = useState("");
+  const currentOntarioTime = formatOntarioTime(new Date().toISOString());
 
   useEffect(() => {
     setSlots(readSlots());
@@ -149,12 +186,14 @@ export default function BookingPage() {
     }
 
     const now = new Date().toISOString();
+    const isWeekly = form.schedule === "weekly";
+    const targetDate = form.schedule === "today" ? localDateOffset(0) : form.schedule === "tomorrow" ? localDateOffset(1) : null;
     const slot: WantedSlot = {
       id: makeId(),
-      kind: form.kind,
-      target_date: form.kind === "one_shot" ? form.target_date : null,
-      day_of_week: form.kind === "recurring" ? Number(form.day_of_week) : null,
-      end_date: form.kind === "recurring" && form.end_date ? form.end_date : null,
+      kind: isWeekly ? "recurring" : "one_shot",
+      target_date: targetDate,
+      day_of_week: isWeekly ? Number(form.day_of_week) : null,
+      end_date: isWeekly && form.end_date ? form.end_date : null,
       start_time: form.start_time,
       end_time: form.end_time,
       num_slots: Number(form.num_slots),
@@ -163,7 +202,7 @@ export default function BookingPage() {
         .map((partner) => partner.trim())
         .filter(Boolean)
         .slice(0, 3),
-      notify: form.notify.trim() || null,
+      notify: FIXED_NOTIFICATION_TARGET,
       status: "pending",
       attempts: [],
       created_at: now,
@@ -252,30 +291,28 @@ export default function BookingPage() {
         <form className="rounded-sm border border-[#d8d1c3] bg-white p-5" onSubmit={submitWantedSlot}>
           <h2 className="font-serif text-3xl font-semibold">New Wanted Slot</h2>
           <div className="mt-5 grid gap-4">
-            <label className="grid gap-2 text-sm font-bold text-[#465444]">
-              Request Type
-              <select
-                className="border border-[#cfc6b5] bg-white px-3 py-3 text-[#182118]"
-                value={form.kind}
-                onChange={(event) => updateField("kind", event.target.value as WantedKind)}
-              >
-                <option value="one_shot">One-shot date</option>
-                <option value="recurring">Recurring weekday</option>
-              </select>
-            </label>
+            <fieldset>
+              <legend className="mb-2 text-sm font-bold text-[#465444]">Request Type</legend>
+              <div className="grid grid-cols-3 gap-2">
+                {(["today", "tomorrow", "weekly"] as const).map((schedule) => (
+                  <button
+                    aria-pressed={form.schedule === schedule}
+                    className={`border px-2 py-3 text-xs font-extrabold tracking-[0.1em] ${
+                      form.schedule === schedule
+                        ? "border-[#214d2f] bg-[#214d2f] text-white"
+                        : "border-[#cfc6b5] bg-white text-[#214d2f]"
+                    }`}
+                    key={schedule}
+                    onClick={() => updateField("schedule", schedule)}
+                    type="button"
+                  >
+                    {schedule.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
 
-            {form.kind === "one_shot" ? (
-              <label className="grid gap-2 text-sm font-bold text-[#465444]">
-                Target Date
-                <input
-                  className="border border-[#cfc6b5] px-3 py-3 text-[#182118]"
-                  type="date"
-                  value={form.target_date}
-                  onChange={(event) => updateField("target_date", event.target.value)}
-                  required
-                />
-              </label>
-            ) : (
+            {form.schedule === "weekly" ? (
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="grid gap-2 text-sm font-bold text-[#465444]">
                   Weekday
@@ -301,6 +338,10 @@ export default function BookingPage() {
                   />
                 </label>
               </div>
+            ) : (
+              <p className="border border-[#d8d1c3] bg-[#f7f4ed] px-3 py-3 text-sm text-[#465444]">
+                {form.schedule === "today" ? `Today: ${localDateOffset(0)}` : `Tomorrow: ${localDateOffset(1)}`}
+              </p>
             )}
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -325,6 +366,10 @@ export default function BookingPage() {
                 />
               </label>
             </div>
+            <p className="text-xs text-[#6f7a6e]">
+              All requested times use Ontario, Canada ({currentOntarioTime?.zone ?? "ET"}) ·{" "}
+              {currentOntarioTime?.daylightSaving ? "Daylight Saving Time active" : "Standard Time"}
+            </p>
 
             <label className="grid gap-2 text-sm font-bold text-[#465444]">
               Players
@@ -346,16 +391,6 @@ export default function BookingPage() {
                 placeholder="Name, Name, Name"
                 value={form.partners}
                 onChange={(event) => updateField("partners", event.target.value)}
-              />
-            </label>
-
-            <label className="grid gap-2 text-sm font-bold text-[#465444]">
-              SMS Notification
-              <input
-                className="border border-[#cfc6b5] px-3 py-3 text-[#182118]"
-                placeholder="+19057356768"
-                value={form.notify}
-                onChange={(event) => updateField("notify", event.target.value)}
               />
             </label>
 
@@ -414,8 +449,7 @@ export default function BookingPage() {
                       {slot.start_time} - {slot.end_time} · {slot.num_slots} players
                     </p>
                     <p className="mt-1 text-sm text-[#6f7a6e]">
-                      Partners: {slot.partners.length ? slot.partners.join(", ") : "None"} · SMS:{" "}
-                      {slot.notify ?? "Off"}
+                      Partners: {slot.partners.length ? slot.partners.join(", ") : "None"}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -441,21 +475,29 @@ export default function BookingPage() {
                 </div>
 
                 <div className="mt-5 border-t border-[#d8d1c3] pt-4">
-                  <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#465444]">
-                    Attempts
-                  </p>
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                    <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#465444]">Timeline</p>
+                    <p className="text-xs text-[#6f7a6e]">
+                      Ontario, Canada · {currentOntarioTime?.zone ?? "ET"} ·{" "}
+                      {currentOntarioTime?.daylightSaving ? "Daylight Saving Time" : "Standard Time"}
+                    </p>
+                  </div>
                   {slot.attempts.length === 0 ? (
                     <p className="mt-2 text-sm text-[#6f7a6e]">No worker attempts yet.</p>
                   ) : (
                     <div className="mt-3 grid gap-2">
-                      {slot.attempts.map((attempt) => (
-                        <div className="bg-[#fbfaf6] p-3 text-sm text-[#516050]" key={`${slot.id}-${attempt.ts}`}>
-                          <strong className="text-[#182118]">{attempt.outcome}</strong> on{" "}
-                          {attempt.target_date} at {new Date(attempt.ts).toLocaleString()}
-                          {attempt.booking_id ? ` · booking ${attempt.booking_id}` : ""}
-                          {attempt.error ? ` · ${attempt.error}` : ""}
-                        </div>
-                      ))}
+                      {slot.attempts.map((attempt) => {
+                        const ontarioTime = formatOntarioTime(attempt.ts);
+                        return (
+                          <div className="bg-[#fbfaf6] p-3 text-sm text-[#516050]" key={`${slot.id}-${attempt.ts}`}>
+                            <strong className="text-[#182118]">{attempt.outcome}</strong> on {attempt.target_date} at{" "}
+                            {ontarioTime?.label ?? attempt.ts}
+                            {ontarioTime ? ` · ${ontarioTime.daylightSaving ? "DST active" : "Standard time"}` : ""}
+                            {attempt.booking_id ? ` · booking ${attempt.booking_id}` : ""}
+                            {attempt.error ? ` · ${attempt.error}` : ""}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

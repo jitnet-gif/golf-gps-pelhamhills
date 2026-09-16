@@ -2,7 +2,7 @@
 
 // 예약 상세 패널 (Reservation Detail).
 //
-// 레이아웃은 Lightspeed Golf 의 하단 패널을 그대로 따른다:
+// 레이아웃은 pelhamhills 의 하단 패널을 그대로 따른다:
 //   ┌ 헤더 줄: ☎ 확인코드 · 홀 수 · 날짜 · 시각 ······ [Cancel] [Save]
 //   ├ 왼쪽 아이콘 레일 │ 플레이어 카드 가로 나열
 //   └ 노란 메모 줄
@@ -17,7 +17,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { printReceiptDoc, receiptSheetHtml } from "@/lib/retail/printReceipt";
+import { computeTax, formatMoney } from "@/lib/retail/types";
 import { longDate, money } from "@/lib/teeSheet/dates";
+import { confirmationCode, teeReceiptFor } from "@/lib/teeSheet/receipt";
 import type {
   AuditEntry,
   PatchBookingInput,
@@ -128,13 +131,6 @@ function relativeTime(ts: string): string {
   return years === 1 ? "1 year ago" : `${years} years ago`;
 }
 
-/** 확인 코드 — 레퍼런스의 `6HOR-4M6L` 자리. id 를 사람이 읽고 부를 수 있는 모양으로 자른다. */
-function confirmationCode(bookingId: string): string {
-  const clean = bookingId.replace(/[^a-z0-9]/gi, "").toUpperCase();
-  const head = clean.slice(0, 8).padEnd(8, "0");
-  return `${head.slice(0, 4)}-${head.slice(4, 8)}`;
-}
-
 const CHIP =
   "flex items-center gap-1.5 border border-[#c7c7cc] bg-white px-2 py-1 text-[11px] outline-none focus:border-[#4533ff]";
 
@@ -190,6 +186,14 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
   // 부르면 예약이 중간 날짜들을 하나씩 밟고 지나간다. blur 에서 한 번만 커밋한다.
   const [dateDraft, setDateDraft] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // 카트 요금 입력 중인 글자. 이름·전화 draft 와 따로 둔다 — 그 draft 는 필드 전체를 한 번에
+  // 찍어 두므로, 카트를 켜서 서버가 요금을 채운 직후에 이름 draft 가 커밋되면 옛 요금(0)을 되돌려 보낸다.
+  const [feeDrafts, setFeeDrafts] = useState<Record<string, string>>({});
+  // 영수증을 찍지 못한 이유 (결제가 서버에 기록되지 않았을 때).
+  const [receiptNote, setReceiptNote] = useState<{ playerId: string; text: string } | null>(null);
+  // 결제 전에 보여 주는 영수증 창. 한 사람일 수도(카드의 Payment), 일행 전체일 수도(Pay all) 있다.
+  // `at` 은 아직 결제 시각이 없는 사람의 미리보기용 시각이다.
+  const [preview, setPreview] = useState<{ playerIds: string[]; reprint: boolean; at: string } | null>(null);
 
   // 최신 값을 debounce 타이머 콜백에서 읽기 위한 미러 ref 들.
   const bookingRef = useRef<TeeBooking | null>(booking);
@@ -197,6 +201,9 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
   const bookingDraftRef = useRef<BookingDraft | null>(bookingDraft);
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const inflightRef = useRef(0);
+  // 진행 중인 카트 요금 저장. Payment 가 이것을 기다린다 — 요금 칸에서 바로 Payment 를 누르면
+  // blur 의 저장과 결제 요청이 동시에 떠나고, 결제가 먼저 닿으면 영수증에 옛 요금이 찍힌다.
+  const feeCommitsRef = useRef<Map<string, Promise<unknown>>>(new Map());
 
   useEffect(() => {
     bookingRef.current = booking;
@@ -223,6 +230,9 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
     setCancelReason("");
     setDateDraft(null);
     setHistoryOpen(false);
+    setFeeDrafts({});
+    setReceiptNote(null);
+    setPreview(null);
     setSaveState({ kind: "idle", nonce: 0 });
   }, [bookingId, clearTimers]);
 
@@ -333,6 +343,31 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
     [schedulePlayerCommit],
   );
 
+  /** 카트 요금 칸을 커밋한다 (blur·Enter). 숫자가 아니거나 그대로면 보내지 않고 칸을 되돌린다. */
+  const commitFee = useCallback(
+    (playerId: string, text: string) => {
+      setFeeDrafts((prev) => {
+        if (!(playerId in prev)) return prev;
+        const next = { ...prev };
+        delete next[playerId];
+        return next;
+      });
+      const current = bookingRef.current;
+      const player = current?.players.find((p) => p.id === playerId);
+      const fee = Number(text);
+      if (!current || !player || text.trim() === "" || !Number.isFinite(fee) || fee < 0) return;
+      const cents = Math.round(fee * 100);
+      if (cents === Math.round((player.cartFee ?? 0) * 100)) return;
+
+      const pending = controller.patchPlayer(current.id, playerId, { cartFee: cents / 100 });
+      feeCommitsRef.current.set(playerId, pending);
+      void pending.finally(() => {
+        if (feeCommitsRef.current.get(playerId) === pending) feeCommitsRef.current.delete(playerId);
+      });
+    },
+    [controller],
+  );
+
   // ===== derived =====
 
   const effectiveBookingDraft = useMemo(
@@ -405,7 +440,64 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
   const busy = controller.busy;
   const audit: AuditEntry[] = [...(booking.audit ?? [])].reverse();
 
-  const dueFor = (player: Player) => (player.paid || player.cancelled ? 0 : booking.rate);
+  /** 카트를 쓰는 사람의 카트 요금, 아니면 0. */
+  const cartPart = (player: Player) => (player.cart ? (player.cartFee ?? 0) : 0);
+  const dueFor = (player: Player) => (player.paid || player.cancelled ? 0 : booking.rate + cartPart(player));
+
+  // 전체 결제 대상과 그 청구액. 센트는 영수증과 **같은 방식**으로 만든다(사람마다 그린피·카트를
+  // 따로 반올림한 뒤 더하고, 세금은 합계에 한 번). 그래야 버튼 금액과 종이의 Total 이 같다.
+  const unpaidPlayers = players.filter((player) => !player.paid && !player.cancelled);
+  const unpaidSubtotal = unpaidPlayers.reduce(
+    (sum, player) => sum + Math.round(booking.rate * 100) + Math.round(cartPart(player) * 100),
+    0,
+  );
+  const unpaidTotal = unpaidSubtotal + computeTax(unpaidSubtotal);
+
+  /**
+   * Payment 는 **영수증 창을 열기만** 한다. 실제 결제와 인쇄는 그 창의 버튼에서 한다 —
+   * 무엇을 받는지 보고 나서 돈을 받는 순서다. 이미 결제한 카드면 재인쇄 창이 열린다.
+   * 결제 취소는 카드 머리의 "Mark unpaid" 로만 한다.
+   */
+  const openReceipt = (people: Player[], reprint: boolean) => {
+    setReceiptNote(null);
+    setPreview({ playerIds: people.map((person) => person.id), reprint, at: new Date().toISOString() });
+  };
+
+  /** 재인쇄: 서버 상태는 건드리지 않는다. */
+  const reprintReceipt = (people: Player[]) => {
+    setPreview(null);
+    printReceiptDoc(teeReceiptFor(booking, people), { reprint: true });
+  };
+
+  /**
+   * 결제 + 인쇄. 여러 명을 한 번에 받으면 영수증도 **한 장**이다(합계 하나).
+   * PATCH 는 사람마다 **차례로** 보낸다: 응답이 예약 전체를 갈아 끼우므로 동시에 보내면
+   * 마지막 응답이 앞사람의 결제를 덮어쓴 예약으로 화면을 되돌린다.
+   */
+  const payAndPrint = async (people: Player[]) => {
+    setReceiptNote(null);
+    setPreview(null);
+    // 카드에 보이는 금액과 영수증 금액이 같아야 한다. 저장 안 된 편집(그린피·카트 요금)을 먼저 보낸다.
+    for (const person of people) await feeCommitsRef.current.get(person.id);
+    if (dirty) await saveAll();
+
+    let updated: TeeBooking | null = null;
+    for (const person of people) {
+      updated = await controller.patchPlayer(booking.id, person.id, { paid: true });
+      if (!updated) break;
+    }
+    const paid = people.map((person) => updated?.players.find((item) => item.id === person.id));
+    // 종이는 서버가 결제를 기록한 뒤에만 나온다. 결제 시각은 서버만 찍으므로(로컬 사본은 null),
+    // 그게 없으면 서버가 거절했거나 오프라인 사본이다. 한 명이라도 빠지면 찍지 않는다.
+    if (!updated || paid.some((person) => !person?.paid || !person.paidAt)) {
+      setReceiptNote({
+        playerId: people[0]?.id ?? "",
+        text: "Payment not saved to the server — no receipt printed.",
+      });
+      return;
+    }
+    printReceiptDoc(teeReceiptFor(updated, paid as Player[]));
+  };
 
   // 시각 선택지는 그날의 실제 티타임 목록이다. 서버가 아직 슬롯을 안 줬거나 이 예약이
   // 목록에 없는 시각을 갖고 있으면(레거시 레코드) 현재 값을 한 항목 더 붙인다 —
@@ -426,6 +518,17 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
 
   const saveLabel =
     saveState.kind === "saving" ? "saving…" : saveState.kind === "saved" ? "saved" : dirty ? "unsaved" : "";
+
+  // 영수증 창에 보여 줄 내용. 결제한 사람은 서버가 찍은 시각을, 아직 아닌 사람은 창을 연 시각을 쓴다.
+  const previewPlayers = preview
+    ? preview.playerIds
+        .map((id) => players.find((item) => item.id === id))
+        .filter((item): item is Player => Boolean(item))
+    : [];
+  const previewDoc =
+    preview && previewPlayers.length > 0
+      ? teeReceiptFor(booking, previewPlayers, preview.reprint ? {} : { at: preview.at })
+      : null;
 
   return (
     <section className="min-w-0 border-t border-[#d4d4d8] bg-[#dedee2] text-xs text-[#1f2328]">
@@ -493,6 +596,19 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
             Cancelled: {booking.cancelReason}
           </span>
         ) : null}
+
+        {/* 일행 전체 결제. 카드의 Payment 는 한 사람, 이 버튼은 아직 안 낸 사람 전부를 한 장에 담는다.
+            금액은 세금까지 더한 **실제 청구액**이다 — 카드의 Subtotal Due(세전)와 다른 숫자라
+            버튼에 금액을 직접 적어 둔다. */}
+        <button
+          className="border border-[#4533ff] bg-white px-3 py-1.5 font-bold text-[#4533ff] hover:bg-[#f0eeff] disabled:cursor-not-allowed disabled:border-[#c7c7cc] disabled:bg-white disabled:text-[#b6b6c0]"
+          disabled={busy || unpaidPlayers.length === 0}
+          onClick={() => openReceipt(unpaidPlayers, false)}
+          title="Take payment for everyone who has not paid yet — one receipt for the group"
+          type="button"
+        >
+          Pay all ({unpaidPlayers.length}) {formatMoney(unpaidTotal)}
+        </button>
 
         <span
           aria-live="polite"
@@ -624,6 +740,7 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
             // 서버 값이 목록에 없으면 그 값도 항목으로 붙인다 (RATE_PLANS 주석 참고).
             const plan = player.ratePlan?.trim() || "Public";
             const planOptions = RATE_PLANS.includes(plan) ? RATE_PLANS : [plan, ...RATE_PLANS];
+            const cartOn = player.cart === true;
 
             return (
               <article
@@ -638,8 +755,19 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
                     {player.type === "Guest" ? "G" : "●"}
                   </span>
                   <span className="truncate font-bold">{player.type}</span>
+                  {player.paid ? (
+                    <button
+                      className="ml-auto whitespace-nowrap px-1 text-[10px] text-[#4e5560] underline decoration-dotted hover:text-[#8a3f26] disabled:opacity-30"
+                      disabled={busy}
+                      onClick={() => void controller.patchPlayer(booking.id, player.id, { paid: false })}
+                      title="Clear the payment on this card — only to fix a mistake"
+                      type="button"
+                    >
+                      Mark unpaid
+                    </button>
+                  ) : null}
                   <button
-                    className="ml-auto px-1 text-[#8a3f26] disabled:opacity-30"
+                    className={`${player.paid ? "" : "ml-auto "}px-1 text-[#8a3f26] disabled:opacity-30`}
                     disabled={busy}
                     onClick={() => void controller.removePlayer(booking.id, player.id)}
                     title="Remove this player from the reservation"
@@ -790,10 +918,63 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
                 {draft.rate.trim() !== "" && !Number.isFinite(Number(draft.rate)) ? (
                   <span className="mt-1 block text-[10px] text-[#8a3f26]">Not a number — will not be saved</span>
                 ) : null}
+                {/* 카트 한 줄. 켜면 서버가 금액을 채운다(`cart_fee_for`) — 세전 $19.00 한 가지이고,
+                    카트가 포함된 회원 요금제만 $0 이다. 그린피와 달리 이 사람 것만 바뀐다.
+                    결제한 뒤에는 잠근다: 받은 돈과 재인쇄 영수증이 달라지면 안 된다. */}
+                <div
+                  className={`mt-1 flex items-center gap-1 border px-1.5 py-1 ${
+                    cartOn ? "border-[#d7d7dc]" : "border-dashed border-[#d7d7dc] text-[#9aa0a6]"
+                  }`}
+                >
+                  {/* 글자는 "Half Cart" 만. 212px 카드에 "(18 Holes)" 까지 넣으면 잘린다 — 홀 수는
+                      바로 위 그린피 줄과 영수증 품목 이름에 있다. */}
+                  <label
+                    className="flex min-w-0 items-center gap-1"
+                    title={
+                      player.paid
+                        ? "Paid — mark unpaid to change the cart"
+                        : `Add a half cart (${booking.holes} holes) for this player`
+                    }
+                  >
+                    <input
+                      checked={cartOn}
+                      className="h-3 w-3 shrink-0 accent-[#4533ff]"
+                      disabled={busy || player.paid || player.cancelled}
+                      onChange={(event) =>
+                        void controller.patchPlayer(booking.id, player.id, { cart: event.target.checked })
+                      }
+                      type="checkbox"
+                    />
+                    <span className="truncate">Half Cart</span>
+                  </label>
+                  <span aria-hidden className="ml-auto text-[#9aa0a6]">
+                    $
+                  </span>
+                  <input
+                    aria-label={`Cart fee for ${player.name}`}
+                    className="w-12 bg-transparent text-right tabular-nums outline-none focus:text-[#4533ff] disabled:text-[#b6b6c0]"
+                    disabled={!cartOn || player.paid}
+                    inputMode="decimal"
+                    onBlur={(event) => commitFee(player.id, event.currentTarget.value)}
+                    onChange={(event) => setFeeDrafts((prev) => ({ ...prev, [player.id]: event.target.value }))}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") event.currentTarget.blur();
+                    }}
+                    title="Cart fee for this player only — filled in from the rate plan and holes"
+                    value={feeDrafts[player.id] ?? cartPart(player).toFixed(2)}
+                  />
+                  <span
+                    aria-hidden
+                    className={`h-2 w-2 shrink-0 rounded-full border ${
+                      !cartOn ? "border-transparent" : player.paid ? "border-[#168a3c] bg-[#168a3c]" : "border-[#c7c7cc]"
+                    }`}
+                  />
+                </div>
+
                 {player.cancelled ? (
                   <div className="mt-1 flex justify-between text-[#8a3f26]">
                     <span>Cancelled</span>
-                    <span>−{money(booking.rate)}</span>
+                    <span>−{money(booking.rate + cartPart(player))}</span>
                   </div>
                 ) : null}
 
@@ -817,15 +998,18 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
                     className={`flex items-center justify-center gap-1 px-1 py-1 font-bold text-white disabled:opacity-40 ${
                       player.paid ? "bg-[#4533ff]" : "bg-[#b1a8ff]"
                     }`}
-                    disabled={busy}
-                    onClick={() => void controller.patchPlayer(booking.id, player.id, { paid: !player.paid })}
-                    title={player.paid ? "Mark unpaid" : "Take payment"}
+                    disabled={busy || player.cancelled}
+                    onClick={() => openReceipt([player], player.paid)}
+                    title={player.paid ? "Paid — show the receipt to print again" : "Show the receipt, then take payment"}
                     type="button"
                   >
                     Payment
                     <Glyph className="h-3 w-3" name="card" />
                   </button>
                 </div>
+                {receiptNote?.playerId === player.id ? (
+                  <span className="mt-1 block text-[10px] text-[#8a3f26]">{receiptNote.text}</span>
+                ) : null}
               </article>
             );
           })}
@@ -862,6 +1046,77 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
               ))
             )}
           </ul>
+        </div>
+      ) : null}
+
+      {/* ===== 영수증 창 (Payment) =====
+          종이에 나갈 것과 **같은 HTML**(receiptSheetHtml)을 같은 규칙(.rc-sheet)으로 72mm 폭에
+          그린다. 여기서 Pay 를 눌러야 결제가 기록되고 인쇄가 나간다.
+          프린터 선택 창은 브라우저 것이라 페이지에서 없앨 수 없다 — 프로 샵 PC 를
+          `--kiosk-printing` 바로가기로 열어 두면 대화상자 없이 기본 프린터로 바로 나간다
+          (docs/pro-shop-receipt-printing-2026-09-12.md). */}
+      {preview && previewDoc && previewPlayers.length > 0 ? (
+        <div
+          aria-label="Receipt"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setPreview(null);
+          }}
+          role="dialog"
+        >
+          <div className="flex max-h-full w-full max-w-sm flex-col border border-[#c7c7cc] bg-[#f2f2f4]">
+            <div className="flex items-center gap-2 border-b border-[#c7c7cc] bg-white px-3 py-2">
+              <span className="font-bold">{preview.reprint ? "Reprint receipt" : "Receipt"}</span>
+              <span className="min-w-0 truncate text-[#5c6270]">
+                {previewPlayers.length === 1
+                  ? previewPlayers[0].name
+                  : `${previewPlayers.length} players — one receipt`}
+              </span>
+              <button
+                className="ml-auto px-1 text-[15px] text-[#4e5560]"
+                onClick={() => setPreview(null)}
+                title="Close without printing"
+                type="button"
+              >
+                <span aria-hidden>&times;</span>
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              <div
+                className="rc-sheet mx-auto bg-white p-3 shadow"
+                // 우리 포맷터가 만든 HTML 이다 — 사람이 입력한 글자는 전부 이스케이프돼 있다.
+                dangerouslySetInnerHTML={{ __html: receiptSheetHtml(previewDoc, { reprint: preview.reprint }) }}
+                style={{ width: "72mm" }}
+              />
+            </div>
+
+            <div className="flex items-center gap-2 border-t border-[#c7c7cc] bg-white px-3 py-2">
+              <button
+                className="border border-[#c7c7cc] bg-white px-4 py-2 font-bold"
+                onClick={() => setPreview(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <span className="text-[10px] leading-tight text-[#5c6270]">
+                Prints 2 copies
+                <br />
+                customer + merchant
+              </span>
+              <button
+                className="ml-auto bg-[#4533ff] px-5 py-2 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#b1a8ff]"
+                disabled={busy}
+                onClick={() =>
+                  void (preview.reprint ? reprintReceipt(previewPlayers) : payAndPrint(previewPlayers))
+                }
+                type="button"
+              >
+                {preview.reprint ? "Print again" : `Pay ${formatMoney(previewDoc.total)} & print`}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
 

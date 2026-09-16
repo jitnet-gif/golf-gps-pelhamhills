@@ -77,6 +77,15 @@ export function lookupHref(code: string): string {
 export const ADMIN_HOME = "/admin";
 
 /**
+ * 코스 지도(홀 점선을 페어웨이 위로 옮기는 편집기). 이 Next 앱이 아니라 GPS 앱
+ * (golf-gps-app) 의 화면이다 — 위성 지도·홀 좌표·Leaflet 이 전부 그쪽에 있어서,
+ * 여기에 두 번째 지도 스택을 만들지 않고 절대 주소로 넘긴다.
+ * `adminNav` 보다 위에 있어야 한다: 배열이 모듈을 읽는 순간 평가되므로 아래에
+ * 두면 `const` 를 선언 전에 읽어 ReferenceError 가 난다.
+ */
+export const GOLF_GPS_MAP_EDITOR = "https://golf-gps-pelhamhills-seven.vercel.app/admin/map";
+
+/**
  * 어드민 사이드바 메뉴. 순서가 곧 화면에 보이는 순서다.
  *
  * 티 시트만 `/admin` 이고 나머지가 `/admin/<slug>` 인 이유: 티 시트가 어드민의
@@ -93,6 +102,7 @@ export const adminNav: NavItem[] = [
   { label: "Reports", href: "/admin/reports", glyph: "▥" },
   { label: "Business Intelligence", href: "/admin/business-intelligence", glyph: "◧" },
   { label: "Radar", href: "/admin/radar", glyph: "◎" },
+  { label: "Course Map", href: GOLF_GPS_MAP_EDITOR, glyph: "⌖" },
   { label: "Integrations", href: "/admin/integrations", glyph: "⊞" },
   { label: "Settings", href: "/admin/settings", glyph: "⚙" },
 ];
@@ -110,7 +120,7 @@ export const adminQuickNav: NavItem[] = adminNav.filter((item) =>
 );
 
 /**
- * `/admin/retail` 은 여전히 살아 있는 화면이지만 메뉴에는 없다 — 맞춰 온 Lightspeed
+ * `/admin/retail` 은 여전히 살아 있는 화면이지만 메뉴에는 없다 — 맞춰 온 pelhamhills
  * 사이드바에 Retail 항목이 없기 때문이다. 주소로 직접 들어가면 그대로 열린다.
  * 다시 노출하려면 `adminNav` 에 `{ label: "Retail", href: "/admin/retail", glyph: "🛒" }`
  * 를 되돌려 놓으면 된다.
@@ -151,6 +161,8 @@ export const CLUB = {
   name: "Pelham Hills Golf Club",
   shortName: "Pelham Hills",
   address: "196 Webber Road, Welland, ON",
+  /** 우편 주소 전체. 영수증 머리글이 쓴다 — 클럽이 쓰던 Lightspeed 영수증(2026-09-15)의 표기 그대로. */
+  mailingAddress: ["196 Webber Road", "Welland, Ontario, L3B 5N9", "Canada"],
   phone: "+1 (905) 735-6768",
   phoneHref: "tel:+19057356768",
   email: "info@pelhamhills.com",

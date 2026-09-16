@@ -1,7 +1,12 @@
 """Import a manually verified Chronogolf DOM snapshot; dry-run unless --apply.
 
-Stop the local API before applying: its current store cache does not watch disk.
+Stop the local API before applying (JSON mode): its store cache does not watch disk.
 Source IDs/timestamps are unavailable. Stable IDs and seat chronology are synthetic.
+
+Works on both store backends (json / supabase). It reads and writes only the
+snapshot's date plus the incoming booking ids, never the rest of the tee sheet.
+In supabase mode the rows about to be replaced are snapshotted to
+backend/data/backups/ before anything is written.
 """
 from __future__ import annotations
 
@@ -17,7 +22,12 @@ import shutil
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from backend.api.routes.tee_sheet import (FIRST_TEE_MINUTES, LAST_TEE_MINUTES,
+                                          SLOT_INTERVAL_MINUTES)
 from backend.services import tee_sheet_store as store
+
+# Supabase-mode backups land under the gitignored backend/data. Tests point it at tmp.
+BACKUP_DIR = Path(__file__).resolve().parents[1] / "backend" / "data" / "backups"
 
 
 def surname(name):
@@ -35,7 +45,8 @@ def convert(snapshot):
     for time_label, rate, carts, groups in snapshot["rows"]:
         stamp = datetime.strptime(time_label, "%I:%M %p")
         minutes = stamp.hour * 60 + stamp.minute
-        if not 400 <= minutes <= 1080 or (minutes - 400) % 9:
+        if (not FIRST_TEE_MINUTES <= minutes <= LAST_TEE_MINUTES
+                or (minutes - FIRST_TEE_MINUTES) % SLOT_INTERVAL_MINUTES):
             raise ValueError(f"Invalid slot: {time_label}")
         if time_label in seen:
             raise ValueError("Duplicate source slot")
@@ -115,25 +126,78 @@ def merge(existing, incoming):
     return kept + incoming, replaced
 
 
+def _keyed(bookings):
+    # Scoped reads come back in backend-specific order (file order vs date/created).
+    # Compare content, not order.
+    return {b["id"]: b for b in bookings}
+
+
+def _json_file_missing():
+    # Keep the old "no file = empty store" meaning. Going through the store, JSON mode
+    # seeds a missing file on first read: a write during dry-run, seed rows on apply.
+    return store.backend() == "json" and not store.data_file().exists()
+
+
+def _target():
+    if store.backend() == "json":
+        return str(store.data_file())
+    from backend.services import tee_sheet_supabase
+    return f"supabase:{tee_sheet_supabase.TABLE}"
+
+
+def _backup(rows):
+    """Leave something to roll back to, right before the write. Returns the path or None."""
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    if store.backend() == "json":
+        # Whole-file copy as before; it also holds every row outside the scope.
+        target = store.data_file()
+        if not target.exists():
+            return None
+        backup = target.with_name(target.name + "." + stamp + ".bak")
+        shutil.copy2(target, backup)
+        return str(backup)
+    # No file in supabase mode: keep the scoped rows exactly as read under the lock.
+    # Rows outside the scope are never touched by this import, so they are not needed.
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    backup = BACKUP_DIR / f"import_chronogolf_snapshot-{stamp}.json"
+    backup.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+    return str(backup)
+
+
 def run(source, apply=False):
     snapshot = json.loads(Path(source).read_text(encoding="utf-8-sig"))
     incoming = convert(snapshot)
-    target = store.data_file()
-    existing = json.loads(target.read_text(encoding="utf-8-sig")) if target.exists() else []
+    # Scope = the snapshot date plus the incoming ids. merge() replaces exact previous
+    # imports by id on ANY date (e.g. one staff later moved), so those rows must be
+    # loaded for merge() to see them; otherwise the write would upsert over them blind.
+    scope = store.Scope(dates={snapshot["date"]}, ids={b["id"] for b in incoming})
+    store.drop_cache()  # JSON mode: work from what is on disk, as the old importer did
+    fresh = _json_file_missing()
+    existing = [] if fresh else store.load_bookings(scope)
+    total = 0 if fresh else store.count_bookings()
     merged, replaced = merge(existing, incoming)
     report = dict(mode="apply" if apply else "dry-run", date=snapshot["date"],
         importedBookings=len(incoming), importedPlayers=sum(len(b["players"]) for b in incoming),
         sourceSlots=len(snapshot["rows"]), slotCarts=sum(r[2] for r in snapshot["rows"]),
-        replacedBookings=replaced, preservedBookings=len(merged)-len(incoming),
-        target=str(target), changed=merged != existing,
+        # Rows outside the scope are not read; every one of them is preserved.
+        replacedBookings=replaced, preservedBookings=total - replaced,
+        target=_target(), changed=_keyed(merged) != _keyed(existing),
         sourceSha256=hashlib.sha256(Path(source).read_bytes()).hexdigest())
-    if apply and merged != existing:
-        if target.exists():
-            backup = target.with_name(target.name + "." + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + ".bak")
-            shutil.copy2(target, backup)
-            report["backup"] = str(backup)
-        store.save_bookings(merged)
-        if json.loads(target.read_text(encoding="utf-8")) != merged:
+    if apply and report["changed"]:
+        if fresh:
+            store.save_bookings([])  # start from an empty file, no seed rows
+        with store.mutate(scope) as live:
+            # Recompute against what was read under the lock, so merge()'s collision
+            # guard also covers anything that changed since the dry-run read.
+            merged, replaced = merge(live, incoming)
+            backup = None if fresh else _backup(live)
+            live[:] = merged
+        report["replacedBookings"] = replaced
+        report["preservedBookings"] = total - replaced
+        if backup:
+            report["backup"] = backup
+        # Read the same scope back from the store (either backend) instead of the file.
+        if _keyed(store.load_bookings(scope)) != _keyed(merged):
             raise RuntimeError("Readback verification failed")
     return report
 

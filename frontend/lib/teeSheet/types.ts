@@ -35,6 +35,12 @@ export type Player = {
   paid: boolean;
   cancelled: boolean;
   no_show: boolean;
+  /** 이 사람이 카트를 쓰나 (1인 요금 한 줄). 예약 단위 `cartCount`(카트 대수)와는 따로다. */
+  cart: boolean;
+  /** 1인 카트 요금(달러, 세전 — `rate` 와 같은 단위). 켤 때 서버가 요금제·홀 수로 채운다. */
+  cartFee: number;
+  /** 결제로 표시된 시각(ISO). 서버만 찍는다. 이 필드가 생기기 전의 결제에는 없다. */
+  paidAt: string | null;
 };
 
 export type AuditEntry = {
@@ -106,8 +112,8 @@ export type PatchBookingInput = Partial<{
   cancelReason: string | null;
 }>;
 
-export type AddPlayerInput = Partial<Omit<Player, "id">>;
-export type PatchPlayerInput = Partial<Omit<Player, "id">>;
+export type AddPlayerInput = Partial<Omit<Player, "id" | "paidAt">>;
+export type PatchPlayerInput = Partial<Omit<Player, "id" | "paidAt">>;
 
 // ===== Reports =====
 

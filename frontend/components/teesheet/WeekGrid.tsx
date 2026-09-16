@@ -9,7 +9,7 @@
 //
 //   * 주간 뷰(week): 컬럼 = 날짜, 셀 하나 = 예약 막대(BookingBar). 예약 단위 색
 //     `booking.color` 가 COLOR_CLASS 로 그대로 쓰인다.
-//   * 일간 시트(day): Chronogolf/Lightspeed 관리자 시트의 복제.
+//   * 일간 시트(day): Chronogolf/pelhamhills 관리자 시트의 복제.
 //     구조가 **행 → 세그먼트 → 셀** 3단계라는 점이 핵심이고, 이걸 2단계로
 //     접으면 화면이 틀린다.
 //       - 행(row)      = 티타임 하나. 트랙: Time | Rate | 플레이어 4칸 | Cart | Timer.

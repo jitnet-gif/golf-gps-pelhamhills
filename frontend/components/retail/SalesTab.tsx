@@ -11,12 +11,9 @@
 import { useEffect, useMemo, useState } from "react";
 
 import retailApi, { localBusinessDate, toRetailError } from "@/lib/retail/api";
-import {
-  formatMoney,
-  type PaymentMethod,
-  type RetailDailyReport,
-  type Sale,
-} from "@/lib/retail/types";
+import { printReceipt } from "@/lib/retail/printReceipt";
+import { PAYMENT_LABELS } from "@/lib/retail/receipt";
+import { formatMoney, type RetailDailyReport, type Sale } from "@/lib/retail/types";
 
 import {
   Button,
@@ -31,13 +28,6 @@ import {
   TextArea,
   TextInput,
 } from "./ui";
-
-const PAYMENT_LABELS: Record<PaymentMethod, string> = {
-  cash: "Cash",
-  card: "Card",
-  member_account: "Member account",
-  gift_card: "Gift card",
-};
 
 type Props = {
   demo: boolean;
@@ -364,6 +354,12 @@ function SaleDetail({
         </dl>
 
         {sale.note ? <p className="text-xs text-[#6b7280]">{sale.note}</p> : null}
+
+        {/* 다시 찍은 종이에는 REPRINT 가 찍힌다. 원본과 사본을 들고 두 번 환불받으러
+            오는 것을 창구에서 가려낼 수 있어야 한다. 데모 매출은 예시라 찍지 않는다. */}
+        <Button disabled={demo} full onClick={() => printReceipt(sale, { reprint: true })}>
+          Reprint receipt
+        </Button>
 
         {error ? <ErrorNote>{error}</ErrorNote> : null}
 

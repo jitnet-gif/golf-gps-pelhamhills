@@ -114,6 +114,19 @@ export default function BookingShell({ title, subtitle, children }: Props) {
           </p>
           <p className="mt-2 text-[#8a6f30]">{CLUB.address}</p>
         </div>
+
+        {/* 공개 사이트로 나가는 출구. 헤더의 클럽 이름도 같은 곳으로 가지만 제목처럼
+            생겨서 링크인 줄 모르는 손님이 있고, 뒤로 가기 화살표는 허브에서만 밖으로
+            나간다. 그래서 스크롤 끝 — 하단 탭 바로 위 — 에 이름이 붙은 문을 하나 둔다.
+            고정 탭이 아니라 흐름 안에 있으므로 탭이 없는 데스크톱에서도 그대로 남고,
+            푸터가 이미 갖고 있는 `pb-28` 여백을 물려받아 탭에 가리지 않는다. */}
+        <Link
+          className="tap-target mt-4 flex items-center justify-center gap-2 rounded-sm border border-[#d8d1c3] bg-white px-4 text-sm font-semibold text-[#214d2f] transition hover:bg-[#ece7da]"
+          href={SITE_HOME}
+        >
+          <span aria-hidden>←</span>
+          Back to {CLUB.shortName}
+        </Link>
       </footer>
 
       <nav

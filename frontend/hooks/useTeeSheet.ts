@@ -99,6 +99,11 @@ function makePlayer(input: Partial<Player> = {}): Player {
     paid: input.paid ?? false,
     cancelled: input.cancelled ?? false,
     no_show: input.no_show ?? false,
+    cart: input.cart ?? false,
+    cartFee: input.cartFee ?? 0,
+    // 결제 시각은 서버만 찍는다. 로컬 사본에 찍으면 "서버가 결제를 기록했다" 는 신호가 사라진다
+    // (ReservationDetail 의 Payment 가 이 값으로 영수증을 낼지 정한다).
+    paidAt: null,
   };
 }
 
@@ -305,6 +310,9 @@ function mergePlayer(player: Player, patch: PatchPlayerInput): Player {
     next.firstName = parts[0] ?? "";
     next.lastName = parts.slice(1).join(" ");
   }
+  // 서버 규칙을 흉내 내는 것은 "지우는" 쪽뿐이다. 카트 자동 요금과 결제 시각은 서버가 채운다.
+  if (patch.paid === false) next.paidAt = null;
+  if (patch.cart === false) next.cartFee = 0;
   return next;
 }
 
@@ -1030,9 +1038,13 @@ export function useTeeSheet(): TeeSheetController {
       carts += booking.cartCount;
 
       if (booking.status === "cancelled") continue; // 취소 예약은 매출에서 제외
-      const billable = booking.players.filter((player) => !player.cancelled);
-      revenue += booking.rate * billable.length;
-      outstanding += booking.rate * billable.filter((player) => !player.paid).length;
+      for (const player of booking.players) {
+        if (player.cancelled) continue;
+        // 한 사람이 내는 돈 = 그린피 + (카트를 쓰면) 카트 요금. 서버 일일 리포트와 같은 식이다.
+        const due = booking.rate + (player.cart ? (player.cartFee ?? 0) : 0);
+        revenue += due;
+        if (!player.paid) outstanding += due;
+      }
     }
 
     return {

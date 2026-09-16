@@ -13,7 +13,7 @@
  * 문서 맨 아래에 있어서, 고정 줄이 늘 떠 있으면 다른 화면으로 갈 길을 덮는다.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 
 import {
   computeCartTotals,
@@ -22,6 +22,8 @@ import {
   type CartLine,
 } from "@/lib/retail/api";
 import retailApi from "@/lib/retail/api";
+import { printReceipt } from "@/lib/retail/printReceipt";
+import { PAYMENT_LABELS } from "@/lib/retail/receipt";
 import {
   PAYMENT_METHODS,
   RETAIL_CATEGORIES,
@@ -46,12 +48,43 @@ import {
   useOverlayDismiss,
 } from "./ui";
 
-const PAYMENT_LABELS: Record<PaymentMethod, string> = {
-  cash: "Cash",
-  card: "Card",
-  member_account: "Member account",
-  gift_card: "Gift card",
-};
+/**
+ * "결제 뒤 영수증 자동 인쇄" 스위치. 카운터 PC 한 대의 습관이라 서버가 아니라 이
+ * 브라우저에만 남긴다. 저장소가 막힌 브라우저(사생활 모드 등)에서는 꺼진 채로 시작할 뿐이다.
+ */
+const AUTO_PRINT_KEY = "pelham.retail.autoPrint";
+
+// 저장소가 막힌 브라우저에서도 이 화면이 열려 있는 동안은 스위치가 동작하도록 메모리에도 둔다.
+let autoPrintFallback = false;
+const autoPrintListeners = new Set<() => void>();
+
+function readAutoPrint(): boolean {
+  try {
+    return window.localStorage.getItem(AUTO_PRINT_KEY) === "on";
+  } catch {
+    return autoPrintFallback;
+  }
+}
+
+function writeAutoPrint(on: boolean): void {
+  autoPrintFallback = on;
+  try {
+    window.localStorage.setItem(AUTO_PRINT_KEY, on ? "on" : "off");
+  } catch {
+    // 위의 메모리 값으로 버틴다.
+  }
+  // `storage` 이벤트는 **다른** 탭에만 온다. 이 탭의 구독자는 직접 깨운다.
+  autoPrintListeners.forEach((listener) => listener());
+}
+
+function subscribeAutoPrint(listener: () => void): () => void {
+  autoPrintListeners.add(listener);
+  window.addEventListener("storage", listener);
+  return () => {
+    autoPrintListeners.delete(listener);
+    window.removeEventListener("storage", listener);
+  };
+}
 
 /**
  * 장바구니 한 줄의 **화면 상태**. 할인은 센트가 아니라 사용자가 친 문자열 그대로
@@ -87,6 +120,9 @@ export default function RegisterTab({ products, loading, demo, onSold }: Props) 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [receipt, setReceipt] = useState<Sale | null>(null);
+  // 미리 구운 정적 HTML 은 세 번째 인자(꺼짐)로 그리고, 브라우저에서 저장된 값으로
+  // 바꾼다. 첫 렌더에서 localStorage 를 읽으면 체크 상태가 달라져 하이드레이션이 어긋난다.
+  const autoPrint = useSyncExternalStore(subscribeAutoPrint, readAutoPrint, () => false);
 
   // 판매 화면에는 **활성 상품만** 올린다. 비활성 상품이 격자에 섞이면 이미
   // 안 파는 물건을 눌러 찍게 된다.
@@ -184,6 +220,9 @@ export default function RegisterTab({ products, loading, demo, onSold }: Props) 
       // 영수증은 **서버 응답**으로 그린다. 화면 미리보기와 서버 계산이 어긋났다면
       // 그 사실이 영수증에 그대로 드러나야 한다 — 덮어 두면 마감 때 발견한다.
       setReceipt(sale);
+      // 인쇄는 다음 틱으로 미룬다. `window.print()` 는 대화상자가 닫힐 때까지 스크립트를
+      // 멈추므로, 여기서 바로 부르면 비워진 장바구니와 영수증 화면이 인쇄가 끝난 뒤에야 그려진다.
+      if (autoPrint) window.setTimeout(() => printReceipt(sale), 0);
       setEntries([]);
       setOrderDiscountInput("");
       setNote("");
@@ -197,12 +236,14 @@ export default function RegisterTab({ products, loading, demo, onSold }: Props) 
 
   const cartBody = (
     <CartBody
+      autoPrint={autoPrint}
       cashier={cashier}
       demo={demo}
       entries={entries}
       error={error}
       lineTotals={totals.lineTotals}
       note={note}
+      onAutoPrint={writeAutoPrint}
       onCashier={setCashier}
       onCharge={charge}
       onLineDiscount={setLineDiscount}
@@ -406,6 +447,9 @@ type CartBodyProps = {
   onNote: (value: string) => void;
   onCharge: () => void;
   onReset: () => void;
+  /** 결제가 끝나면 영수증을 바로 인쇄할지. 이 브라우저에만 저장된다. */
+  autoPrint: boolean;
+  onAutoPrint: (on: boolean) => void;
 };
 
 function CartBody(props: CartBodyProps) {
@@ -413,12 +457,14 @@ function CartBody(props: CartBodyProps) {
   if (receipt) return <ReceiptBody onReset={props.onReset} sale={receipt} />;
 
   const {
+    autoPrint,
     cashier,
     demo,
     entries,
     error,
     lineTotals,
     note,
+    onAutoPrint,
     onCashier,
     onCharge,
     onLineDiscount,
@@ -565,6 +611,16 @@ function CartBody(props: CartBodyProps) {
         </p>
       ) : null}
 
+      <label className="flex min-h-11 items-center gap-2 text-sm">
+        <input
+          checked={autoPrint}
+          className="h-5 w-5 accent-[#4533ff]"
+          onChange={(event) => onAutoPrint(event.target.checked)}
+          type="checkbox"
+        />
+        Print receipt after charge
+      </label>
+
       <Button
         className="min-h-14 text-base"
         disabled={demo || submitting || entries.length === 0}
@@ -626,6 +682,9 @@ function ReceiptBody({ sale, onReset }: { sale: Sale; onReset: () => void }) {
 
       {sale.note ? <p className="text-xs text-[#6b7280]">{sale.note}</p> : null}
 
+      <Button className="min-h-12" full onClick={() => printReceipt(sale)}>
+        Print receipt
+      </Button>
       <Button className="min-h-14 text-base" full onClick={onReset} tone="primary">
         New sale
       </Button>

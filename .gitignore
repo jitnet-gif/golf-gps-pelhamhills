@@ -16,6 +16,11 @@ desktop.ini
 
 /backend/data/
 
+# 생성된 코스 타일. `npm run generate-tiles` / `scripts/upload_to_r2.py` 의 작업
+# 디렉터리다. 줌 레벨 하나가 수천 장이고 전부 바이너리라, 한 번 들어가면
+# 저장소 히스토리에서 빼기 어렵다. 진실은 R2 버킷에 있다.
+/tiles/
+
 # 임시 검증 스크립트와 그 산출물. 저장소에 남길 것이 아니다.
 .tmp-*.mjs
 shots/

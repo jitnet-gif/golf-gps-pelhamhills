@@ -1,0 +1,56 @@
+# 예약 API (FastAPI) 배포 설정.
+#
+# 2026-09-08 첫 배포 때의 설정을 그대로 되살리고, 티 시트 저장소만 Supabase 로 바꿨다
+# (2026-09-11). 배포: 저장소 루트에서 `flyctl deploy --remote-only`.
+#
+# ⚠️ **머신은 반드시 하나다.** 티 시트는 이제 Supabase(`public.pelham_tee_bookings`)에
+# 있지만, 정원 검사와 저장을 묶는 잠금은 여전히 프로세스 안의 `threading.RLock` 뿐이다
+# (`backend/services/tee_sheet_store.py`). 머신을 둘로 늘리면 두 프로세스가 같은
+# 티 타임을 동시에 팔 수 있다. 상점(retail)과 시뮬레이터는 아직 볼륨의 JSON 파일이라
+# 머신마다 다른 데이터를 보게 된다. `fly scale count 1` 을 유지할 것.
+
+app = "pelhamhills-api"
+primary_region = "yyz"   # 토론토. 클럽과 손님이 온타리오에 있다.
+
+[build]
+  dockerfile = "backend/Dockerfile"
+
+[env]
+  # 티 시트 저장소. URL 과 service_role 키는 여기 말고 `fly secrets` 에 있다
+  # (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY). json 으로 되돌리면 볼륨의
+  # /data/tee_sheet.json 을 다시 읽는다 — 전환 뒤의 예약은 거기 없다.
+  TEE_SHEET_BACKEND = "supabase"
+
+  # 나머지 두 저장소는 볼륨으로 보낸다. 하나라도 빠뜨리면 그 데이터는 컨테이너
+  # 파일시스템에 쓰이고 재배포 때마다 조용히 사라진다. TEE_SHEET_DATA_FILE 은
+  # supabase 모드에서는 읽지 않지만, 전환 전 예약이 남아 있는 파일이라 그대로 둔다.
+  TEE_SHEET_DATA_FILE = "/data/tee_sheet.json"
+  RETAIL_DATA_FILE = "/data/retail.json"
+  SIMULATOR_DATA_FILE = "/data/simulator.json"
+
+  # CORS 허용 출처는 `fly secrets set ALLOWED_ORIGINS=...` 로 덮여 있다 — 그래야
+  # 코드 배포 없이 고친다. CORS 는 **부르는 쪽 브라우저의 출처** 목록이다.
+
+[[mounts]]
+  source = "pelhamhills_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_start_machines = true
+  # 예약 화면은 손님이 기다리는 화면이라 콜드 스타트를 두지 않는다.
+  auto_stop_machines = false
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    # `backend/main.py` 의 루트 핸들러. {"status": "online", ...} 를 돌려준다.
+    path = "/"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

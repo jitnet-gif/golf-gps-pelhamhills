@@ -1,7 +1,12 @@
 """Chronogolf 대시보드 티시트 CSV export 를 티 시트에 반영한다; --apply 전엔 dry-run.
 
-적용 전에 로컬 API 를 내릴 것: `tee_sheet_store` 는 스토어를 프로세스에 캐시하고
-파일을 감시하지 않는다. 서버가 떠 있으면 다음 저장 때 임포트를 덮어쓴다.
+적용 전에 로컬 API 를 내릴 것 (JSON 모드): `tee_sheet_store` 는 스토어를 프로세스에
+캐시하고 파일을 감시하지 않는다. 서버가 떠 있으면 다음 저장 때 임포트를 덮어쓴다.
+
+두 저장 엔진(json / supabase) 모두에서 돈다. 저장소 전체가 아니라 **export 가 책임지는
+날짜** 만 읽고 그 범위 안에서만 바꾼다 — 그 밖의 예약(컷오버 뒤 API·음성으로 들어온
+것)은 읽지도 쓰지도 않는다. 범위 안에 사람이 만든 예약이 있으면 `merge` 가 멈춘다.
+supabase 모드는 쓰기 전에 바꿀 범위의 행을 `backend/data/backups/` 에 남긴다.
 
 DOM 스냅샷 임포터(`import_chronogolf_snapshot.py`)보다 이 경로가 낫다. 진짜
 `Reservation ID` 와 예약 시각, 도착/결제/취소 상태, 그린피·카트피가 다 들어 있어서
@@ -35,11 +40,15 @@ import shutil
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from backend.api.routes.tee_sheet import (FIRST_TEE_MINUTES, LAST_TEE_MINUTES,
+                                          SLOT_INTERVAL_MINUTES)
 from backend.services import tee_sheet_store as store
 
 CLUB_ID = 19671
 IMPORT_MARKER = "Chronogolf dashboard CSV export"
 ROW_CAP = 500  # export 한 번에 내려오는 행 상한. 이 수치면 잘렸다고 본다.
+# supabase 모드 백업 위치 (gitignore 된 backend/data 아래). 테스트가 tmp 로 바꾼다.
+BACKUP_DIR = Path(__file__).resolve().parents[1] / "backend" / "data" / "backups"
 
 # 스토어/프론트가 받아들이는 유일한 시각 표기. "06:58 AM" 처럼 0이 붙으면
 # merge 의 슬롯 비교가 어긋나 같은 날을 통째로 이중 등록한다 — 조용히 틀리는
@@ -54,7 +63,10 @@ def slot_label(raw):
     if not SLOT_TIME_RE.match(label):
         raise ValueError(f"Bad slot label: {label!r}")
     minutes = stamp.hour * 60 + stamp.minute
-    if not 400 <= minutes <= 1080 or (minutes - 400) % 9:
+    # 격자는 API 의 상수를 그대로 쓴다. 여기서 따로 적어 두면 한쪽만 바뀌어
+    # 임포터가 받은 예약이 시트에 칸이 없거나, 칸이 있는 예약을 임포터가 거절한다.
+    if (not FIRST_TEE_MINUTES <= minutes <= LAST_TEE_MINUTES
+            or (minutes - FIRST_TEE_MINUTES) % SLOT_INTERVAL_MINUTES):
         raise ValueError(f"Invalid slot: {raw}")
     return label, minutes
 
@@ -66,6 +78,11 @@ def cancelled(row):
 def money(raw):
     value = (raw or "").strip()
     return float(value) if value else 0.0
+
+
+def oversize_cancelled(group):
+    """통째로 취소됐고 라운드가 4개를 넘는 예약. 예약 모델(최대 4명)에 담을 수 없다."""
+    return len(group) > 4 and all(cancelled(r) for r in group)
 
 
 def convert(rows, source_name, include_cancelled=False):
@@ -85,8 +102,13 @@ def convert(rows, source_name, include_cancelled=False):
         active = [r for r in group if not cancelled(r)]
         if not active and not include_cancelled:
             continue
+        if oversize_cancelled(group):
+            # 살아 있는 자리가 하나도 없으니 버려도 시트에서 사라지는 게 없다.
+            # 조용히 사라지지 않게 run() 이 따로 세어 보고한다.
+            continue
         seats = active or group
         if len(seats) > 4:
+            # 살아 있는 자리가 5개 이상이면 진짜 충돌이다. 넘기지 말고 멈춘다.
             raise ValueError(f"Reservation {reservation_id} has {len(seats)} active seats")
 
         head = seats[0]
@@ -222,6 +244,68 @@ def merge(existing, incoming, dates):
     return kept + [b for b in incoming if b["date"] in dates], replaced
 
 
+def plan(existing, incoming, dates, truncated, dropped):
+    """범위 안 예약(existing)에 대해 merge 를 돌리기 전 검사까지. dry-run 과 적용이 같이 쓴다."""
+    if truncated and not dropped:
+        # 잘린 날을 넣기로 했다. 그날 예약이 이미 있으면 오전만 있는 시트로
+        # 오후를 덮어써 지우게 된다. 순수 추가일 때만 허용한다.
+        clash = [b["id"] for b in existing if b["date"] == truncated]
+        if clash:
+            raise ValueError(
+                f"{truncated} is truncated mid-day by the {ROW_CAP}-row cap and the store "
+                f"already holds {len(clash)} booking(s) on it; importing would erase that "
+                f"day's afternoon. Re-export {truncated} on its own instead.")
+    # 들여올 id 가 이 export 의 날짜 밖에 이미 있다 = Chronogolf 에서 날짜가 바뀐 예약.
+    # merge 는 날짜 밖 행을 남기므로 그대로 두면 같은 id 가 두 번 들어가고, 저장소는
+    # 기본키 upsert 로 예약을 말없이 옮긴다. 책임 범위 경계에서는 추측하지 않고 멈춘다.
+    ids = {b["id"] for b in incoming}
+    strays = sorted((b["date"], b["id"]) for b in existing
+                    if b["id"] in ids and b["date"] not in dates)
+    if strays:
+        day, booking_id = strays[0]
+        raise ValueError(
+            f"Booking {booking_id} is already stored on {day}, outside this export's dates "
+            f"({len(strays)} such booking(s)); re-export a window that covers {day} too")
+    return merge(existing, incoming, dates)
+
+
+def _keyed(bookings):
+    # 범위 읽기의 순서는 엔진마다 다르다 (파일 순서 / 날짜·생성 시각 순). 내용만 비교한다.
+    return {b["id"]: b for b in bookings}
+
+
+def _json_file_missing():
+    # 예전 임포터처럼 "파일 없음 = 빈 저장소" 로 본다. 저장소를 거치면 JSON 모드는 파일이
+    # 없을 때 시드를 심는다 — dry-run 이 파일을 쓰게 되고, 적용 결과에 시드가 섞인다.
+    return store.backend() == "json" and not store.data_file().exists()
+
+
+def _target():
+    if store.backend() == "json":
+        return str(store.data_file())
+    from backend.services import tee_sheet_supabase
+    return f"supabase:{tee_sheet_supabase.TABLE}"
+
+
+def _backup(rows):
+    """쓰기 직전에 되돌릴 거리를 남긴다. 경로를 돌려준다 (남길 게 없으면 None)."""
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    if store.backend() == "json":
+        # JSON 은 예전처럼 파일 통째 사본. 범위 밖 행까지 들어 있어 되돌리기가 쉽다.
+        target = store.data_file()
+        if not target.exists():
+            return None
+        backup = target.with_name(target.name + "." + stamp + ".bak")
+        shutil.copy2(target, backup)
+        return str(backup)
+    # supabase 는 파일이 없다. 곧 바꿀 범위의 행(= 락 안에서 읽은 그대로)을 남긴다.
+    # 범위 밖 행은 이 임포트가 건드리지 않으므로 필요 없다.
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    backup = BACKUP_DIR / f"import_teesheet_csv-{stamp}.json"
+    backup.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+    return str(backup)
+
+
 def run(source, apply=False, include_cancelled=False, include_truncated=False):
     path = Path(source)
     with path.open(encoding="utf-8-sig", newline="") as handle:
@@ -236,20 +320,20 @@ def run(source, apply=False, include_cancelled=False, include_truncated=False):
     dates, truncated, dropped = covered_dates(rows, converted, include_truncated)
     incoming = [b for b in converted if b["date"] in dates]
 
-    target = store.data_file()
-    existing = json.loads(target.read_text(encoding="utf-8-sig")) if target.exists() else []
+    # 읽는 범위 = 책임 날짜 + 잘린 날(겹침 검사용) + 들여올 id (다른 날에 이미 있는지).
+    # 범위 밖은 읽지도 쓰지도 않는다. merge 의 "사람이 만든 예약" 검사가 범위 안을 지킨다.
+    scope = store.Scope(dates=set(dates) | ({truncated} if truncated else set()),
+                        ids={b["id"] for b in incoming})
+    store.drop_cache()  # JSON 모드: 예전처럼 디스크에 있는 것을 기준으로 한다
+    fresh = _json_file_missing()
+    existing = [] if fresh else store.load_bookings(scope)
+    total = 0 if fresh else store.count_bookings()
+    merged, replaced = plan(existing, incoming, dates, truncated, dropped)
 
-    if truncated and not dropped:
-        # 잘린 날을 넣기로 했다. 그날 예약이 이미 있으면 오전만 있는 시트로
-        # 오후를 덮어써 지우게 된다. 순수 추가일 때만 허용한다.
-        clash = [b["id"] for b in existing if b["date"] == truncated]
-        if clash:
-            raise ValueError(
-                f"{truncated} is truncated mid-day by the {ROW_CAP}-row cap and the store "
-                f"already holds {len(clash)} booking(s) on it; importing would erase that "
-                f"day's afternoon. Re-export {truncated} on its own instead.")
-
-    merged, replaced = merge(existing, incoming, dates)
+    groups = defaultdict(list)
+    for r in rows:
+        groups[(r.get("Reservation ID") or "").strip()].append(r)
+    oversize = sum(1 for g in groups.values() if oversize_cancelled(g)) if include_cancelled else 0
 
     report = dict(
         mode="apply" if apply else "dry-run", sourceRows=len(rows),
@@ -261,9 +345,13 @@ def run(source, apply=False, include_cancelled=False, include_truncated=False):
         importedPlayers=sum(len(b["players"]) for b in incoming),
         cancelledReservationsSkipped=len(
             {(r.get("Reservation ID") or "").strip() for r in rows}) - len(converted),
+        # 위 수에 포함된다. 통째로 취소된 5인 이상 예약 — 모델에 담을 수 없어 버린 것.
+        oversizeCancelledSkipped=oversize,
         bookingsWithCart=sum(1 for b in incoming if b["cartCount"]),
-        replacedBookings=replaced, preservedBookings=len(merged) - len(incoming),
-        target=str(target), changed=merged != existing,
+        # 범위 밖은 읽지 않았으니 "남는 예약" 은 전체 수에서 교체될 수를 뺀다
+        # (= 예전의 len(merged) - len(incoming)).
+        replacedBookings=replaced, preservedBookings=total - replaced,
+        target=_target(), changed=_keyed(merged) != _keyed(existing),
         sourceSha256=hashlib.sha256(path.read_bytes()).hexdigest())
     if dropped:
         report["warning"] = (f"Source hit the {ROW_CAP}-row cap; {dropped} is truncated "
@@ -273,14 +361,21 @@ def run(source, apply=False, include_cancelled=False, include_truncated=False):
                              f"anyway (--include-truncated-date) and holds that day's morning "
                              f"only. Re-export it on its own to complete the day.")
 
-    if apply and merged != existing:
-        if target.exists():
-            backup = target.with_name(
-                target.name + "." + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + ".bak")
-            shutil.copy2(target, backup)
-            report["backup"] = str(backup)
-        store.save_bookings(merged)
-        if json.loads(target.read_text(encoding="utf-8")) != merged:
+    if apply and report["changed"]:
+        if fresh:
+            store.save_bookings([])  # 시드 없이 빈 파일부터 (예전 결과와 같게)
+        with store.mutate(scope) as live:
+            # 락 안에서 읽은 것으로 다시 계산한다. dry-run 과 이 사이에 범위 안이 바뀌었으면
+            # 그 변경도 merge 의 검사를 다시 거친다.
+            merged, replaced = plan(live, incoming, dates, truncated, dropped)
+            backup = None if fresh else _backup(live)
+            live[:] = merged
+        report["replacedBookings"] = replaced
+        report["preservedBookings"] = total - replaced
+        if backup:
+            report["backup"] = backup
+        # 파일이 아니라 저장소에서 같은 범위를 다시 읽어 합친 결과와 비교한다 (두 엔진 공통).
+        if _keyed(store.load_bookings(scope)) != _keyed(merged):
             raise RuntimeError("Readback verification failed")
     return report
 
@@ -297,5 +392,5 @@ if __name__ == "__main__":
     mode.add_argument("--apply", action="store_true")
     mode.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    print(json.dumps(run(args.source, args.apply, args.include_cancelled,
-                         args.include_truncated_date), indent=2))
+    report = run(args.source, args.apply, args.include_cancelled, args.include_truncated_date)
+    print(json.dumps(report, indent=2))

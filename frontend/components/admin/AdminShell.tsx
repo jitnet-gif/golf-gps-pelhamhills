@@ -149,14 +149,14 @@ function DesktopSidebar({ pathname }: { pathname: string | null }) {
     // 두면 메뉴 12개 바로 밑에 노트가 붙어서 화면 중간에 뜬다.
     <aside className="hidden min-h-0 flex-col bg-[#111315] text-white lg:flex">
       <div className="flex shrink-0 items-center gap-2 border-b border-white/10 px-4 py-4 text-sm font-bold">
-        {/* 워드마크 앞의 마름모는 클럽 로고 자리 (Lightspeed 워드마크 앞 마름모를 그대로 따랐다). */}
+        {/* 워드마크 앞의 마름모는 pelhamhills 로고 자리. */}
         <span aria-hidden className="text-base leading-none">
           &#9670;
         </span>
         pelhamhills
       </div>
 
-      {/* 제품군 표시. Lightspeed 는 여기에 드롭다운을 두지만 우리는 골프 하나뿐이라
+      {/* 제품군 표시. pelhamhills 는 여기에 드롭다운을 두지만 우리는 골프 하나뿐이라
           고를 것이 없다 — 아무것도 하지 않는 가짜 드롭다운 대신 생김새만 맞춘 표시다.
           그래서 <button> 이 아니라 <p> 이고, 캐럿에는 aria-hidden 이 붙어 있다. */}
       <p className="flex shrink-0 items-center justify-between border-b border-white/10 bg-[#1c1f22] px-4 py-2.5 text-xs font-semibold text-white/70">

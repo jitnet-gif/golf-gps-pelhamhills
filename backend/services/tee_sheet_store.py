@@ -1,15 +1,22 @@
 """티 시트 예약 영속 저장소.
 
-`backend/api/routes/tee_sheet.py` 가 쓰는 유일한 저장 계층이다.
-JSON 파일 하나에 예약 목록을 통째로 보관한다 (레코드 수가 수백 단위라 충분하다).
+`backend/api/routes/tee_sheet.py` 와 스크립트들이 쓰는 저장 계층의 **입구**다.
+저장 엔진은 `TEE_SHEET_BACKEND` 환경변수로 고른다.
+- `json` (기본값): JSON 파일 하나에 예약 목록을 통째로 보관한다 (레코드 수가 수백 단위라 충분하다).
+- `supabase`: `pelham_tee_bookings` 테이블. 실제 REST 호출은 `tee_sheet_supabase.py` 가 한다.
+공개 API 는 둘 다 같다. 호출자는 어느 엔진인지 몰라도 된다.
 
 설계 메모
-- 데이터 파일 경로는 **호출 시점**에 `TEE_SHEET_DATA_FILE` 환경변수를 읽어 결정한다.
+- 엔진과 데이터 파일 경로 모두 **호출 시점**에 환경변수를 읽어 결정한다.
   모듈 임포트 시점에 굳혀 두면 테스트에서 monkeypatch 해도 먹지 않는다.
-- 인메모리 캐시는 "해석된 경로"를 키로 잡는다. 경로가 바뀌면 캐시를 버린다.
+- 인메모리 캐시는 JSON 모드에만 있고 "해석된 경로"를 키로 잡는다. 경로가 바뀌면 캐시를 버린다.
+  supabase 모드는 캐시하지 않는다 — 스크립트와 음성 웹훅 등 다른 프로세스도 같은 테이블에 쓴다.
 - 모든 변경은 `threading.RLock` 으로 감싼다. FastAPI 의 sync 엔드포인트는
   스레드풀에서 돌기 때문에 동시 진입이 실제로 가능하다.
-- 쓰기는 같은 디렉터리에 임시 파일을 만든 뒤 `os.replace` 로 원자 교체한다.
+- JSON 쓰기는 같은 디렉터리에 임시 파일을 만든 뒤 `os.replace` 로 원자 교체한다.
+- 읽기·쓰기는 `Scope` 로 **필요한 날짜/id 만** 다룬다. 과거 예약 8,400여 건(~20 MB)을
+  들여오면 요청마다 테이블 전체를 읽는 방식은 쓸 수 없다. `scope=None` 은 예전 그대로
+  전체를 다룬다 (스크립트와 기존 테스트가 기댄다).
 """
 
 from __future__ import annotations
@@ -20,23 +27,31 @@ import tempfile
 import threading
 from contextlib import contextmanager
 from copy import deepcopy
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterable, Iterator
 from uuid import uuid4
 
 __all__ = [
     "ENV_VAR",
+    "BACKEND_ENV_VAR",
+    "Scope",
+    "backend",
     "data_file",
     "load_bookings",
     "save_bookings",
     "mutate",
+    "count_bookings",
+    "drop_cache",
     "reset",
     "seed_bookings",
     "split_name",
 ]
 
 ENV_VAR = "TEE_SHEET_DATA_FILE"
+BACKEND_ENV_VAR = "TEE_SHEET_BACKEND"
+_BACKENDS = ("json", "supabase")
 
 # backend/services/tee_sheet_store.py -> backend/data/tee_sheet.json
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -53,6 +68,92 @@ def data_file() -> Path:
     if override:
         return Path(override).expanduser().resolve()
     return _DEFAULT_DATA_FILE
+
+
+def backend() -> str:
+    """현재 저장 엔진 이름 (`json` | `supabase`). 환경변수를 매번 다시 읽는다.
+
+    모르는 값은 조용히 json 으로 떨어뜨리지 않고 터뜨린다. 오타 하나로 운영 서버가
+    로컬 JSON 파일에 예약을 쌓기 시작하면, 티 시트가 두 벌로 갈라진 걸 한참 뒤에야 안다.
+    """
+    name = os.environ.get(BACKEND_ENV_VAR, "").strip().lower() or "json"
+    if name not in _BACKENDS:
+        raise ValueError(
+            f"{BACKEND_ENV_VAR}={name!r} is not supported; use one of {', '.join(_BACKENDS)}"
+        )
+    return name
+
+
+def _sb():
+    """supabase 저장 계층을 늦게 임포트한다.
+
+    JSON 모드는 httpx 도, 그 모듈 파일도 없이 돌아야 한다. 그리고 저쪽이 이 모듈을
+    임포트하지 않으므로 순환도 생기지 않는다.
+    """
+    from backend.services import tee_sheet_supabase
+
+    return tee_sheet_supabase
+
+
+# ===== 읽기 범위 =======================================================
+
+
+def _frozen(values: Iterable[str], name: str) -> frozenset[str]:
+    # 문자열 하나를 그대로 넘기면 frozenset("2026-09-12") 가 글자 집합이 되어
+    # 아무 예약도 안 읽힌다 — 정원 검사가 빈 목록으로 "자리 있음" 을 낸다. 막는다.
+    if isinstance(values, str):
+        raise TypeError(f"Scope.{name} takes a collection of strings, not one string")
+    return frozenset(str(value) for value in values)
+
+
+@dataclass(frozen=True)
+class Scope:
+    """저장소에서 읽을 예약의 범위. 기준들은 **합집합(OR)** 이다.
+
+    - `dates`: 개별 ISO 날짜들
+    - `date_from` / `date_to`: 경계 포함 날짜 구간 하나. 한쪽을 비우면 그쪽은 열려 있다.
+    - `ids`: 예약 id 들
+    - `holds`: `holdExpiresAt` 이 있는 예약 전부 (날짜 무관)
+
+    `covers_date` 는 `dates` 나 구간으로만 참이 된다. ids·holds 로 읽은 행은 그 날짜의
+    **일부**일 뿐이라, 그걸로 날짜를 "다 읽었다" 고 치면 정원 검사가 모자란 목록을 센다.
+    """
+
+    dates: frozenset[str] = field(default_factory=frozenset)
+    date_from: str | None = None
+    date_to: str | None = None
+    ids: frozenset[str] = field(default_factory=frozenset)
+    holds: bool = False
+
+    def __post_init__(self) -> None:
+        # set·list 로 넘겨도 되게 한다. frozen 이라 object.__setattr__ 로 정규화한다.
+        object.__setattr__(self, "dates", _frozen(self.dates, "dates"))
+        object.__setattr__(self, "ids", _frozen(self.ids, "ids"))
+
+    @property
+    def has_range(self) -> bool:
+        return self.date_from is not None or self.date_to is not None
+
+    def covers_date(self, iso_date: str) -> bool:
+        """이 날짜의 예약을 **전부** 읽었다고 보장하는가."""
+        if iso_date in self.dates:
+            return True
+        if not self.has_range:
+            return False
+        # ISO 날짜는 문자열 비교가 곧 날짜 비교다 (Postgres 의 date 비교와 같은 결과).
+        return (self.date_from is None or iso_date >= self.date_from) and (
+            self.date_to is None or iso_date <= self.date_to
+        )
+
+    def matches(self, doc: dict[str, Any]) -> bool:
+        day = doc.get("date")
+        if isinstance(day, str) and self.covers_date(day):
+            return True
+        if self.ids and str(doc.get("id")) in self.ids:
+            return True
+        # `is not None` 이 아니라 참거짓으로 본다. to_row 가 "" 를 NULL 로 적으므로
+        # supabase 의 `hold_expires_at=not.is.null` 과 같은 행을 고르려면 "" 도 빠져야 한다.
+        return self.holds and bool(doc.get("holdExpiresAt"))
 
 
 # ===== 시드 데이터 =====================================================
@@ -350,45 +451,155 @@ def _ensure_loaded() -> list[dict[str, Any]]:
     return _cache
 
 
+def _store_json(payload: list[dict[str, Any]]) -> None:
+    """이미 이 모듈 소유인 목록을 원자적으로 쓰고 캐시로 삼는다. 호출자는 _lock 을 잡고 있어야 한다."""
+    global _cache, _cache_path
+    path = data_file()
+    _write_atomic(path, payload)
+    _cache = payload
+    _cache_path = path
+
+
+def _replace_subset(
+    full: list[dict[str, Any]], loaded_ids: set[str], working: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """전체 목록 안에서 "읽었던 부분" 만 working 으로 갈아 끼운다 (JSON 모드의 apply_diff).
+
+    - working 에 있는 id → 원래 자리에 새 값 (자리를 지켜야 같은 티 타임 안의 좌석 순서,
+      즉 파일 순서가 흔들리지 않는다)
+    - 읽었는데 working 에서 빠진 id → 삭제
+    - 읽지 않은 행 → 그대로. 범위를 다시 계산하지 않는다: 9/12 로 읽고 9/13 으로 옮긴
+      예약은 working 에 있으니 남는다.
+    - working 에만 있는 새 id → 끝에 붙인다.
+    working 의 id 가 범위 밖 기존 행과 겹치면 그 행을 덮어쓴다 — supabase upsert 와 같은
+    기본키 의미다. 같은 id 두 줄은 절대 만들지 않는다.
+    """
+    pending: dict[str, dict[str, Any]] = {}
+    for doc in working:
+        pending[str(doc["id"])] = doc  # 같은 id 가 두 번이면 뒤의 것 (supabase _by_id 와 같다)
+    out: list[dict[str, Any]] = []
+    for doc in full:
+        doc_id = str(doc.get("id"))
+        if doc_id in pending:
+            out.append(pending.pop(doc_id))
+        elif doc_id not in loaded_ids:
+            out.append(doc)
+    out.extend(pending.values())
+    return out
+
+
 # ===== 공개 API ========================================================
 
 
-def load_bookings() -> list[dict[str, Any]]:
-    """예약 목록의 깊은 복사본을 돌려준다 (호출자가 캐시를 오염시키지 못하게)."""
+def load_bookings(scope: Scope | None = None) -> list[dict[str, Any]]:
+    """예약 목록의 깊은 복사본을 돌려준다 (호출자가 캐시를 오염시키지 못하게).
+
+    `scope` 를 주면 그 범위의 예약만. None 이면 전체.
+    """
+    if backend() == "supabase":
+        # 락을 잡지 않는다. 다른 프로세스도 테이블에 쓰므로 프로세스 안의 락으로는
+        # 일관된 읽기를 살 수 없고, 잡으면 일일 배치의 동시 읽기 셋이 한 줄로 늘어선다.
+        sb = _sb()
+        return deepcopy(sb.fetch_all() if scope is None else sb.fetch(scope))
     with _lock:
-        return deepcopy(_ensure_loaded())
+        data = _ensure_loaded()
+        if scope is None:
+            return deepcopy(data)
+        # 복사는 고른 것만 한다. 전체를 깊은 복사하면 대량 임포트 뒤에는 그것만으로 느리다.
+        return deepcopy([doc for doc in data if scope.matches(doc)])
+
+
+def count_bookings() -> int:
+    """저장된 예약 수. 행을 읽지 않고 센다 (supabase 는 count=exact 한 번)."""
+    if backend() == "supabase":
+        return _sb().count()
+    with _lock:
+        return len(_ensure_loaded())
+
+
+def drop_cache() -> None:
+    """JSON 캐시를 버린다. 다음 읽기는 디스크에서 다시 읽는다.
+
+    임포터용이다. 예전 임포터는 파일을 직접 읽었고, 저장소를 거치게 된 지금도
+    "디스크에 있는 것" 을 기준으로 해야 한다. 같은 프로세스에서 누가 파일을 저장소
+    몰래 바꿨다면, 낡은 캐시를 기준으로 합친 결과가 그 변경을 지운다.
+    """
+    global _cache, _cache_path
+    with _lock:
+        _cache = None
+        _cache_path = None
 
 
 def save_bookings(bookings: list[dict[str, Any]]) -> None:
     """목록 전체를 원자적으로 덮어쓰고 캐시를 갱신한다."""
-    global _cache, _cache_path
+    if backend() == "supabase":
+        # JSON 은 파일을 통째로 덮어쓰니 목록에서 빠진 예약이 저절로 사라진다.
+        # 테이블은 그렇지 않으므로 replace_all 이 "없는 행 삭제" 까지 해야 같은 의미다.
+        with _lock:
+            _sb().replace_all(list(bookings))
+        return
     with _lock:
-        path = data_file()
-        payload = deepcopy(list(bookings))
-        _write_atomic(path, payload)
-        _cache = payload
-        _cache_path = path
+        _store_json(deepcopy(list(bookings)))
 
 
 @contextmanager
-def mutate() -> Iterator[list[dict[str, Any]]]:
+def mutate(scope: Scope | None = None) -> Iterator[list[dict[str, Any]]]:
     """읽기-수정-쓰기를 락으로 감싼 컨텍스트 매니저.
 
-        with mutate() as bookings:
+        with mutate(Scope(dates={"2026-09-12"})) as bookings:
             bookings.append(...)
 
-    블록이 예외 없이 끝나면 저장한다. 예외가 나면 디스크는 그대로 둔다.
+    블록이 예외 없이 끝나면 저장한다. 예외가 나면 저장소는 그대로 둔다.
     주의: 이 블록 안에서 `await` 하지 말 것 (락을 잡은 채로 양보하게 된다).
+
+    `scope` 를 주면 그 범위만 읽어 working 으로 넘기고, 끝나면 **읽었던 것** 과의
+    차이만 쓴다: 새/바뀐 doc 은 upsert, 읽었는데 working 에서 사라진 id 는 삭제.
+    쓸 때 범위를 다시 계산하지 않는다 — 9/12 범위에서 9/13 으로 옮긴 예약은
+    working 에 그대로 있으니 upsert 되지, 범위 밖이라고 지워지지 않는다. 읽지 않은
+    행은 지우지도 덮지도 않는다. 단, working 에 **추가한** id 가 범위 밖에 이미
+    있으면 기본키 upsert 라 두 엔진 모두 그 행을 덮는다. 신경 쓰이면 그 id 도
+    범위에 넣어 읽을 것 (새 예약은 uuid 라 겹칠 일이 없다).
+    `scope=None` 은 예전처럼 전체를 읽고 전체와 비교한다.
     """
+    if backend() == "supabase":
+        sb = _sb()
+        with _lock:
+            # diff 기준은 여기서 읽은 before 다 — save_bookings 로 다시 읽어 비교하지 않는다.
+            # 그래야 블록이 실제로 바꾼 행만 쓰고, 그사이 다른 프로세스가 고친 다른 행은
+            # 건드리지 않는다. 같은 행을 동시에 고치면 나중 쓰기가 이긴다 (락은 프로세스 안뿐).
+            # apply_diff 가 이미 "읽은 것 중 사라진 id 만 삭제" 라서 범위가 있어도 그대로 쓴다.
+            before = sb.fetch_all() if scope is None else sb.fetch(scope)
+            working = deepcopy(before)
+            yield working
+            sb.apply_diff(before, working)
+        return
     with _lock:
-        working = deepcopy(_ensure_loaded())
+        if scope is None:
+            working = deepcopy(_ensure_loaded())
+            yield working
+            save_bookings(working)
+            return
+        full = _ensure_loaded()
+        loaded = [doc for doc in full if scope.matches(doc)]
+        loaded_ids = {str(doc.get("id")) for doc in loaded}
+        working = deepcopy(loaded)
         yield working
-        save_bookings(working)
+        # working 만 복사한다. 범위 밖 행은 캐시가 이미 가진 객체라 그대로 옮겨 담아도 된다.
+        _store_json(_replace_subset(full, loaded_ids, deepcopy(working)))
 
 
 def reset(*, seed: bool = True) -> list[dict[str, Any]]:
-    """캐시와 파일을 초기화한다. 테스트/재시드 용."""
+    """캐시와 저장소를 초기화한다. 테스트/재시드 용."""
     global _cache, _cache_path
+    if backend() == "supabase":
+        sb = _sb()
+        with _lock:
+            data = seed_bookings() if seed else []
+            # 재시드는 "지금 테이블에 뭐가 있든" 이 목록과 같게 만드는 게 목적이라
+            # 먼저 읽어 diff 를 낼 이유가 없다. 비우고 다시 심는다.
+            sb.delete_all()
+            sb.upsert(data)
+            return deepcopy(data)
     with _lock:
         _cache = None
         _cache_path = None

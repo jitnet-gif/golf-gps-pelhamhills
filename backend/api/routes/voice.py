@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import logging
@@ -32,6 +33,7 @@ from pydantic import BaseModel, Field
 
 from backend.api.routes import tee_sheet as ts
 from backend.services import voice_agent
+from backend.services.tee_sheet_store import Scope
 
 logger = logging.getLogger(__name__)
 
@@ -487,7 +489,9 @@ def find_tee_times(body: FindTeeTimesRequest) -> FindTeeTimesResponse:
 
     now = club_now()
     utc_now = datetime.now(timezone.utc)
-    bookings = [b for b in ts.read_bookings() if b.date == iso_date]
+    # 그날만 읽는다. 컴프리헨션으로 다시 거르지 않는다 — 평범한 list 가 되면 읽은
+    # 범위가 떨어져 `tee_time_players` 가 받지 않는다.
+    bookings = ts.read_bookings(Scope(dates={iso_date}))
     blocked = _blocked_times(bookings, iso_date)
 
     options: list[TeeTimeOption] = []
@@ -556,7 +560,8 @@ def hold_tee_time(body: HoldRequest) -> HoldResponse:
 
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=ts.HOLD_TTL_SECONDS)
 
-    with ts.bookings_tx() as bookings:
+    # 그날(정원 검사) + 날짜 무관 홀드(아래 purge 가 예전처럼 전부 걷는다).
+    with ts.bookings_tx(Scope(dates={iso_date}, holds=True)) as bookings:
         ts.purge_expired_holds(bookings)
         slot = _require_open_slot(bookings, iso_date, time_label, body.party_size)
 
@@ -611,7 +616,7 @@ def release_hold(body: ReleaseHoldRequest) -> ReleaseHoldResponse:
     """
     _touch_session(body.conversation_id)
 
-    with ts.bookings_tx() as bookings:
+    with ts.bookings_tx(Scope(ids={body.hold_id}, holds=True)) as bookings:
         ts.purge_expired_holds(bookings)
         before = len(bookings)
         bookings[:] = [
@@ -647,7 +652,8 @@ def confirm_booking(body: ConfirmRequest) -> ConfirmResponse:
             detail="That phone number did not come through. Ask the caller to repeat it.",
         )
 
-    with ts.bookings_tx() as bookings:
+    # 인원을 늘리지 않는다 (홀드가 이미 자리를 잡고 있다) → 그 홀드 하나만 읽는다.
+    with ts.bookings_tx(Scope(ids={body.hold_id})) as bookings:
         hold = next((b for b in bookings if b.id == body.hold_id), None)
 
         if hold is None or hold.source != ts.BookingSource.VOICE_HOLD:
@@ -729,7 +735,8 @@ def lookup_booking(body: LookupRequest) -> LookupResponse:
     now = datetime.now(timezone.utc)
 
     matches: list[ts.TeeBooking] = []
-    for booking in ts.read_bookings():
+    # 지난 날짜는 어차피 버린다. 과거 예약 수천 건을 읽지 않게 오늘부터만.
+    for booking in ts.read_bookings(Scope(date_from=today)):
         if booking.date < today:
             continue
         if booking.status in (ts.BookingStatus.CANCELLED, ts.BookingStatus.BLOCKED):
@@ -805,7 +812,8 @@ def cancel_booking(body: CancelRequest) -> CancelResponse:
 
     wanted_last = body.last_name.strip().casefold()
 
-    with ts.bookings_tx() as bookings:
+    # 취소는 자리를 돌려줄 뿐이라 정원을 셀 필요가 없다 → 그 예약 하나만.
+    with ts.bookings_tx(Scope(ids={body.booking_id})) as bookings:
         booking = next((b for b in bookings if b.id == body.booking_id), None)
         if booking is None or booking.source == ts.BookingSource.VOICE_HOLD:
             raise HTTPException(status_code=404, detail="That reservation is not on the sheet.")
@@ -965,11 +973,16 @@ async def post_call(
         note += f" after {int(duration)} seconds"
     note += "."
 
-    annotated = 0
-    with ts.bookings_tx() as bookings:
-        for booking in bookings:
-            if booking.id in booking_ids:
-                ts._audit(booking, note)
-                annotated += 1
+    def annotate() -> int:
+        annotated = 0
+        with ts.bookings_tx(Scope(ids=booking_ids)) as bookings:
+            for booking in bookings:
+                if booking.id in booking_ids:
+                    ts._audit(booking, note)
+                    annotated += 1
+        return annotated
 
+    # 저장소가 Supabase 면 이 트랜잭션은 네트워크 왕복이다. async 핸들러에서 그대로
+    # 돌리면 그동안 이벤트 루프 전체(다른 통화의 웹훅, 음성 세션 발급)가 멈춘다.
+    annotated = await asyncio.to_thread(annotate)
     return {"ok": True, "annotated": annotated}

@@ -5,7 +5,9 @@
 - 모든 `time` 은 `GET /tee-sheet/slots?date=` 가 돌려주는 슬롯 라벨 중 하나여야 한다.
 - Player 는 `firstName`/`lastName` 를 갖고 `name` 은 서버가 파생한다.
 
-영속화는 `backend/services/tee_sheet_store.py` (JSON 파일 + RLock + 원자적 쓰기).
+영속화는 `backend/services/tee_sheet_store.py` (기본은 JSON 파일 + RLock + 원자적 쓰기,
+`TEE_SHEET_BACKEND=supabase` 면 Supabase 테이블). 모든 읽기·쓰기는 `Scope` 로 그 요청이
+실제로 필요한 날짜/id 만 다룬다 — 과거 예약을 들여오면 테이블 전체를 읽을 수 없다.
 """
 
 from __future__ import annotations
@@ -25,16 +27,22 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, model_validator
 
 from backend.services import tee_sheet_store as store
+from backend.services.tee_sheet_store import Scope
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 # ===== 슬롯 설정 ======================================================
-# Chronogolf 와 동일한 간격: 첫 티 6:40 AM, 9분 간격, 오후 6시까지.
+# Chronogolf 와 동일한 격자: 첫 티 6:40 AM, 9분 간격, 마지막 티 6:58 PM.
+# 마지막 티를 처음엔 "오후 6시까지" 로 짐작했는데 틀렸다. Chronogolf export
+# (2026-04~09, 예약 8,600여 건) 에 6:04~6:58 PM 예약이 250건 가까이 있고 전부 이
+# 9분 격자 위다 — 격자 밖 시각이나 6:40 AM 이전은 한 건도 없다. 격자를 좁게 두면
+# 그 예약들이 시트에서 칸을 잃는다. 해가 짧은 달의 마감 시각은 여기서 다루지 않는다.
+# 임포터(`scripts/import_*`)도 이 상수를 그대로 쓴다 — 격자 정의는 여기 하나뿐이다.
 
 FIRST_TEE_MINUTES = 6 * 60 + 40      # 06:40
-LAST_TEE_MINUTES = 18 * 60           # 18:00 (경계 포함; 9분 격자에는 안 걸린다)
+LAST_TEE_MINUTES = 18 * 60 + 58      # 18:58 (경계 포함, 격자 위의 마지막 슬롯)
 SLOT_INTERVAL_MINUTES = 9
 CARTS_PER_SLOT = 4
 # 하나의 티 타임은 플레이어 4자리다. 이 4자리는 **여러 예약이 나눠 가질 수 있다**
@@ -48,6 +56,33 @@ HOLD_TTL_SECONDS = 180
 
 WEEKDAY_RATE = 47.79
 WEEKEND_RATE = 58.41
+
+# 1인 카트 요금(세전, 달러). **2026-09-15 클럽 확인: 홀 수·요금제와 무관하게 $19.00 한 가지다**
+# (HST 13% 를 더하면 $21.47).
+#
+# 참고로 Chronogolf export(2026-04~09, 좌석 25,108행)에 남아 있는 과거 금액은 여러 가지였다:
+# 19.47(6,607행, 18홀 일반), 17.70(2,607행, Public Senior), 9.74(1,760행, 9홀), 11.50(1,369행, 미상).
+# 지금 요금표는 한 금액으로 통일됐으므로 상수 하나만 둔다. 옛 예약의 금액은 그대로 보존된다 —
+# 이 값은 카트를 **새로 켤 때** 채우는 기본값이고, 이미 적힌 금액을 건드리지 않는다.
+CART_FEE = 19.00
+
+
+def cart_fee_for(rate_plan: str, holes: int) -> float:
+    """1인 카트 요금. 카드가 처음 채우는 값이고, 사람이 카드에서 고칠 수 있다.
+
+    이름에 "Cart" 가 든 회원 요금제("... with Weekday Cart", "... with 7 Day Cart")는
+    회원권에 카트가 들어 있다고 보고 0 이다 — export 로 확인한 것이 아니라 요금제 이름을 읽은 것이다.
+
+    `holes` 는 지금 금액에 영향을 주지 않지만 인자로 남겨 둔다. 홀 수별 요금이 다시 생기면
+    호출부(카드·예약 수정·리포트)를 건드리지 않고 이 함수만 고치면 된다.
+    """
+    if "cart" in (rate_plan or "").lower():
+        return 0.0
+    return CART_FEE
+
+
+def _same_money(a: float, b: float) -> bool:
+    return round(a, 2) == round(b, 2)
 
 # 특정 날짜 강제 요금 (공휴일 / 이벤트 / 단체 행사용).
 # 지금은 비어 있다. 날짜를 넣으면 주말/평일 판정보다 우선한다.
@@ -114,6 +149,13 @@ class Player(BaseModel):
     paid: bool = False
     cancelled: bool = False
     no_show: bool = False
+    # 이 사람이 카트를 쓰나(1인 요금 한 줄). 예약 단위 `cartCount`(카트 대수)와는 따로 둔다 —
+    # 둘을 한 숫자로 합치면 헬스 체크의 카트 대수 검사와 두 곳에서 같은 값을 쓰게 된다.
+    cart: bool = False
+    # 1인 카트 요금(세전, 달러 — `rate` 와 같은 단위). 카트를 켤 때 `cart_fee_for` 로 채운다.
+    cartFee: float = Field(default=0.0, ge=0)
+    # 결제로 표시된 시각. 영수증의 날짜·시각이다. 이 필드가 생기기 전의 결제에는 없다.
+    paidAt: datetime | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -223,6 +265,9 @@ class AddPlayerRequest(BaseModel):
     paid: bool = False
     cancelled: bool = False
     no_show: bool = False
+    cart: bool = False
+    # 비우면 요금제·홀 수로 채운다.
+    cartFee: float | None = Field(default=None, ge=0)
 
 
 class PatchPlayerRequest(BaseModel):
@@ -237,6 +282,8 @@ class PatchPlayerRequest(BaseModel):
     paid: bool | None = None
     cancelled: bool | None = None
     no_show: bool | None = None
+    cart: bool | None = None
+    cartFee: float | None = Field(default=None, ge=0)
 
 
 class ReportBookingLine(BaseModel):
@@ -404,18 +451,70 @@ def _to_models(raw: list[dict[str, Any]]) -> list[TeeBooking]:
     return models
 
 
-def read_bookings() -> list[TeeBooking]:
-    return sorted(_to_models(store.load_bookings()), key=_sort_key)
+class ScopedBookings(list):
+    """`read_bookings` / `bookings_tx` 가 돌려주는 목록. **무엇을 읽었는지** 를 함께 든다.
+
+    `.scope` 가 None 이면 전체를 읽은 것이다. 정원 검사(`tee_time_players`)가 이것을
+    보고, 검사하려는 날짜를 다 읽지 않은 목록이면 거절한다. 범위를 목록에 붙여 두는
+    이유: 따로 인자로 넘기면 다른 목록과 짝이 어긋나도 아무도 모른다.
+    슬라이스 대입(`bookings[:] = ...`)과 sort 는 이 객체를 그대로 두지만, 컴프리헨션이나
+    `sorted()` 결과는 평범한 list 라 범위가 떨어진다 — 그런 목록은 정원 검사가 받지 않는다.
+    """
+
+    def __init__(self, items: Any = (), scope: Scope | None = None) -> None:
+        super().__init__(items)
+        self.scope = scope
+
+
+class ScopeNotLoaded(RuntimeError):
+    """정원 검사 대상 날짜를 다 읽지 않은 목록으로 검사하려 했다 (프로그래밍 오류)."""
+
+
+def read_bookings(scope: Scope | None = None) -> ScopedBookings:
+    return ScopedBookings(sorted(_to_models(store.load_bookings(scope)), key=_sort_key), scope)
 
 
 @contextmanager
-def bookings_tx() -> Iterator[list[TeeBooking]]:
-    """읽기-수정-쓰기 트랜잭션. 이 블록 안에서 절대 `await` 하지 말 것."""
-    with store.mutate() as raw:
-        models = sorted(_to_models(raw), key=_sort_key)
+def bookings_tx(scope: Scope | None = None) -> Iterator[ScopedBookings]:
+    """읽기-수정-쓰기 트랜잭션. 이 블록 안에서 절대 `await` 하지 말 것.
+
+    `scope` 밖의 예약은 목록에 없고, 저장소도 건드리지 않는다 (`store.mutate` 참고).
+    """
+    with store.mutate(scope) as raw:
+        models = ScopedBookings(sorted(_to_models(raw), key=_sort_key), scope)
         yield models
         models.sort(key=_sort_key)
         raw[:] = [m.model_dump(mode="json") for m in models]
+
+
+def _require_loaded(bookings: list[TeeBooking], iso_date: str) -> None:
+    """이 목록이 `iso_date` 의 예약을 **전부** 담고 있지 않으면 터뜨린다.
+
+    `tee_time_players` 는 받은 목록을 더할 뿐이다. 그 티 타임의 다른 예약이 빠진 목록을
+    주면 인원이 적게 나오고, 정원 검사가 통과하고, 초과 예약이 된다 — 오류도 로그도 없이.
+    그래서 조용히 세지 않고 멈춘다. 범위를 모르는 평범한 list 도 같은 이유로 거절한다.
+    """
+    if not isinstance(bookings, ScopedBookings):
+        raise ScopeNotLoaded(
+            "capacity check needs the list from read_bookings()/bookings_tx(); "
+            "a plain list does not say which dates it covers"
+        )
+    if bookings.scope is not None and not bookings.scope.covers_date(iso_date):
+        raise ScopeNotLoaded(f"capacity check on {iso_date}, which this transaction did not load")
+
+
+def _require_date_in_tx(bookings: ScopedBookings, iso_date: str) -> None:
+    """미리 읽은 날짜로 범위를 잡은 트랜잭션에서, 예약이 그사이 다른 날로 옮겨졌는지.
+
+    PATCH·플레이어 추가는 id 로 먼저 읽어 날짜를 알아낸 뒤 그 날짜로 트랜잭션을 연다.
+    그 사이 다른 요청이 예약을 옮겼으면 새 날짜는 읽지 않았으므로 정원을 셀 수 없다.
+    500 대신 409 로 돌려보내 호출자가 다시 시도하게 한다.
+    """
+    if bookings.scope is not None and not bookings.scope.covers_date(iso_date):
+        raise HTTPException(
+            status_code=409,
+            detail="This reservation changed while it was being edited. Reload and try again.",
+        )
 
 
 def _find(bookings: list[TeeBooking], booking_id: str) -> TeeBooking:
@@ -485,7 +584,10 @@ def tee_time_players(
     """해당 티 타임이 이미 잡아먹은 플레이어 자리 수.
 
     무엇이 자리를 차지하는지의 판정은 `occupies_seat` 하나뿐이다.
+    `bookings` 는 그 날짜를 다 읽은 `ScopedBookings` 여야 한다 (아니면 `ScopeNotLoaded`).
+    검사를 여기 둔 이유: 음성 `find_tee_times` 는 이 함수를 직접 부른다.
     """
+    _require_loaded(bookings, iso_date)
     now = now or datetime.now(timezone.utc)
     return sum(
         len(other.players)
@@ -538,27 +640,27 @@ def list_bookings(
     # 만료된 음성 홀드는 아무에게도 보여주지 않는다. 정리 패스가 레코드를 지우기
     # 전이라도 티 시트 격자와 고객 예약 화면에는 존재하지 않는 것으로 취급한다.
     now = datetime.now(timezone.utc)
-    bookings = [b for b in read_bookings() if not hold_expired(b, now)]
 
+    # 날짜는 범위를 만들기 **전에** 검증한다. 잘못된 값이 supabase 필터로 가면
+    # Postgres 22007 → 500 이 된다. 여기서 막아야 422 다.
     if date:
         parse_iso_date(date)
-        return [b for b in bookings if b.date == date]
-
-    if from_ or to:
-        low = from_ or "0000-01-01"
-        high = to or "9999-12-31"
+        scope: Scope | None = Scope(dates={date})
+    elif from_ or to:
         if from_:
             parse_iso_date(from_, "from")
         if to:
             parse_iso_date(to, "to")
-        return [b for b in bookings if low <= b.date <= high]
+        scope = Scope(date_from=from_ or None, date_to=to or None)
+    else:
+        scope = None  # 파라미터 없음 = 전체 (예전 그대로)
 
-    return bookings
+    return [b for b in read_bookings(scope) if not hold_expired(b, now)]
 
 
 @router.get("/tee-sheet/bookings/{booking_id}", response_model=TeeBooking)
 def get_booking(booking_id: str) -> TeeBooking:
-    return _find(read_bookings(), booking_id)
+    return _find(read_bookings(Scope(ids={booking_id})), booking_id)
 
 
 @router.post("/tee-sheet/bookings", response_model=TeeBooking, status_code=201)
@@ -566,7 +668,8 @@ def create_booking(body: CreateBookingRequest) -> TeeBooking:
     slot = require_slot(body.date, body.time)
     time_label = body.time.strip()
 
-    with bookings_tx() as bookings:
+    # 정원은 그날의 예약만으로 결정된다. require_slot 이 날짜를 이미 검증했다.
+    with bookings_tx(Scope(dates={body.date})) as bookings:
         # 생성 엔드포인트는 기본 플레이어를 만들지 않는다. 요청에 실려 온 인원이 곧 정원 소비량.
         require_tee_time_capacity(bookings, body.date, time_label, incoming=len(body.players))
         booking = TeeBooking(
@@ -581,9 +684,21 @@ def create_booking(body: CreateBookingRequest) -> TeeBooking:
             cartCount=body.cartCount,
             players=body.players,
         )
+        for player in booking.players:
+            _settle_new_player(player, booking.holes, fee_given="cartFee" in player.model_fields_set)
         _audit(booking, f"Reservation created for {booking.date} {booking.time}.")
         bookings.append(booking)
         return booking
+
+
+def _settle_new_player(player: Player, holes: int, *, fee_given: bool) -> None:
+    """새로 들어온 플레이어의 파생 값: 카트 요금과 결제 시각."""
+    if not player.cart:
+        player.cartFee = 0.0
+    elif not fee_given:
+        player.cartFee = cart_fee_for(player.ratePlan, holes)
+    if player.paid and player.paidAt is None:
+        player.paidAt = datetime.now(timezone.utc)
 
 
 def _apply_status(booking: TeeBooking, status: BookingStatus, cancel_reason: str | None) -> str:
@@ -598,9 +713,12 @@ def _apply_status(booking: TeeBooking, status: BookingStatus, cancel_reason: str
         return "Reservation checked in."
 
     if status == BookingStatus.PAID:
+        now = datetime.now(timezone.utc)
         for player in booking.players:
             if not player.cancelled:
                 player.arrived = True
+                if not player.paid:
+                    player.paidAt = now
                 player.paid = True
                 player.no_show = False
         return "Reservation marked paid."
@@ -629,6 +747,7 @@ def _apply_status(booking: TeeBooking, status: BookingStatus, cancel_reason: str
         player.no_show = False
         player.arrived = False
         player.paid = False
+        player.paidAt = None
     return "Reservation reinstated as reserved."
 
 
@@ -636,7 +755,15 @@ def _apply_status(booking: TeeBooking, status: BookingStatus, cancel_reason: str
 def patch_booking(booking_id: str, body: PatchBookingRequest) -> TeeBooking:
     fields = body.model_dump(exclude_unset=True)
 
-    with bookings_tx() as bookings:
+    # 정원 검사에 필요한 날짜(현재 날짜, 옮길 날짜)를 알려면 먼저 id 로 읽어야 한다.
+    # 없는 예약은 여기서 404 — 날짜 검증(422)보다 먼저라는 순서도 예전과 같다.
+    current = _find(read_bookings(Scope(ids={booking_id})), booking_id)
+    dates = {current.date}
+    if fields.get("date"):
+        parse_iso_date(fields["date"])  # 범위에 넣기 전에 검증 (supabase 필터 → 500 방지)
+        dates.add(fields["date"])
+
+    with bookings_tx(Scope(ids={booking_id}, dates=dates)) as bookings:
         booking = _find(bookings, booking_id)
 
         # --- 날짜/시간 이동은 슬롯 재검증 + 충돌 검사 ---
@@ -649,6 +776,9 @@ def patch_booking(booking_id: str, body: PatchBookingRequest) -> TeeBooking:
                 # 따라서 옮기는 것만으로는 목적지 정원을 한 자리도 먹지 않는다.
                 # 되살릴 때 아래 status 게이트가 (이동 후의) 목적지 정원을 다시 검사한다.
                 if booking.status != BookingStatus.CANCELLED:
+                    # 시간만 바꾸면 목적지는 예약의 **지금** 날짜다. 미리 읽은 뒤 누가 옮겼으면
+                    # 그 날짜는 읽지 않았다.
+                    _require_date_in_tx(bookings, new_date)
                     require_tee_time_capacity(
                         bookings, new_date, new_time,
                         incoming=len(booking.players), exclude_id=booking.id,
@@ -662,7 +792,18 @@ def patch_booking(booking_id: str, body: PatchBookingRequest) -> TeeBooking:
             _audit(booking, f"Title changed to '{booking.title}'.")
 
         if "holes" in fields and fields["holes"] is not None and fields["holes"] != booking.holes:
+            old_holes = booking.holes
             booking.holes = fields["holes"]
+            # 카트 요금이 아직 자동값이면 새 홀 수의 값으로 따라간다. 사람이 고친 금액과
+            # 이미 결제한 사람의 금액은 그대로 둔다 — 결제한 뒤에 금액이 바뀌면 재인쇄한
+            # 영수증이 받은 돈과 달라진다.
+            for player in booking.players:
+                if (
+                    player.cart
+                    and not player.paid
+                    and _same_money(player.cartFee, cart_fee_for(player.ratePlan, old_holes))
+                ):
+                    player.cartFee = cart_fee_for(player.ratePlan, booking.holes)
             _audit(booking, f"Holes set to {booking.holes}.")
 
         if "rate" in fields and fields["rate"] is not None and fields["rate"] != booking.rate:
@@ -690,6 +831,8 @@ def patch_booking(booking_id: str, body: PatchBookingRequest) -> TeeBooking:
             # 취소된 예약은 정원을 차지하지 않으므로 그 사이 자리가 다른 예약에 팔릴 수 있다.
             # 되살릴 때는 자리가 아직 남아 있는지 반드시 다시 확인해야 한다.
             if booking.status == BookingStatus.CANCELLED and status != BookingStatus.CANCELLED:
+                # booking.date 는 미리 읽은 값으로 범위를 잡았다. 그사이 옮겨졌으면 409.
+                _require_date_in_tx(bookings, booking.date)
                 require_tee_time_capacity(
                     bookings, booking.date, booking.time,
                     incoming=len(booking.players), exclude_id=booking.id,
@@ -715,7 +858,7 @@ def patch_booking(booking_id: str, body: PatchBookingRequest) -> TeeBooking:
 # voice 라우터도 이 모듈을 임포트해서 같이 사라졌다.
 @router.delete("/tee-sheet/bookings/{booking_id}", status_code=204, response_model=None)
 def delete_booking(booking_id: str) -> None:
-    with bookings_tx() as bookings:
+    with bookings_tx(Scope(ids={booking_id})) as bookings:
         booking = _find(bookings, booking_id)
         bookings.remove(booking)
 
@@ -724,7 +867,9 @@ def delete_booking(booking_id: str) -> None:
 
 @router.post("/tee-sheet/bookings/{booking_id}/players", response_model=TeeBooking)
 def add_player(booking_id: str, body: AddPlayerRequest) -> TeeBooking:
-    with bookings_tx() as bookings:
+    # 정원 검사에 그날의 다른 예약이 필요하다. 날짜는 id 로 먼저 읽어 알아낸다.
+    current = _find(read_bookings(Scope(ids={booking_id})), booking_id)
+    with bookings_tx(Scope(ids={booking_id}, dates={current.date})) as bookings:
         booking = _find(bookings, booking_id)
         # 두 개의 서로 다른 한계를 구분한다.
         # 1) 예약 하나가 담을 수 있는 인원 = 4 -> 422 (요청 자체가 모델 제약 위반)
@@ -736,10 +881,13 @@ def add_player(booking_id: str, body: AddPlayerRequest) -> TeeBooking:
         # "취소된 예약에 사람을 더할 수 있는가" 가 **무관한 다른 예약**의 인원수에 좌우된다.
         # 되살릴 때 PATCH status 게이트가 정원을 다시 검사하므로 넘칠 길은 없다.
         if booking.status != BookingStatus.CANCELLED:
+            # 미리 읽은 날짜로 범위를 잡았다. 그사이 다른 날로 옮겨졌으면 409.
+            _require_date_in_tx(bookings, booking.date)
             # exclude_id 를 주지 않는다: taken 에 이 예약의 인원이 이미 포함돼야 incoming=1 이 맞다.
             require_tee_time_capacity(bookings, booking.date, booking.time, incoming=1)
         payload = body.model_dump(exclude_none=True)
         player = Player.model_validate(payload)
+        _settle_new_player(player, booking.holes, fee_given=body.cartFee is not None)
         booking.players.append(player)
         _audit(booking, f"Player added: {player.name}.")
         return booking
@@ -749,7 +897,8 @@ def add_player(booking_id: str, body: AddPlayerRequest) -> TeeBooking:
 def patch_player(booking_id: str, player_id: str, body: PatchPlayerRequest) -> TeeBooking:
     fields = body.model_dump(exclude_unset=True)
 
-    with bookings_tx() as bookings:
+    # 플레이어 정보만 바꾼다. 인원이 늘지 않으니 정원을 셀 필요가 없다 → 이 예약 하나만.
+    with bookings_tx(Scope(ids={booking_id})) as bookings:
         booking = _find(bookings, booking_id)
         for index, player in enumerate(booking.players):
             if player.id != player_id:
@@ -767,8 +916,44 @@ def patch_player(booking_id: str, player_id: str, body: PatchPlayerRequest) -> T
 
             updated = Player.model_validate(merged)
             updated.id = player.id
+
+            # 카트: 켜면서 금액을 안 보냈으면 요금제·홀 수로 채운다. 요금제를 바꿨고 금액이
+            # 아직 옛 요금제의 자동값이면 따라간다(결제 전일 때만). 끄면 0 — 다시 켜면 새로 계산된다.
+            if fields.get("cartFee") is None and updated.cart:
+                if not player.cart:
+                    updated.cartFee = cart_fee_for(updated.ratePlan, booking.holes)
+                elif (
+                    updated.ratePlan != player.ratePlan
+                    and not updated.paid
+                    and _same_money(player.cartFee, cart_fee_for(player.ratePlan, booking.holes))
+                ):
+                    updated.cartFee = cart_fee_for(updated.ratePlan, booking.holes)
+            if not updated.cart:
+                updated.cartFee = 0.0
+
+            # 결제 시각은 서버가 찍는다. 영수증의 날짜·시각이 이 값이다.
+            if updated.paid and not player.paid:
+                updated.paidAt = datetime.now(timezone.utc)
+            elif not updated.paid:
+                updated.paidAt = None
+
             booking.players[index] = updated
-            _audit(booking, f"Player updated: {updated.name}.")
+
+            messages = []
+            if fields.keys() - {"paid", "cart", "cartFee"}:
+                messages.append(f"Player updated: {updated.name}.")
+            if updated.cart != player.cart or not _same_money(updated.cartFee, player.cartFee):
+                messages.append(
+                    f"Cart added for {updated.name} (${updated.cartFee:.2f})." if updated.cart and not player.cart
+                    else f"Cart fee for {updated.name} set to ${updated.cartFee:.2f}." if updated.cart
+                    else f"Cart removed for {updated.name}."
+                )
+            if updated.paid != player.paid:
+                messages.append(
+                    f"Payment recorded for {updated.name}." if updated.paid
+                    else f"Payment cleared for {updated.name}."
+                )
+            _audit(booking, " ".join(messages) or f"Player updated: {updated.name}.")
             return booking
 
     raise HTTPException(status_code=404, detail="Player not found")
@@ -776,7 +961,7 @@ def patch_player(booking_id: str, player_id: str, body: PatchPlayerRequest) -> T
 
 @router.delete("/tee-sheet/bookings/{booking_id}/players/{player_id}", response_model=TeeBooking)
 def delete_player(booking_id: str, player_id: str) -> TeeBooking:
-    with bookings_tx() as bookings:
+    with bookings_tx(Scope(ids={booking_id})) as bookings:
         booking = _find(bookings, booking_id)
         if len(booking.players) <= 1:
             raise HTTPException(status_code=422, detail="A reservation must keep at least one player")
@@ -805,8 +990,12 @@ def build_daily_report(iso_date: str, bookings: list[TeeBooking]) -> DailyReport
     for booking in active:
         payable = [p for p in booking.players if not p.cancelled]
         booked_slots += len(payable)
-        total_revenue += booking.rate * len(payable)
-        collected_revenue += booking.rate * sum(1 for p in payable if p.paid)
+        for player in payable:
+            # 한 사람이 내는 돈 = 그린피 + (카트를 쓰면) 카트 요금. 둘 다 세전.
+            due = booking.rate + (player.cartFee if player.cart else 0.0)
+            total_revenue += due
+            if player.paid:
+                collected_revenue += due
         carts += booking.cartCount
 
     available = max(total_slots - booked_slots, 0)
@@ -849,7 +1038,7 @@ def _current_iso_week() -> tuple[str, str]:
 @router.get("/tee-sheet/reports/daily", response_model=DailyReport)
 def get_daily_report(date: str = Query(...)) -> DailyReport:
     parse_iso_date(date)
-    return build_daily_report(date, read_bookings())
+    return build_daily_report(date, read_bookings(Scope(dates={date})))
 
 
 @router.get("/tee-sheet/reports/week", response_model=WeekReport, response_model_by_alias=True)
@@ -867,7 +1056,7 @@ def get_week_report(
     if (end - start).days > 62:
         raise HTTPException(status_code=422, detail="Week report range is limited to 62 days")
 
-    bookings = read_bookings()
+    bookings = read_bookings(Scope(date_from=start_iso, date_to=end_iso))
     days: list[DailyReport] = []
     cursor = start
     while cursor <= end:
@@ -980,8 +1169,11 @@ def _launch(task: OrchestrationTask, coro_factory: Any) -> None:
 async def send_reminders(iso_date: str) -> dict[str, Any]:
     """해당 날짜의 유효 예약에 리마인더를 보낸다 (외부 호출은 시뮬레이션)."""
     clock = time.perf_counter()
+    # 저장소가 네트워크(Supabase)일 수 있다. 루프에서 동기로 읽으면 gather 로 묶인
+    # 다른 작업까지 그동안 멈춰, 병렬 배치가 조용히 순차 실행으로 떨어진다.
+    bookings = await asyncio.to_thread(read_bookings, Scope(dates={iso_date}))
     targets = [
-        b for b in read_bookings()
+        b for b in bookings
         if b.date == iso_date and b.status in (BookingStatus.RESERVED, BookingStatus.CHECKED_IN)
     ]
     recipients: list[str] = []
@@ -1005,7 +1197,9 @@ async def send_reminders(iso_date: str) -> dict[str, Any]:
 
 async def build_report_task(iso_date: str) -> dict[str, Any]:
     clock = time.perf_counter()
-    report = build_daily_report(iso_date, read_bookings())
+    # 이유는 send_reminders 참고
+    bookings = await asyncio.to_thread(read_bookings, Scope(dates={iso_date}))
+    report = build_daily_report(iso_date, bookings)
     await asyncio.sleep(0.18)  # 리포트 파이프라인 시뮬레이션
     return {
         "task": "generate_report",
@@ -1021,7 +1215,9 @@ async def build_report_task(iso_date: str) -> dict[str, Any]:
 async def refresh_availability(iso_date: str) -> dict[str, Any]:
     clock = time.perf_counter()
     slots = generate_slots(iso_date)
-    taken = {b.time for b in read_bookings() if b.date == iso_date and b.status != BookingStatus.CANCELLED}
+    # 이유는 send_reminders 참고
+    bookings = await asyncio.to_thread(read_bookings, Scope(dates={iso_date}))
+    taken = {b.time for b in bookings if b.date == iso_date and b.status != BookingStatus.CANCELLED}
     await asyncio.sleep(0.12)  # 채널 매니저 푸시 시뮬레이션
     return {
         "task": "refresh_availability",
@@ -1072,7 +1268,10 @@ async def run_daily_batch(iso_date: str) -> dict[str, Any]:
 def cleanup_expired_bookings(before_iso: str) -> dict[str, Any]:
     """`before_iso` 보다 **엄격히 이전** 날짜의 예약을 실제로 삭제한다."""
     removed: list[dict[str, str]] = []
-    with bookings_tx() as bookings:
+    # 읽는 범위만 좁힌다. 지우는 규칙은 그대로다: 구간은 before 의 **전날** 까지라
+    # "엄격히 이전" 이 유지되고, 만료 홀드를 날짜와 무관하게 걷으려고 holds 를 더한다.
+    day_before = (parse_iso_date(before_iso, "before") - timedelta(days=1)).isoformat()
+    with bookings_tx(Scope(date_to=day_before, holds=True)) as bookings:
         # 지난 날짜 정리와 별개로, 아무 날짜의 만료 홀드는 항상 함께 걷어낸다.
         holds_purged = purge_expired_holds(bookings)
         keep: list[TeeBooking] = []
@@ -1083,7 +1282,10 @@ def cleanup_expired_bookings(before_iso: str) -> dict[str, Any]:
             else:
                 keep.append(booking)
         bookings[:] = keep
-        remaining = len(keep)
+
+    # keep 은 읽은 범위 안에서 남은 것뿐이다. "남은 예약 수" 는 테이블 전체의 수라
+    # 커밋 뒤에 따로 센다 (행을 읽지 않는 count 한 번).
+    remaining = store.count_bookings()
 
     return {
         "task": "cleanup",
@@ -1127,7 +1329,8 @@ def run_sync_pass(iso_date: str) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
     updated = 0
 
-    with bookings_tx() as bookings:
+    # 그날 + 날짜 무관 홀드 (아래 purge 가 예전처럼 모든 날짜의 만료 홀드를 걷는다).
+    with bookings_tx(Scope(dates={iso_date}, holds=True)) as bookings:
         # 노쇼 스캔 전에 유령 홀드를 치운다. 안 그러면 통화 중 끊긴 홀드가
         # "플레이어 없는 예약" 경고로 잡혀 리포트를 오염시킨다.
         purged_holds = purge_expired_holds(bookings)
@@ -1223,7 +1426,7 @@ AVAILABLE_TASKS = [
 def orchestration_status() -> OrchestrationStatus:
     return OrchestrationStatus(
         status="ready",
-        total_bookings=len(read_bookings()),
+        total_bookings=store.count_bookings(),  # 건수만 필요하다. 행을 읽지 않는다.
         timestamp=datetime.now(timezone.utc),
         available_tasks=AVAILABLE_TASKS,
         tasks=recent_tasks(),

@@ -177,3 +177,183 @@ body {
     --day-row: 44px;
   }
 }
+
+/* ===== 영수증 인쇄 =====================================================
+ *
+ * `lib/retail/printReceipt.ts` 가 body 바로 아래의 #receipt-print-root 를 채우고
+ * window.print() 를 부른다. 그 컨테이너가 **비어 있지 않을 때만** 나머지 화면을
+ * 숨긴다 — 평소 Ctrl+P 로 티 시트를 찍을 때 이 규칙은 아무것도 하지 않는다.
+ *
+ * 72mm = 80mm 롤 용지의 인쇄 폭(TM-m30III). 모양은 클럽이 쓰던 Lightspeed 영수증을 따른다 —
+ * 산세리프 본문, 굵은 머리글·품목명·Total, Items·#·Price 3열 표, 오른쪽 정렬 합계.
+ * 본문 3.1mm ≈ 8.8pt 는 실물 영수증 본문과 비슷한 크기다. 금액 칸은 줄바꿈하지 않는다 —
+ * 좁아질 수 있는 것은 품목 설명 칸 하나뿐이다.
+ * 여백 0 은 이름 붙은 @page 라서 이 영수증에만 걸린다. 다른 화면 인쇄의 여백은 그대로다. */
+#receipt-print-root {
+  display: none;
+}
+
+@page receipt {
+  margin: 0;
+}
+
+/* ----- 영수증 한 장의 모양 -----------------------------------------------
+ *
+ * 인쇄용 컨테이너(#receipt-print-root)와 화면 미리보기(결제 전 확인 창)가 **같은 규칙**을
+ * 쓴다 — 미리보기에서 본 그대로 종이에 나가야 한다. 그래서 @media print 밖에 둔다.
+ * 화면에서 인쇄용 컨테이너는 display:none 이라 이 규칙들이 보이지 않는다.
+ * 클래스 이름은 `lib/retail/receipt.ts` 의 receiptHtml() 과 짝이고, 두 컨테이너 모두
+ * `.rc-sheet` 를 달고 있다.
+ *
+ * 문단 여백을 여기서 직접 0 으로 둔다 — Tailwind 리셋에 기대면 리셋이 없는 곳(샘플 렌더,
+ * 나중의 다른 페이지)에서 줄마다 1em 씩 벌어진다. `:where()` 로 우선순위를 낮춰서
+ * `.rc-gap`·`.rc-section` 의 윗여백이 이 규칙을 이긴다. */
+.rc-sheet :where(p) {
+  margin: 0;
+}
+
+.rc-sheet .rc {
+  display: grid;
+  gap: 0.5mm;
+  color: #000;
+  font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+  font-size: 3.1mm;
+  line-height: 1.3;
+  /* 감열 인쇄는 글자가 흐리게 나오기 쉽다. 획을 아주 살짝 굵혀서 진하게 만든다 —
+     굵게(700)로 바꾸면 Items·Total 의 굵은 줄과 구분이 사라지고 좁은 칸에서 뭉갠다.
+     종이의 진하기 자체는 드라이버의 인쇄 농도(Print Density)가 정한다(설치 문서 3번). */
+  -webkit-text-stroke: 0.025mm currentColor;
+}
+
+.rc-sheet .rc-center {
+  text-align: center;
+}
+
+.rc-sheet .rc-bold {
+  font-weight: 700;
+}
+
+.rc-sheet .rc-large {
+  font-size: 3.8mm;
+}
+
+.rc-sheet .rc-gap {
+  margin-top: 2.5mm;
+}
+
+/* 클럽 로고. 이미지 자체가 `lib/retail/logo.ts` 에 박혀 있어서 인쇄 순간에 받아 올 것이 없다.
+   15mm 는 72mm 용지의 1/5 — 이름 위에서 알아볼 만하면서 종이를 적게 먹는 크기다(18mm 에서 줄였다). */
+.rc-sheet .rc-logo {
+  margin-bottom: 1.5mm;
+  text-align: center;
+}
+
+.rc-sheet .rc-logo-img {
+  display: block;
+  width: 15mm;
+  height: 15mm;
+  margin: 0 auto;
+}
+
+/* Items · # · Price. 설명 칸만 줄어들고, 수량·금액 칸은 폭이 고정이다. */
+.rc-sheet .rc-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 6mm 17mm;
+  column-gap: 1.5mm;
+  align-items: baseline;
+}
+
+.rc-sheet .rc-row > :nth-child(2) {
+  text-align: center;
+}
+
+.rc-sheet .rc-row > :nth-child(3) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.rc-sheet .rc-head {
+  margin-top: 2.5mm;
+  padding-bottom: 0.6mm;
+  border-bottom: 0.3mm solid #000;
+  font-weight: 700;
+}
+
+.rc-sheet .rc-item {
+  margin-top: 0.8mm;
+}
+
+.rc-sheet .rc-detail {
+  padding-left: 3mm;
+  overflow-wrap: anywhere;
+}
+
+.rc-sheet .rc-rule {
+  margin: 0.8mm 0;
+  border: 0;
+  border-top: 0.3mm solid #000;
+}
+
+/* 합계: 실물처럼 라벨도 금액도 오른쪽 정렬. */
+.rc-sheet .rc-total {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 17mm;
+  column-gap: 2mm;
+  text-align: right;
+}
+
+.rc-sheet .rc-total > :last-child {
+  white-space: nowrap;
+}
+
+.rc-sheet .rc-section {
+  margin-top: 2.5mm;
+  padding-bottom: 0.6mm;
+  border-bottom: 0.3mm solid #000;
+  font-weight: 700;
+}
+
+.rc-sheet .rc-barcode {
+  margin-top: 2.5mm;
+}
+
+.rc-sheet .rc-barcode svg {
+  display: block;
+  width: 100%;
+  height: 12mm;
+  fill: #000;
+}
+
+.rc-sheet .rc-barcode p {
+  text-align: center;
+  font-size: 3mm;
+  letter-spacing: 0.15em;
+}
+
+@media print {
+  body:has(> #receipt-print-root:not(:empty)) > :not(#receipt-print-root) {
+    display: none !important;
+  }
+
+  #receipt-print-root:not(:empty) {
+    display: block;
+    page: receipt;
+    width: 72mm;
+    /* 드라이버가 페이지를 80mm 로 잡든 72mm 로 잡든 인쇄 영역 가운데에 온다. */
+    margin: 0 auto;
+    padding: 2mm 0 8mm;
+  }
+
+  /* 한 번 인쇄에 두 장(고객용·회사용). 장 사이에서 페이지를 끊어야 감열 프린터가 사이를
+     자른다 — 안 끊으면 두 장이 한 장으로 길게 이어져 나온다.
+     `page-break-after` 는 옛 이름이다. 둘 다 둔다(드라이버·브라우저 조합에 따라 하나만 먹는다). */
+  #receipt-print-root .rc-copy {
+    page-break-after: always;
+    break-after: page;
+  }
+
+  #receipt-print-root .rc-copy:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+}

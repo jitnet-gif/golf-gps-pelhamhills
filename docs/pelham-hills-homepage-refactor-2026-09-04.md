@@ -25,7 +25,7 @@ Refactored the `frontend` home page into a Pelham Hills Golf Club landing experi
 - Updated the booking CTA flow to open an internal `/booking` program instead of linking out.
 - Implemented a Tee-Sniper-inspired booking workspace using the source model from `https://github.com/stebennett/tee-sniper`: one-shot requests, recurring requests, time windows, players, partners, SMS notification, request status controls, and attempt history.
 - Implemented an internal `/admin` operations console based on the Tee-Sniper admin concerns: queue monitoring, status controls, worker-run simulation, partner roster management, system configuration summary, and audit log.
-- Implemented an internal `/teesheet` operator screen modeled after a Chronogolf/Lightspeed tee sheet: side navigation, weather/date/reservation summary, week grid, colored reservation bars, selected booking details, player cards, check-in/payment controls, and add-guest slot.
+- Implemented an internal `/teesheet` operator screen modeled after a Chronogolf/pelhamhills tee sheet: side navigation, weather/date/reservation summary, week grid, colored reservation bars, selected booking details, player cards, check-in/payment controls, and add-guest slot.
 - Updated `/admin` to render the Tee Sheet operator layout directly, matching the admin URL pattern shown in the reference screenshot.
 - Added FastAPI Tee Sheet endpoints under `/api/v1/tee-sheet/*` using the Tee-Sniper-style operational model: bookings, players, status updates, cancellation reason, audit log, and worker simulation.
 - Connected the Tee Sheet UI to the FastAPI service when available, with local sample fallback when the API is offline.

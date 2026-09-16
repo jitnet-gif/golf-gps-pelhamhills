@@ -47,6 +47,14 @@ def test_slot_label_rejects_off_grid_times():
         module.slot_label("07:44AM")
 
 
+def test_slot_label_accepts_evening_tees_up_to_the_last_grid_slot():
+    """Chronogolf 는 6:58 PM 까지 판다. 6시에서 자르면 저녁 예약이 임포트에서 전부 튕긴다."""
+    assert module.slot_label("06:04PM")[0] == "6:04 PM"
+    assert module.slot_label("06:58PM")[0] == "6:58 PM"
+    with pytest.raises(ValueError, match="Invalid slot"):
+        module.slot_label("07:07PM")
+
+
 # ===== 변환 ============================================================
 
 
@@ -81,6 +89,27 @@ def test_fully_cancelled_reservation_skipped_unless_opted_in():
     assert module.convert(rows, "t.csv") == []
     kept = module.convert(rows, "t.csv", include_cancelled=True)[0]
     assert kept["status"] == "cancelled" and "Cancelled 2026-04-20" in kept["cancelReason"]
+
+
+def cancelled_group(size):
+    return [row(**{"Round ID": str(i), "Round Player ID": f"90000{i}", "Player Name": f"Player {i}",
+                   "Is Round Cancelled": "Yes", "Round Cancelled At": "2026-04-20",
+                   "Cancelled By": "Staff Person"}) for i in range(1, size + 1)]
+
+
+def test_oversize_fully_cancelled_reservation_is_skipped_not_fatal():
+    """소스에 통째로 취소된 5·8인 예약이 있다. 예약은 최대 4명이라 담을 수 없고,
+    살아 있는 자리가 없으니 버려도 시트에서 사라지는 게 없다."""
+    assert module.convert(cancelled_group(5), "t.csv", include_cancelled=True) == []
+    assert module.convert(cancelled_group(8), "t.csv", include_cancelled=True) == []
+
+
+def test_more_than_four_active_seats_still_refuses():
+    """살아 있는 자리가 5개면 진짜 충돌이다. 취소 예약처럼 조용히 버리면 안 된다."""
+    rows = [row(**{"Round ID": str(i), "Round Player ID": f"90000{i}",
+                   "Player Name": f"Player {i}"}) for i in range(1, 6)]
+    with pytest.raises(ValueError, match="5 active seats"):
+        module.convert(rows, "t.csv", include_cancelled=True)
 
 
 def test_rate_is_max_green_fee_over_active_players():
@@ -197,6 +226,23 @@ def test_run_refuses_truncated_day_when_the_store_already_has_that_day(tmp_path,
         module.run(source, include_truncated=True)
 
 
+def test_run_reports_oversize_cancelled_reservations_separately(tmp_path, monkeypatch):
+    """버린 사실이 cancelledReservationsSkipped 에 섞여 안 보이면 다음 사례를 놓친다."""
+    from backend.services import tee_sheet_store
+    target = tmp_path / "tee_sheet.json"
+    target.write_text("[]", encoding="utf-8")
+    monkeypatch.setenv(tee_sheet_store.ENV_VAR, str(target))
+
+    source = tmp_path / "export.csv"
+    oversize = [dict(r, **{"Reservation ID": "600001"}) for r in cancelled_group(5)]
+    write_csv(source, [row()] + oversize)
+
+    report = module.run(source, include_cancelled=True)
+    assert report["importedBookings"] == 1
+    assert report["oversizeCancelledSkipped"] == 1
+    assert module.run(source)["oversizeCancelledSkipped"] == 0, "취소 예약을 안 받으면 따로 셀 것도 없다"
+
+
 # ===== merge ===========================================================
 
 
@@ -247,6 +293,87 @@ def test_dry_run_leaves_file_untouched_then_apply_backs_up_and_is_idempotent(
     assert [b["id"] for b in stored] == ["b-keep", "chronogolf-csv-19671-500001"]
 
     assert module.run(source, apply=True)["changed"] is False, "재실행이 값을 바꾸면 안 된다"
+
+
+def supabase_store(tmp_path, monkeypatch, docs):
+    """컷오버 뒤 상태: JSON 파일은 없고 원격에 예약이 있다. 백업은 tmp 로."""
+    from backend.services import tee_sheet_store
+    from backend.tests.fake_postgrest import install
+    fake = install(monkeypatch)
+    fake.seed(docs)
+    monkeypatch.setattr(module, "BACKUP_DIR", tmp_path / "backups")
+    monkeypatch.setenv(tee_sheet_store.ENV_VAR, str(tmp_path / "missing.json"))
+    return fake
+
+
+def test_supabase_backend_replaces_only_the_covered_dates(tmp_path, monkeypatch):
+    """예전 경로(save_bookings = replace_all)는 merged 에 없는 원격 행을 전부 지웠다 —
+    컷오버 뒤 API·음성으로 들어온 예약 전부. 이제는 export 가 책임지는 날짜만 읽고 바꾼다."""
+    import copy
+    live = [{"id": f"live-{i}", "date": "2026-09-09", "time": "7:43 AM"} for i in range(3)]
+    # 4/23 은 export 가 책임지는 날. 스냅샷 임포터가 넣은 행(id 가 csv id 로 바뀐다) +
+    # 예전 CSV 임포트 행(같은 id 로 다시 온다).
+    old_snapshot = {"id": "chronogolf-19671-2026-04-23-481-0", "date": "2026-04-23",
+                    "time": "8:01 AM", "notes": ""}
+    old_csv = {"id": "chronogolf-csv-19671-500001", "date": "2026-04-23", "time": "8:01 AM",
+               "notes": "stale"}
+    fake = supabase_store(tmp_path, monkeypatch, live + [old_snapshot, old_csv])
+    untouched = {i: copy.deepcopy(fake.rows[i]) for i in ("live-0", "live-1", "live-2")}
+    source = tmp_path / "export.csv"
+    write_csv(source, [row(), row(**{"Reservation ID": "500002", "Round ID": "2",
+                                     "Round Player ID": "900002", "Player Name": "Bo Sampleton"})])
+
+    dry = module.run(source)
+    assert fake.writes() == [], "dry-run 은 쓰기 요청을 한 건도 보내지 않는다"
+    assert (dry["importedBookings"], dry["replacedBookings"], dry["preservedBookings"]) == (2, 2, 3)
+    assert dry["changed"] is True and "backup" not in dry
+    assert not (tmp_path / "backups").exists()
+
+    applied = module.run(source, apply=True)
+    backup = Path(applied["backup"])
+    assert backup.parent == tmp_path / "backups"
+    assert sorted(b["id"] for b in json.loads(backup.read_text(encoding="utf-8"))) == sorted(
+        [old_snapshot["id"], old_csv["id"]]), "바꾸기 직전 범위의 행을 남긴다"
+    on_day = sorted(i for i, r in fake.rows.items() if r["booking_date"] == "2026-04-23")
+    assert on_day == ["chronogolf-csv-19671-500001", "chronogolf-csv-19671-500002"], \
+        "스냅샷 id 가 csv id 로 바뀌어도 그날 예약 수가 두 배가 되면 안 된다"
+    assert fake.rows["chronogolf-csv-19671-500001"]["doc"]["notes"] != "stale"
+    for booking_id, before in untouched.items():
+        assert fake.rows[booking_id] == before, "범위 밖 행은 다시 쓰지도 않는다"
+    assert fake.table_scans() == [], "테이블 전체를 읽지 않는다"
+    assert not (tmp_path / "missing.json").exists()
+
+    mark = len(fake.requests)
+    assert module.run(source, apply=True)["changed"] is False
+    assert fake.writes(mark) == [], "재실행이 값을 바꾸면 안 된다"
+
+
+def test_supabase_backend_still_refuses_to_destroy_a_locally_created_booking(tmp_path, monkeypatch):
+    """범위 안의 사람이 만든 예약을 막는 건 이제 merge 의 검사뿐이다."""
+    walkup = {"id": "local-walkup", "date": "2026-04-23", "time": "8:10 AM", "notes": "", "audit": []}
+    fake = supabase_store(tmp_path, monkeypatch, [walkup])
+    source = tmp_path / "export.csv"
+    write_csv(source, [row()])
+    for apply in (False, True):
+        with pytest.raises(ValueError, match="Locally created"):
+            module.run(source, apply=apply)
+    assert fake.writes() == [] and set(fake.rows) == {"local-walkup"}
+    assert not (tmp_path / "backups").exists()
+
+
+def test_refuses_a_reservation_already_stored_outside_the_export_dates(tmp_path, monkeypatch):
+    """Chronogolf 에서 날짜가 바뀐 예약. 받아들이면 같은 id 가 두 줄이 되거나 말없이 옮겨진다."""
+    from backend.services import tee_sheet_store
+    target = tmp_path / "tee_sheet.json"
+    original = json.dumps([{"id": "chronogolf-csv-19671-500001", "date": "2026-04-20",
+                            "time": "8:01 AM", "notes": ""}])
+    target.write_text(original, encoding="utf-8")
+    monkeypatch.setenv(tee_sheet_store.ENV_VAR, str(target))
+    source = tmp_path / "export.csv"
+    write_csv(source, [row()])
+    with pytest.raises(ValueError, match="outside this export's dates"):
+        module.run(source, apply=True)
+    assert target.read_text(encoding="utf-8") == original
 
 
 def test_rejects_export_from_another_club(tmp_path):
