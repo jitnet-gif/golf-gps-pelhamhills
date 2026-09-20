@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chronogolf 이관 리스크 진단</title>
+    <style>
+      :root {
+        --ink: #172016;
+        --green: #214d2f;
+        --gold: #d6b85f;
+        --cream: #f5f1e8;
+        --paper: #fffdf8;
+        --line: #d8d1c3;
+        --blue: #253fc7;
+        --red: #b94732;
+        --muted: #657063;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: #e9e3d6;
+        color: var(--ink);
+        font-family: Arial, "Malgun Gothic", sans-serif;
+      }
+
+      .page {
+        width: 1440px;
+        margin: 0 auto;
+        background: var(--cream);
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: 1.05fr 0.95fr;
+        gap: 56px;
+        padding: 76px 86px 60px;
+        background: var(--ink);
+        color: white;
+      }
+
+      .eyebrow {
+        color: var(--gold);
+        font-size: 18px;
+        font-weight: 800;
+        letter-spacing: 4px;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 22px 0 0;
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 66px;
+        line-height: 1.02;
+      }
+
+      .hero p {
+        max-width: 710px;
+        margin: 26px 0 0;
+        color: #eef3ea;
+        font-size: 23px;
+        line-height: 1.55;
+      }
+
+      .verdict {
+        align-self: end;
+        border: 1px solid #596458;
+        background: var(--paper);
+        color: var(--ink);
+        box-shadow: 0 28px 60px rgba(0, 0, 0, 0.28);
+      }
+
+      .verdict-top {
+        display: flex;
+        justify-content: space-between;
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--line);
+        background: white;
+        font-size: 15px;
+        font-weight: 800;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+      }
+
+      .verdict-row {
+        display: grid;
+        grid-template-columns: 104px 1fr;
+        gap: 16px;
+        align-items: center;
+        padding: 18px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .verdict-row:last-child {
+        border-bottom: 0;
+      }
+
+      .badge {
+        padding: 8px 0;
+        text-align: center;
+        font-size: 15px;
+        font-weight: 900;
+        letter-spacing: 1px;
+      }
+
+      .badge.ok {
+        background: var(--green);
+        color: white;
+      }
+
+      .badge.now {
+        background: var(--red);
+        color: white;
+      }
+
+      .badge.check {
+        background: var(--gold);
+        color: #2b2410;
+      }
+
+      .verdict-row strong {
+        display: block;
+        font-size: 21px;
+      }
+
+      .verdict-row span {
+        color: var(--muted);
+        font-size: 16px;
+        line-height: 1.45;
+      }
+
+      .content {
+        padding: 54px 86px 20px;
+      }
+
+      .section-title {
+        margin: 0 0 12px;
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 46px;
+        line-height: 1.08;
+      }
+
+      .section-note {
+        margin: 0 0 30px;
+        max-width: 1040px;
+        color: var(--muted);
+        font-size: 19px;
+        line-height: 1.5;
+      }
+
+      .tier-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 22px;
+      }
+
+      .tier {
+        border: 1px solid var(--line);
+        border-top: 10px solid var(--green);
+        background: var(--paper);
+        padding: 28px 26px 26px;
+      }
+
+      .tier.now {
+        border-top-color: var(--red);
+      }
+
+      .tier.check {
+        border-top-color: var(--gold);
+      }
+
+      .tier .rank {
+        color: var(--muted);
+        font-size: 15px;
+        font-weight: 800;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+      }
+
+      .tier h3 {
+        margin: 12px 0 6px;
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 31px;
+        line-height: 1.14;
+      }
+
+      .tier .level {
+        margin: 0 0 16px;
+        font-size: 17px;
+        font-weight: 900;
+        color: var(--green);
+      }
+
+      .tier.now .level {
+        color: var(--red);
+      }
+
+      .tier.check .level {
+        color: #8a6d15;
+      }
+
+      .tier ul {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .tier li {
+        position: relative;
+        padding: 0 0 12px 26px;
+        color: var(--muted);
+        font-size: 17px;
+        line-height: 1.5;
+      }
+
+      .tier li::before {
+        position: absolute;
+        left: 0;
+        top: 0;
+        color: var(--green);
+        font-weight: 900;
+        content: "\2713";
+      }
+
+      .tier.now li::before {
+        color: var(--red);
+        content: "!";
+      }
+
+      .tier.check li::before {
+        color: #8a6d15;
+        content: "?";
+      }
+
+      .tier li b {
+        color: var(--ink);
+      }
+
+      .matrix {
+        display: grid;
+        grid-template-columns: 0.85fr 1.15fr 1fr;
+        margin-top: 38px;
+        border: 1px solid var(--line);
+        background: white;
+      }
+
+      .matrix div {
+        padding: 18px 22px;
+        border-right: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        font-size: 17px;
+        line-height: 1.45;
+      }
+
+      .matrix div:nth-child(3n) {
+        border-right: 0;
+      }
+
+      .matrix .head {
+        background: var(--green);
+        color: white;
+        font-weight: 900;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+      }
+
+      .matrix .label {
+        font-weight: 900;
+      }
+
+      .matrix .yes {
+        color: var(--green);
+        font-weight: 800;
+      }
+
+      .matrix .no {
+        color: var(--red);
+        font-weight: 800;
+      }
+
+      .matrix .wait {
+        color: #8a6d15;
+        font-weight: 800;
+      }
+
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 18px;
+        margin-top: 34px;
+      }
+
+      .step {
+        border-top: 8px solid var(--green);
+        background: white;
+        padding: 24px;
+      }
+
+      .step strong {
+        display: block;
+        color: var(--red);
+        font-size: 15px;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+      }
+
+      .step h3 {
+        margin: 14px 0 10px;
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 26px;
+        line-height: 1.16;
+      }
+
+      .step p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 17px;
+        line-height: 1.45;
+      }
+
+      .step code {
+        font-size: 15px;
+        color: var(--ink);
+      }
+
+      .footer {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 30px;
+        margin-top: 50px;
+        padding: 42px 86px 64px;
+        background: white;
+      }
+
+      .footer-card {
+        border-left: 8px solid var(--gold);
+        background: #fbfaf6;
+        padding: 28px 30px;
+      }
+
+      .footer-card h2 {
+        margin: 0;
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 32px;
+      }
+
+      .footer-card p {
+        margin: 14px 0 0;
+        color: var(--muted);
+        font-size: 19px;
+        line-height: 1.55;
+      }
+
+      .stamp {
+        padding: 22px 86px 34px;
+        background: white;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.6;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="hero">
+        <div>
+          <div class="eyebrow">Chronogolf 이관 리스크 진단 &middot; 2026-09-18</div>
+          <h1>프로그램 저작권은<br />괜찮습니다</h1>
+          <p>
+            자체 티 시트가 Chronogolf 의 저작권을 건드리는 부분은 찾지 못했습니다. 저장소에
+            들어온 Chronogolf 코드·이미지·로고가 없고, 화면 흐름과 색값은 저작권 보호 대상이
+            아닙니다. 대신 성격이 다른 두 건 — 공개 저장소에 남은 실제 골퍼 이름, 그리고
+            데이터를 가져온 방식의 계약 확인 — 이 남아 있습니다.
+          </p>
+        </div>
+        <div class="verdict">
+          <div class="verdict-top">
+            <span>판정</span>
+            <span>3개 항목</span>
+          </div>
+          <div class="verdict-row">
+            <div class="badge ok">문제 없음</div>
+            <div>
+              <strong>저작권 · 프로그램</strong>
+              <span>복제된 자산 0건, 독립 구현</span>
+            </div>
+          </div>
+          <div class="verdict-row">
+            <div class="badge now">지금 조치</div>
+            <div>
+              <strong>개인정보 · 공개 저장소</strong>
+              <span>커밋된 문서의 예시 이름 4건 중 3건이 실제 데이터 유래</span>
+            </div>
+          </div>
+          <div class="verdict-row">
+            <div class="badge check">확인 필요</div>
+            <div>
+              <strong>약관 · 데이터 추출</strong>
+              <span>공식 export 요청으로 정리</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="content">
+        <h2 class="section-title">왜 이렇게 봤는가</h2>
+        <p class="section-note">
+          저장소 전체 검색(추적 파일 + 무시된 로컬 데이터), 공개 스냅샷 원문 파싱, 저장소 공개
+          설정 조회로 확인한 내용입니다. 세 항목의 무게는 같지 않습니다.
+        </p>
+
+        <div class="tier-grid">
+          <article class="tier">
+            <div class="rank">항목 1 / 3</div>
+            <h3>저작권</h3>
+            <p class="level">낮음 — 진행에 걸림돌 아님</p>
+            <ul>
+              <li>추적되는 Chronogolf <b>소스·CSS·스크린샷·로고가 0건</b>. 이미지 14개 중 해당 자산 없음.</li>
+              <li>어드민 사이드바 워드마크는 <b>자체 pelhamhills 마크</b>. 타사 상표 미사용.</li>
+              <li>스크린샷에서 뽑은 <b>색값 자체는 저작물이 아님</b>.</li>
+              <li>"행 = 티타임, 좌석 4칸, Rate 컬럼" 같은 <b>업무 흐름은 보호 대상이 아님</b>.</li>
+              <li>Next.js + FastAPI 로 <b>독립 구현</b> — 코드 이식 흔적 없음.</li>
+            </ul>
+          </article>
+
+          <article class="tier now">
+            <div class="rank">항목 2 / 3</div>
+            <h3>개인정보</h3>
+            <p class="level">실제 노출 확인 — 오늘 처리</p>
+            <ul>
+              <li>공개 저장소에 커밋된 <b>기존 인포그래픽(HTML + PNG)</b> 의 예시 화면에 실제 골퍼 이름이 들어가 있음 — 원본 export 와 대조해 <b>예시 4건 중 3건</b>(풀네임 1건, 실제 성 2건) 확인.</li>
+              <li>성만 남아도 <b>티타임과 묶이면 식별 가능</b> — 3건 전부 같은 위험으로 봐야 함.</li>
+              <li>PNG 에도 같은 이름이 찍혀 있음(이미지 확인 완료) — <b>텍스트 수정만으로는 부족</b>, 이미지 재생성과 이력 정리까지 필요.</li>
+              <li>반면 공개 티 시트 스냅샷은 <b>정상 비식별화</b> — 이름은 Golfer 1~4, 이메일·전화·메모·감사로그 전부 비어 있음.</li>
+              <li>실명·연락처 원본 파일은 <b>git 무시 목록</b>에 있어 저장소에 올라가지 않음.</li>
+              <li>남는 잔여 위험은 스냅샷의 <b>시간 + 요금제 조합</b> — 120명 규모에서는 추정 가능.</li>
+            </ul>
+          </article>
+
+          <article class="tier check">
+            <div class="rank">항목 3 / 3</div>
+            <h3>이용약관</h3>
+            <p class="level">확인 필요 — 저작권이 아닌 계약 문제</p>
+            <ul>
+              <li>이관 스크립트가 출처를 <b>관리자 화면 주소</b>로 기록 — 화면에서 받아온 데이터임이 드러남.</li>
+              <li>BI 리포트도 <b>스크립트 자동 수집</b> 경로 — 자동 추출 제한 조항과 맞닿는 지점.</li>
+              <li>예약·고객 데이터는 <b>클럽 소유</b>라 이관 자체의 명분은 충분.</li>
+              <li>정리 방법은 하나 — <b>Lightspeed 공식 export 요청</b>. 메일 한 통으로 방식 논란이 사라짐.</li>
+            </ul>
+          </article>
+        </div>
+
+        <div class="matrix">
+          <div class="head">확인한 것</div>
+          <div class="head">확인 방법</div>
+          <div class="head">결과</div>
+
+          <div class="label">Chronogolf 자산 복제</div>
+          <div>추적 파일 목록에서 이미지·CSS·HTML 전수 확인</div>
+          <div class="yes">해당 없음</div>
+
+          <div class="label">타사 상표 노출</div>
+          <div>화면 컴포넌트의 브랜드 문자열 검색</div>
+          <div class="yes">사용자 화면에 없음</div>
+
+          <div class="label">공개 스냅샷 개인정보</div>
+          <div>공개 JSON 227건 파싱 — 이름·연락처·메모 필드</div>
+          <div class="yes">비식별화 정상</div>
+
+          <div class="label">원본 데이터 노출</div>
+          <div>로컬 export·고객 파일의 git 무시 여부</div>
+          <div class="yes">저장소에 없음</div>
+
+          <div class="label">저장소 공개 여부</div>
+          <div>저장소 공개 설정 조회</div>
+          <div class="no">공개 — 노출 영향 증폭</div>
+
+          <div class="label">커밋된 문서의 실명</div>
+          <div>문서 예시 화면의 이름 4건을 원본 export 와 대조</div>
+          <div class="no">3건이 실제 데이터 유래</div>
+
+          <div class="label">데이터 추출 방식</div>
+          <div>이관 스크립트의 출처 기록과 수집 경로</div>
+          <div class="wait">공식 export 로 확정</div>
+        </div>
+
+        <h2 class="section-title" style="margin-top: 56px">남은 일 3가지</h2>
+        <div class="flow">
+          <article class="step">
+            <strong>Step 01 &middot; 오늘</strong>
+            <h3>공개 문서의 실명 제거</h3>
+            <p>
+              기존 인포그래픽의 예시 이름을 가상 이름으로 바꾸고 이미지를 다시 굽습니다. 이미
+              공개된 이력이라 <code>git</code> 이력 정리 여부도 함께 결정해야 합니다.
+            </p>
+          </article>
+          <article class="step">
+            <strong>Step 02 &middot; 이번 주</strong>
+            <h3>Lightspeed 공식 export</h3>
+            <p>
+              지원팀에 클럽 데이터 공식 추출을 요청합니다. 받으면 화면 기반 수집 경로는 폐기하고,
+              이관 스크립트의 출처 기록도 공식 파일로 교체합니다.
+            </p>
+          </article>
+          <article class="step">
+            <strong>Step 03 &middot; 정리</strong>
+            <h3>폴백 데이터 · 문구</h3>
+            <p>
+              오프라인 폴백용 스냅샷을 합성 데이터로 바꾸면 노출이 0 이 됩니다. 공개 저장소 주석의
+              "복제" 표현은 "참고한 배치" 정도로 순화합니다.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="footer">
+        <div class="footer-card">
+          <h2>결론</h2>
+          <p>
+            Chronogolf 를 대체하는 자체 티 시트는 계속 진행해도 됩니다. 막아야 할 것은 프로그램이
+            아니라, 공개 저장소에 올라간 실명과 데이터를 가져온 방식입니다.
+          </p>
+        </div>
+        <div class="footer-card">
+          <h2>가장 급한 것</h2>
+          <p>
+            공개 문서의 실제 이름 3건. 저작권 논쟁보다 실제 사람의 이름이 공개 인터넷에 남아
+            있는 쪽이 먼저입니다. 나머지는 메일 한 통과 문구 정리로 끝납니다.
+          </p>
+        </div>
+      </section>
+
+      <div class="stamp">
+        확인 범위 &middot; 저장소 전체 파일 검색, 공개 스냅샷 원문 파싱, 저장소 공개 설정 조회. 법률
+        의견이 아니라 실무 위험도 정리이며, 계약 해석이 필요한 항목은 "확인 필요" 로 표시했습니다. 이
+        문서에는 실제 고객 이름·예약 시각·클럽 식별자를 넣지 않았습니다.
+      </div>
+    </main>
+  </body>
+</html>

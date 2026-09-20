@@ -1,8 +1,13 @@
 // The one tee sheet API client. Do not add a second fetch wrapper elsewhere.
-// Base URL comes from NEXT_PUBLIC_API_BASE_URL (Next.js convention) and must
-// include the version prefix, e.g. "http://localhost:8000/api/v1".
-// 주소 해석 자체는 `lib/apiHost.ts` 가 맡는다 — 배포된 사이트에 localhost 가
-// 굳어 나가는 사고를 한 군데서 막기 위해서다.
+//
+// 2026-09-19: 주소는 더 이상 없다. 이 래퍼는 Fly.io 의 FastAPI(`/api/v1/tee-sheet/...`)
+// 를 부르던 자리였지만, 그 서버는 2026-09-16 체험 종료로 꺼졌다. 메서드 이름·인자·
+// 반환 타입은 **그대로 두고** 전송만 `lib/teeSheet/staffRpc.ts` 의 Supabase 함수 호출로
+// 바꾼다. `hooks/useTeeSheet.ts` 와 패널들은 한 줄도 바뀌지 않는다 — 티 시트 화면의
+// 동작을 건드리지 않고 백엔드만 갈아 끼우는 것이 이번 작업의 전부다.
+//
+// `ApiError` 는 여기 남는다. 예약 화면(`app/book/*`, `components/booking/availability.ts`)
+// 과 `lib/booking/rpc.ts` 가 이 타입을 import 하고, `status === 0` 을 "연결 실패" 로 읽는다.
 
 import type {
   AddPlayerInput,
@@ -17,11 +22,23 @@ import type {
   WeekReport,
 } from "./types";
 
-// `NEXT_PUBLIC_API_BASE_URL` wins; otherwise the versioned path is derived from the
-// host-only `NEXT_PUBLIC_API_URL` that the rest of the app already sets. 값을 모듈
-// 상수로 굳히지 않는다 — 정적 export 는 서버에서 한 번, 브라우저에서 다시
-// 평가되는데 "쓸 수 있는 주소인가" 는 브라우저에서만 판단할 수 있다.
+// 예전 호출부(`lib/retail/api.ts` 등)가 이 모듈을 통해 주소 헬퍼를 가져다 쓸 수 있도록
+// 재수출만 유지한다. 티 시트 자신은 더 이상 쓰지 않는다.
 import { apiBaseUrl } from "../apiHost";
+import { todayIso } from "./dates";
+import {
+  staffBooking,
+  staffBookingCreate,
+  staffBookingDelete,
+  staffBookingPatch,
+  staffBookings,
+  staffPlayerAdd,
+  staffPlayerPatch,
+  staffPlayerRemove,
+  staffReportDaily,
+  staffReportWeek,
+  staffSlots,
+} from "./staffRpc";
 
 export { apiBaseUrl };
 
@@ -35,110 +52,76 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const base = apiBaseUrl();
-  // 주소가 없으면 요청을 흉내내지 않는다. status 0 은 `useTeeSheet` 가 이미
-  // "offline" 으로 읽는 값이라, 티 시트는 그대로 로컬 모드로 넘어간다.
-  if (!base) {
-    throw new ApiError(0, "no booking server is configured for this site");
-  }
+/**
+ * 자동 작업(일일 배치·리마인더·정리·워커)은 Fly 의 잡 러너였다. 서버가 꺼지면서
+ * 같이 멈췄고, 리마인더는 이메일 발송이 필요해 클럽이 보류했다.
+ *
+ * 메서드를 지우지 않고 **즉시 실패**시키는 이유: `OrchestrationPanel` 은 작업을 보낸 뒤
+ * 상태를 폴링한다. 없는 주소로 보내면 패널이 2분(MAX_POLL_WINDOW_MS) 동안 도는 것처럼
+ * 보인다. 바로 거절하면 패널의 `describeError` 가 "503 · 자동 작업은 …" 한 줄을 띄운다.
+ * status 0 을 쓰지 않는 것도 같은 이유다 — 0 은 "서버에 닿지 못함" 으로 읽힌다.
+ */
+const ORCHESTRATION_STOPPED =
+  "자동 작업은 Fly 서버와 함께 멈췄습니다. 티 시트와 리포트는 그대로 쓸 수 있습니다.";
 
-  let response: Response;
-  try {
-    response = await fetch(`${base}${path}`, {
-      ...init,
-      headers: { "Content-Type": "application/json", ...init?.headers },
-    });
-  } catch (cause) {
-    throw new ApiError(0, cause instanceof Error ? cause.message : "Network error");
-  }
-
-  if (!response.ok) {
-    let detail = `${response.status} ${response.statusText}`;
-    try {
-      const body = await response.json();
-      if (body && typeof body === "object" && "detail" in body) {
-        const value = (body as { detail: unknown }).detail;
-        detail = typeof value === "string" ? value : JSON.stringify(value);
-      }
-    } catch {
-      // non-JSON error body; keep the status line
-    }
-    throw new ApiError(response.status, detail);
-  }
-
-  if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
+function orchestrationStopped<T>(): Promise<T> {
+  return Promise.reject(new ApiError(503, ORCHESTRATION_STOPPED));
 }
 
-function query(params: Record<string, string | number | undefined>): string {
-  const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== "") search.set(key, String(value));
-  }
-  const serialized = search.toString();
-  return serialized ? `?${serialized}` : "";
-}
-
+// 반환 타입을 일부러 명시한다. 이 객체가 화면과의 계약이라, 전송을 갈아 끼우다
+// 타입이 슬쩍 달라지면 바로 여기서 걸리게 하기 위해서다.
 export const teeSheetApi = {
   // ===== Slots =====
-  getSlots: (date: string) => request<SlotsResponse>(`/tee-sheet/slots${query({ date })}`),
+  getSlots: (date: string): Promise<SlotsResponse> => staffSlots(date),
 
   // ===== Bookings =====
-  listBookings: (range?: { from?: string; to?: string; date?: string }) =>
-    request<TeeBooking[]>(`/tee-sheet/bookings${query({ ...range })}`),
+  // 예전 REST 는 from/to/date 를 모두 선택 인자로 받았다. RPC 는 언제나 구간이므로
+  // 여기서 좁힌다: date 가 오면 그 하루, 한쪽만 오면 그 날 하루, 아무것도 없으면 오늘.
+  // (지금 호출부는 늘 from/to 한 주를 넘긴다 — 나머지는 안전망이다.)
+  listBookings: (range?: { from?: string; to?: string; date?: string }): Promise<TeeBooking[]> => {
+    const from = range?.date || range?.from || range?.to || todayIso();
+    const to = range?.date || range?.to || range?.from || from;
+    return staffBookings(from, to);
+  },
 
-  getBooking: (id: string) => request<TeeBooking>(`/tee-sheet/bookings/${id}`),
+  getBooking: (id: string): Promise<TeeBooking> => staffBooking(id),
 
-  createBooking: (input: CreateBookingInput) =>
-    request<TeeBooking>("/tee-sheet/bookings", { method: "POST", body: JSON.stringify(input) }),
+  createBooking: (input: CreateBookingInput): Promise<TeeBooking> => staffBookingCreate(input),
 
-  patchBooking: (id: string, patch: PatchBookingInput) =>
-    request<TeeBooking>(`/tee-sheet/bookings/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  patchBooking: (id: string, patch: PatchBookingInput): Promise<TeeBooking> =>
+    staffBookingPatch(id, patch),
 
-  deleteBooking: (id: string) =>
-    request<void>(`/tee-sheet/bookings/${id}`, { method: "DELETE" }),
+  deleteBooking: (id: string): Promise<void> => staffBookingDelete(id),
 
   // ===== Players =====
-  addPlayer: (bookingId: string, input: AddPlayerInput) =>
-    request<TeeBooking>(`/tee-sheet/bookings/${bookingId}/players`, {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
+  addPlayer: (bookingId: string, input: AddPlayerInput): Promise<TeeBooking> =>
+    staffPlayerAdd(bookingId, input),
 
-  patchPlayer: (bookingId: string, playerId: string, patch: PatchPlayerInput) =>
-    request<TeeBooking>(`/tee-sheet/bookings/${bookingId}/players/${playerId}`, {
-      method: "PATCH",
-      body: JSON.stringify(patch),
-    }),
+  patchPlayer: (
+    bookingId: string,
+    playerId: string,
+    patch: PatchPlayerInput,
+  ): Promise<TeeBooking> => staffPlayerPatch(bookingId, playerId, patch),
 
-  removePlayer: (bookingId: string, playerId: string) =>
-    request<TeeBooking>(`/tee-sheet/bookings/${bookingId}/players/${playerId}`, {
-      method: "DELETE",
-    }),
+  removePlayer: (bookingId: string, playerId: string): Promise<TeeBooking> =>
+    staffPlayerRemove(bookingId, playerId),
 
   // ===== Reports =====
-  getDailyReport: (date: string) =>
-    request<DailyReport>(`/tee-sheet/reports/daily${query({ date })}`),
+  getDailyReport: (date: string): Promise<DailyReport> => staffReportDaily(date),
 
-  getWeekReport: (from: string, to: string) =>
-    request<WeekReport>(`/tee-sheet/reports/week${query({ from, to })}`),
+  getWeekReport: (from: string, to: string): Promise<WeekReport> => staffReportWeek(from, to),
 
-  // ===== Orchestration =====
-  getOrchestrationStatus: () =>
-    request<OrchestrationStatus>("/tee-sheet/orchestration/status"),
+  // ===== Orchestration (중단됨) =====
+  getOrchestrationStatus: (): Promise<OrchestrationStatus> =>
+    orchestrationStopped<OrchestrationStatus>(),
 
-  runDailyBatch: (date: string) =>
-    request<TaskAck>(`/tee-sheet/orchestration/daily-batch${query({ date })}`, { method: "POST" }),
+  runDailyBatch: (_date: string): Promise<TaskAck> => orchestrationStopped<TaskAck>(),
 
-  sendReminders: (date: string) =>
-    request<TaskAck>(`/tee-sheet/orchestration/send-reminders${query({ date })}`, { method: "POST" }),
+  sendReminders: (_date: string): Promise<TaskAck> => orchestrationStopped<TaskAck>(),
 
-  runCleanup: (before?: string) =>
-    request<TaskAck>(`/tee-sheet/orchestration/cleanup${query({ before })}`, { method: "POST" }),
+  runCleanup: (_before?: string): Promise<TaskAck> => orchestrationStopped<TaskAck>(),
 
-  runWorker: (date?: string) =>
-    request<TaskAck>(`/tee-sheet/worker/run${query({ date })}`, { method: "POST" }),
+  runWorker: (_date?: string): Promise<TaskAck> => orchestrationStopped<TaskAck>(),
 };
 
 export default teeSheetApi;

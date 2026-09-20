@@ -219,10 +219,13 @@ body {
   font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
   font-size: 3.1mm;
   line-height: 1.3;
-  /* 감열 인쇄는 글자가 흐리게 나오기 쉽다. 획을 아주 살짝 굵혀서 진하게 만든다 —
-     굵게(700)로 바꾸면 Items·Total 의 굵은 줄과 구분이 사라지고 좁은 칸에서 뭉갠다.
-     종이의 진하기 자체는 드라이버의 인쇄 농도(Print Density)가 정한다(설치 문서 3번). */
-  -webkit-text-stroke: 0.025mm currentColor;
+  /* 감열 인쇄는 글자가 흐리게 나오기 쉽다. 획을 굵혀서 진하게 만든다 — 굵게(700)로 바꾸면
+     Items·Total 의 굵은 줄과 구분이 사라지고 좁은 칸에서 뭉갠다.
+     단위를 점(dot)으로 환산해서 정한다: 203dpi 감열 헤드에서 점 하나가 0.125mm 다.
+     처음 쓴 0.025mm 는 점의 1/5 이라 래스터에서 사라졌다. 0.1mm ≈ 점 0.8개라 실제로 두꺼워진다.
+     종이의 진하기 자체는 드라이버의 인쇄 농도(Print Density)가 정한다(설치 문서 3번) —
+     그쪽이 더 큰 손잡이이고, 이건 글자 획만 손본다. */
+  -webkit-text-stroke: 0.1mm currentColor;
 }
 
 .rc-sheet .rc-center {

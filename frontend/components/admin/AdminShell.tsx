@@ -19,13 +19,28 @@
  * 하나로 합치려 하면 둘 중 하나가 깨진다. `fill` 에 문서형을 넣으면 내용이 잘리고,
  * 문서형에 `fill` 을 넣으면 티 시트가 내용 높이만큼 부풀어 페이지가 두 번 스크롤된다.
  * 그래서 호출부가 명시적으로 고른다.
+ *
+ * ## 로그인 문(2026-09-19)
+ *
+ * 프로 샵 화면은 전부 이 컴포넌트를 거친다. 예전에는 Fly.io 의 FastAPI 가 자기
+ * 나름대로 막고 있었지만 그 서버는 꺼졌고, 지금 데이터는 Supabase 함수 뒤에 있다.
+ * 그래서 문을 여기 둔다: **로그인 전에는 자식(`children`)을 아예 마운트하지 않는다.**
+ * 숨기기만 하면 `useTeeSheet` 가 그대로 돌면서 예약을 불러오려 하고, 실패하면
+ * 오프라인 샘플 데이터(손님 이름이 들어 있다)를 로그인도 하지 않은 화면에 깔아 버린다.
+ *
+ * 세션은 브라우저에만 있다 — 정적 export 라 쿠키를 심어 줄 서버가 없다.
+ * 자세한 내용은 `lib/teeSheet/session.ts`.
  */
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { ADMIN_HOME, CLUB, SITE_HOME, adminNav, adminQuickNav, isActive } from "@/lib/nav";
+import { ApiError } from "@/lib/teeSheet/api";
+import { todayIso } from "@/lib/teeSheet/dates";
+import { accessToken, getSession, signIn, signOut, subscribe } from "@/lib/teeSheet/session";
+import { isStaffDenied, staffSlots } from "@/lib/teeSheet/staffRpc";
 
 type Props = {
   /** 헤더에 굵게 찍히는 현재 화면 이름. */
@@ -40,7 +55,28 @@ type Props = {
   children: ReactNode;
 };
 
-export default function AdminShell({ title, actions, fill = false, children }: Props) {
+/**
+ * 문지기. 상태가 정해지기 전에는 아무것도 보여주지 않는다 — `localStorage` 는
+ * 브라우저에서만 읽을 수 있고, 정적 export 의 프리렌더 HTML 과 첫 렌더가 어긋나면
+ * hydration 이 깨지기 때문에 판단은 전부 effect 안에서 한다.
+ */
+export default function AdminShell(props: Props) {
+  const gate = useStaffGate();
+
+  if (gate.state === "checking") return <GateSplash />;
+  if (gate.state === "out") return <SignInScreen onSignedIn={gate.recheck} />;
+  if (gate.state === "denied") return <NotStaffScreen email={gate.email} onSignOut={gate.signOut} />;
+  return <AdminFrame {...props} email={gate.email} onSignOut={gate.signOut} />;
+}
+
+function AdminFrame({
+  title,
+  actions,
+  fill = false,
+  children,
+  email,
+  onSignOut,
+}: Props & { email: string; onSignOut: () => void }) {
   const pathname = usePathname();
   const [drawerOpen, setDrawerOpen] = useState(false);
   // 데스크톱 사이드바 접기. 레퍼런스 상단바의 햄버거가 하는 일이 이것이다 —
@@ -110,9 +146,11 @@ export default function AdminShell({ title, actions, fill = false, children }: P
               데스크톱은 액션 바가 `lg:hidden` 이라 우연히 멀쩡했을 뿐이다.
               묶어 두면 폭과 무관하게 언제나 3개 아이템(머리/본문/탭)이 된다. */}
           <div className="min-w-0">
-            <MobileTopBar onOpen={() => setDrawerOpen(true)} title={title} />
+            <MobileTopBar onOpen={() => setDrawerOpen(true)} onSignOut={onSignOut} title={title} />
             <DesktopHeader
               actions={actions}
+              email={email}
+              onSignOut={onSignOut}
               onToggleRail={() => setRailOpen((open) => !open)}
               railOpen={railOpen}
               title={title}
@@ -301,11 +339,15 @@ function DesktopHeader({
   actions,
   railOpen,
   onToggleRail,
+  email,
+  onSignOut,
 }: {
   title: string;
   actions?: ReactNode;
   railOpen: boolean;
   onToggleRail: () => void;
+  email: string;
+  onSignOut: () => void;
 }) {
   return (
     // 레퍼런스는 상단바가 **한 줄**이다. 예전에는 클럽 이름 줄 + 화면 제목 줄이었고,
@@ -336,12 +378,29 @@ function DesktopHeader({
         ))}
       </span>
 
+      {/* 누구로 들어와 있는지 한 번은 보여야 한다 — 프로 샵 컴퓨터는 여러 사람이 쓴다. */}
+      <span className="max-w-[180px] shrink-0 truncate text-[11px] text-[#4e5560]" title={email}>
+        {email}
+      </span>
+      <SignOutButton
+        className="shrink-0 border border-[#d4d4d8] px-2 py-1 text-[11px] font-bold text-[#4e5560] hover:bg-[#f2f2f4]"
+        onSignOut={onSignOut}
+      />
+
       {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
     </header>
   );
 }
 
-function MobileTopBar({ title, onOpen }: { title: string; onOpen: () => void }) {
+function MobileTopBar({
+  title,
+  onOpen,
+  onSignOut,
+}: {
+  title: string;
+  onOpen: () => void;
+  onSignOut: () => void;
+}) {
   return (
     <header className="flex items-center gap-3 border-b border-[#d4d4d8] bg-[#111315] px-3 py-2.5 text-white lg:hidden">
       <button
@@ -360,7 +419,31 @@ function MobileTopBar({ title, onOpen }: { title: string; onOpen: () => void }) 
         </p>
         <h1 className="truncate text-sm font-bold">{title}</h1>
       </div>
+      {/* 휴대폰에서도 나갈 길은 늘 보여야 한다. 서랍을 열어야만 로그아웃할 수 있으면
+          공용 태블릿에 세션이 그대로 남는다. */}
+      <SignOutButton
+        className="-mr-1 flex h-11 shrink-0 items-center px-2 text-[11px] font-bold text-white/80"
+        onSignOut={onSignOut}
+      />
     </header>
+  );
+}
+
+/** 로그아웃 버튼. 누르는 순간 잠기고, 이중 클릭으로 두 번 나가지 않는다. */
+function SignOutButton({ className, onSignOut }: { className: string; onSignOut: () => void }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      className={className}
+      disabled={busy}
+      onClick={() => {
+        setBusy(true);
+        onSignOut();
+      }}
+      type="button"
+    >
+      로그아웃
+    </button>
   );
 }
 
@@ -453,6 +536,255 @@ function MobileTabBar({ pathname }: { pathname: string | null }) {
         );
       })}
     </nav>
+  );
+}
+
+// ===== 로그인 문 =========================================================
+
+type GateState =
+  /** 아직 모른다 — 저장된 세션을 읽고 직원인지 확인하는 중. */
+  | "checking"
+  /** 로그인하지 않았다. */
+  | "out"
+  /** 로그인은 됐지만 프로 샵 직원이 아니다. */
+  | "denied"
+  /** 직원 화면을 열어도 된다. */
+  | "in";
+
+function useStaffGate() {
+  const [state, setState] = useState<GateState>("checking");
+  const [email, setEmail] = useState("");
+  // 세션이 바뀌면(로그인·로그아웃·다른 탭에서의 변화·토큰 갱신) 다시 판정한다.
+  const [nonce, setNonce] = useState(0);
+
+  useEffect(() => subscribe(() => setNonce((value) => value + 1)), []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      const current = getSession();
+      if (!current) {
+        if (!cancelled) {
+          setEmail("");
+          setState("out");
+        }
+        return;
+      }
+      if (!cancelled) setEmail(current.email);
+
+      // 확인 요청보다 **먼저** 토큰을 손본다. 만료된 토큰으로 부르면 PostgREST 가
+      // 401 을 주는데, 그것은 "직원이 아니다" 와 구분이 안 된다.
+      const token = await accessToken();
+      if (cancelled) return;
+      if (!token) {
+        setState("out"); // 갱신이 거부됐다 = 세션이 버려졌다.
+        return;
+      }
+
+      try {
+        // 가장 가벼운 직원 전용 호출로 문을 두드려 본다. 결과는 쓰지 않는다 —
+        // 화면은 자기 데이터를 스스로 불러온다.
+        await staffSlots(todayIso());
+        if (!cancelled) setState("in");
+      } catch (error) {
+        if (cancelled) return;
+        // 토큰이 거부돼 세션이 지워졌으면 로그인 화면으로.
+        if (!getSession()) {
+          setState("out");
+          return;
+        }
+        // 401/403 만 "직원 아님" 이다. `0004` 마이그레이션을 아직 적용하지 않은
+        // 프로젝트에서는 PostgREST 가 404(함수 없음)를 주는데, 그것까지 막아 버리면
+        // 진짜 직원이 전부 잠긴다. 그 밖의 오류는 통과시키고 티 시트 자신의
+        // 오류 표시에 맡긴다.
+        setState(isStaffDenied(error) ? "denied" : "in");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [nonce]);
+
+  /**
+   * 로그인·로그아웃 뒤에는 **페이지를 새로 연다.**
+   *
+   * 얼핏 과해 보이지만 이유가 있다. `app/teesheet/page.tsx` 는 `useTeeSheet()` 를
+   * 이 문(門)보다 **위에서** 부른다 — 로그인하지 않은 채로도 그 훅은 이미 돌아서
+   * 예약·슬롯 요청을 401 로 실패해 둔 상태다. 문이 열려 자식이 렌더돼도 그 훅은
+   * 다시 마운트되지 않고, 로더 effect 의 의존성(주·날짜·nonce)은 로그인으로 바뀌지
+   * 않는다. 즉 **로그인해도 티 시트가 빈 채로, 낡은 오류 문구를 단 채 남는다.**
+   * 페이지 소유는 이번 작업 범위 밖이라 훅을 옮기는 대신 여기서 새로 연다.
+   * 세션은 `signIn`/`signOut` 이 끝나기 전에 이미 localStorage 에 쓰였으므로
+   * 새로 열린 페이지는 토큰을 들고 시작한다.
+   *
+   * 로그아웃에서도 같은 이유 + 하나 더: 공용 태블릿에서 앞사람의 예약 목록이
+   * 메모리에 남아 있지 않게 한다.
+   */
+  const reloadPage = useCallback(() => {
+    if (typeof window !== "undefined") window.location.reload();
+  }, []);
+
+  const recheck = useCallback(() => {
+    setState("checking");
+    setNonce((value) => value + 1);
+    reloadPage();
+  }, [reloadPage]);
+
+  const doSignOut = useCallback(() => {
+    setState("checking");
+    // 세션 삭제는 signOut() 안에서 즉시 끝난다. 서버 통보(로그아웃 엔드포인트)는
+    // 기다려 주되, 네트워크가 느려도 화면이 붙잡히지 않도록 상한을 둔다.
+    void signOut().then(reloadPage, reloadPage);
+    window.setTimeout(reloadPage, 1500);
+  }, [reloadPage]);
+
+  return { state, email, recheck, signOut: doSignOut };
+}
+
+/** 판정 중 화면. 깜빡임을 줄이려고 글자 한 줄만 둔다. */
+function GateSplash() {
+  return (
+    <main className="grid min-h-[100dvh] place-items-center bg-[#f2f2f4] px-4 text-sm text-[#4e5560]">
+      <p>확인 중…</p>
+    </main>
+  );
+}
+
+/**
+ * 로그인 화면. 휴대폰 기준(390×844)으로 짠다 — 프런트 데스크는 태블릿, 사장님은
+ * 휴대폰으로 연다. 입력 글자 크기를 16px(text-base) 아래로 내리지 않는 이유:
+ * iOS 사파리가 그보다 작은 입력에 초점이 가면 화면을 확대해 버린다.
+ */
+function SignInScreen({ onSignedIn }: { onSignedIn: () => void }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await signIn(email, password);
+      // 문을 다시 판정하고 페이지를 새로 연다 — 이유는 `useStaffGate` 의 `reloadPage`.
+      // busy 는 풀지 않는다. 새 문서가 뜰 때까지 버튼이 잠겨 있어야 두 번 눌리지 않는다.
+      onSignedIn();
+    } catch (cause) {
+      setBusy(false);
+      setError(
+        cause instanceof ApiError
+          ? cause.message
+          : "로그인에 실패했습니다. 잠시 후 다시 시도해 주세요.",
+      );
+    }
+  };
+
+  return (
+    <main className="grid min-h-[100dvh] place-items-center bg-[#f2f2f4] px-4 py-10 text-[#1f2328]">
+      <div className="w-full max-w-[360px]">
+        <div className="mb-4 flex items-center gap-2 text-sm font-bold">
+          <span aria-hidden className="text-base leading-none text-[#4533ff]">
+            &#9670;
+          </span>
+          {CLUB.shortName} 프로 샵
+        </div>
+
+        <form className="bg-white p-5 shadow-sm" onSubmit={submit}>
+          <h1 className="text-base font-bold">직원 로그인</h1>
+          <p className="mt-1 text-xs leading-5 text-[#6b7280]">
+            GPS 앱에서 쓰는 관리자 계정으로 들어옵니다. 예약 화면을 찾으시나요?{" "}
+            <Link className="font-semibold text-[#4533ff] underline" href={SITE_HOME}>
+              클럽 홈
+            </Link>
+          </p>
+
+          <label className="mt-4 block text-xs font-bold" htmlFor="staff-email">
+            이메일
+          </label>
+          <input
+            autoCapitalize="none"
+            autoComplete="username"
+            className="mt-1 h-11 w-full border border-[#d4d4d8] px-3 text-base"
+            id="staff-email"
+            inputMode="email"
+            name="email"
+            onChange={(event) => setEmail(event.target.value)}
+            required
+            type="email"
+            value={email}
+          />
+
+          <label className="mt-3 block text-xs font-bold" htmlFor="staff-password">
+            비밀번호
+          </label>
+          <input
+            autoComplete="current-password"
+            className="mt-1 h-11 w-full border border-[#d4d4d8] px-3 text-base"
+            id="staff-password"
+            name="password"
+            onChange={(event) => setPassword(event.target.value)}
+            required
+            type="password"
+            value={password}
+          />
+
+          {error ? (
+            // 실패 문구는 읽어 주기도 해야 한다 — 스크린리더 사용자는 붉은 글씨를 못 본다.
+            <p className="mt-3 border border-[#f0b4b4] bg-[#fdf1f1] p-2 text-xs leading-5 text-[#8c1d1d]" role="alert">
+              {error}
+            </p>
+          ) : null}
+
+          <button
+            className="mt-4 h-11 w-full bg-[#4533ff] text-sm font-bold text-white disabled:opacity-60"
+            disabled={busy}
+            type="submit"
+          >
+            {busy ? "로그인 중…" : "로그인"}
+          </button>
+        </form>
+
+        <p className="mt-3 text-[11px] leading-5 text-[#6b7280]">
+          계정이 없거나 비밀번호를 잊으셨으면 프로 샵(905-735-6768)으로 연락해 주세요.
+        </p>
+      </div>
+    </main>
+  );
+}
+
+/**
+ * 로그인은 됐는데 직원이 아닌 경우. 손님 계정으로 어드민 주소를 연 상황이다.
+ * 빈 티 시트를 보여 주면 "고장났다" 로 읽히므로 이유를 적고 나갈 길을 준다.
+ */
+function NotStaffScreen({ email, onSignOut }: { email: string; onSignOut: () => void }) {
+  return (
+    <main className="grid min-h-[100dvh] place-items-center bg-[#f2f2f4] px-4 py-10 text-[#1f2328]">
+      <div className="w-full max-w-[360px] bg-white p-5 shadow-sm">
+        <h1 className="text-base font-bold">직원 계정이 아닙니다</h1>
+        <p className="mt-2 text-xs leading-5 text-[#6b7280]">
+          {email ? `${email} 계정에는 ` : "이 계정에는 "}
+          프로 샵 권한이 없습니다. 다른 계정으로 로그인하거나, 프로 샵(905-735-6768)에
+          권한을 요청해 주세요.
+        </p>
+        <button
+          className="mt-4 h-11 w-full bg-[#4533ff] text-sm font-bold text-white"
+          onClick={onSignOut}
+          type="button"
+        >
+          다른 계정으로 로그인
+        </button>
+        <Link
+          className="mt-3 flex h-11 w-full items-center justify-center border border-[#d4d4d8] text-sm font-bold"
+          href={SITE_HOME}
+        >
+          클럽 홈으로
+        </Link>
+      </div>
+    </main>
   );
 }
 
