@@ -164,8 +164,12 @@ function makeServer() {
 // ===== 실행 ===============================================================
 
 const server = makeServer();
+// 화면 폭은 바꿔 가며 볼 수 있어야 한다 — 프로 샵은 데스크톱, 사장님은 휴대폰이다.
+const WIDTH = Number(process.env.CHECK_WIDTH ?? 1600);
+const HEIGHT = Number(process.env.CHECK_HEIGHT ?? 900);
+
 const browser = await chromium.launch({ headless: true });
-const context = await browser.newContext({ viewport: { width: 1600, height: 900 } });
+const context = await browser.newContext({ viewport: { width: WIDTH, height: HEIGHT } });
 
 // 세션은 문서가 열리기 **전에** 심는다. session.ts 가 첫 읽기에서 모듈 캐시를
 // 채우고, 로그인 문은 그 직후에 읽는다. 만료는 넉넉히 뒤로 — 1분 안쪽이면
@@ -247,6 +251,25 @@ if (!gateOpen) {
 await page.getByRole("button", { name: "Today" }).first().click().catch(() => {});
 await page.waitForTimeout(300);
 
+// ----- 0. 상단바 Add 버튼도 창을 띄우지 않는다 -----
+// 격자의 빈 칸과 같은 결과여야 한다. 누른 자리가 없으므로 그 날의 첫 빈 타임에 만든다.
+const addButton = page.getByRole("button", { name: /^Add/ }).first();
+await addButton.click();
+await page.waitForTimeout(1200);
+const addDialogs = await page.locator('[role="dialog"]').count();
+record("Add 버튼에 모달이 뜨지 않음", addDialogs === 0, `role=dialog ${addDialogs}개`);
+
+const fromAdd = [...server.bookings.values()][0];
+record(
+  "Add 가 첫 빈 타임에 예약을 만듦",
+  Boolean(fromAdd),
+  fromAdd ? `${fromAdd.time} · title="${fromAdd.title}"` : "없음",
+);
+// 이 예약은 아래 시나리오와 섞이면 안 되므로 지우고 시작한다.
+server.bookings.clear();
+await page.reload({ waitUntil: "networkidle" });
+await page.waitForTimeout(600);
+
 // ----- 1. 빈 칸 클릭 → 창이 뜨지 않고 상세 패널이 열린다 -----
 const emptyCell = page.getByRole("button", { name: /^Create reservation on/ }).first();
 await emptyCell.waitFor({ timeout: 10_000 });
@@ -262,6 +285,23 @@ const detailOpen = await page
   .isVisible()
   .catch(() => false);
 record("상세 패널이 바로 열림", detailOpen);
+
+// "바로 나온다" 는 렌더됐다는 뜻이 아니라 **스크롤 없이 보인다**는 뜻이다.
+// 좁은 화면에서는 격자가 높이를 다 먹고 패널이 화면 밖으로 밀릴 수 있다.
+const panelBox = await page
+  .getByText("Subtotal Due", { exact: false })
+  .first()
+  .evaluate((el) => {
+    const card = el.closest("article") ?? el;
+    const r = card.getBoundingClientRect();
+    return { top: r.top, bottom: r.bottom, vh: window.innerHeight };
+  })
+  .catch(() => null);
+record(
+  `상세 패널이 스크롤 없이 화면 안에 보임 (${WIDTH}x${HEIGHT})`,
+  Boolean(panelBox && panelBox.top < panelBox.vh && panelBox.bottom > 0),
+  panelBox ? `패널 top=${Math.round(panelBox.top)} / 화면높이 ${panelBox.vh}` : "패널 못 찾음",
+);
 
 // ----- 2. 이름이 없으면 Guest -----
 const created = [...server.bookings.values()][0];

@@ -9,7 +9,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 
 import AdminShell from "../../components/admin/AdminShell";
-import BookingDialog from "../../components/teesheet/BookingDialog";
+import BookingDialog, { SEATS_PER_TEE_TIME } from "../../components/teesheet/BookingDialog";
 import DateNav from "../../components/teesheet/DateNav";
 import ReservationDetail from "../../components/teesheet/ReservationDetail";
 import WeekGrid from "../../components/teesheet/WeekGrid";
@@ -21,17 +21,13 @@ export default function TeeSheetPage() {
   // 컨트롤러 객체는 useMemo 지만 bookings·busy·toasts 에 딸려 있어 변경 한 번마다
   // 새로 만들어진다. 아래 콜백이 통째로 그 객체에 의존하면 격자(셀 버튼 수백 개)가
   // 그때마다 다시 그려지므로, 쓰는 것만 꺼내 쓴다 — 이 넷은 useCallback 으로 고정이다.
-  const { createBooking, focusedDate, select, setFocusedDate } = controller;
-  // 다이얼로그는 이제 상단바의 Add 버튼 전용이다 — 누를 자리가 정해져 있지 않으니
-  // (날짜만 알고 티 타임은 모른다) 인라인으로 만들 예약이 없다. 격자의 빈 칸은
-  // 아래 `createAt` 으로 간다.
+  const { bookings, createBooking, focusedDate, select, setFocusedDate, slots } = controller;
+  // 다이얼로그는 이제 **막다른 길을 막는 용도**로만 남는다 (아래 addReservation 참고).
   const [dialogOpen, setDialogOpen] = useState(false);
   // 예전에는 빈 칸이 넘겨주는 날짜·시각을 ref 에 담아 뒀는데, 그 ref 를 렌더 중에
-  // 읽는 바람에 react-hooks/refs 가 걸렸다. Add 버튼만 남은 지금은 시드가
-  // "지금 보고 있는 날짜" 하나뿐이라 그냥 계산하면 된다.
+  // 읽는 바람에 react-hooks/refs 가 걸렸다. 지금 시드는 "보고 있는 날짜" 하나뿐이라
+  // 그냥 계산하면 된다.
   const dialogSeed = useMemo(() => ({ date: focusedDate }), [focusedDate]);
-
-  const openBlankDialog = useCallback(() => setDialogOpen(true), []);
 
   // 격자의 빈 칸(`+`)은 더 이상 다이얼로그를 띄우지 않는다. 예약 한 건을 그 자리에
   // 바로 만들고 곧장 선택해서, 아래 상세 패널이 그대로 열리게 한다 — 클릭 한 번에
@@ -86,6 +82,40 @@ export default function TeeSheetPage() {
     [createBooking, focusedDate, select, setFocusedDate],
   );
 
+  /**
+   * 보고 있는 날짜에서 **자리가 남은 가장 이른 티 타임**. 없으면 null.
+   *
+   * 취소된 예약은 좌석을 잡지 않는다 (백엔드의 정원 계산과 같은 규칙).
+   * 슬롯은 분 단위로 정렬해서 본다 — "6:58 AM" 같은 라벨을 문자열로 비교하면
+   * 오전 10시가 오전 7시보다 앞에 온다.
+   */
+  const firstFreeTime = useMemo(() => {
+    const taken = new Map<string, number>();
+    for (const booking of bookings) {
+      if (booking.date !== focusedDate || booking.status === "cancelled") continue;
+      taken.set(booking.time, (taken.get(booking.time) ?? 0) + booking.players.length);
+    }
+    return (
+      [...slots]
+        .sort((a, b) => a.minutes - b.minutes)
+        .find((slot) => (taken.get(slot.time) ?? 0) < SEATS_PER_TEE_TIME)?.time ?? null
+    );
+  }, [bookings, focusedDate, slots]);
+
+  /**
+   * 상단바의 Add. 격자의 빈 칸과 같은 결과를 내야 한다 — 창을 띄우지 않고 예약을
+   * 만들어 아래 상세 패널을 연다. 다른 점은 누른 자리가 없다는 것뿐이라, 그 날의
+   * 첫 빈 타임을 대신 고른다. 타임이 틀렸으면 패널 안의 날짜·티 타임 드롭다운으로
+   * 바로 옮길 수 있다.
+   *
+   * 그 날이 꽉 찼거나 슬롯이 아직 안 왔으면 다이얼로그를 연다. 버튼이 아무 반응도
+   * 없는 것보다 낫고, 거기서는 다른 날짜를 고를 수 있다.
+   */
+  const addReservation = useCallback(() => {
+    if (firstFreeTime) void createAt(focusedDate, firstFreeTime);
+    else setDialogOpen(true);
+  }, [createAt, firstFreeTime, focusedDate]);
+
   // 한 화면 고정: 페이지 자체는 절대 스크롤하지 않고, 티 시트와 상세 패널이
   // 각자 내부에서만 스크롤한다. 그래야 예약을 클릭했을 때 격자와 상세가 동시에 보인다.
   return (
@@ -95,7 +125,7 @@ export default function TeeSheetPage() {
         // 자기 헤더 줄을 하나 더 그려서 거기 달았는데, 그래서 화면 머리가 세 겹이었다.
         <button
           className="inline-flex min-h-11 items-center gap-1 bg-[#4533ff] px-4 text-xs font-bold text-white lg:min-h-0 lg:py-1.5"
-          onClick={openBlankDialog}
+          onClick={addReservation}
           type="button"
         >
           Add

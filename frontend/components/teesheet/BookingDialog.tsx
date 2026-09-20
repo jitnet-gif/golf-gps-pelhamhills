@@ -37,8 +37,14 @@ function emptyPlayer(): PlayerDraft {
   return { firstName: "", lastName: "", email: "", phone: "", type: "Existing Customer", ratePlan: "" };
 }
 
-/** 한 티타임이 가진 좌석 수. 백엔드의 PLAYERS_PER_TEE_TIME 과 같은 값이어야 한다. */
-const SEATS_PER_TEE_TIME = 4;
+/**
+ * 한 티타임이 가진 좌석 수. 백엔드의 PLAYERS_PER_TEE_TIME 과 같은 값이어야 한다.
+ *
+ * 내보내는 이유: 티 시트 페이지의 Add 버튼도 "자리가 남은 첫 타임"을 찾을 때 이
+ * 값을 본다. 손님 화면에도 같은 상수가 있지만(`components/booking/availability.ts`)
+ * 그쪽은 일부러 어드민과 분리해 둔 모듈이라 가져다 쓰지 않는다.
+ */
+export const SEATS_PER_TEE_TIME = 4;
 
 /**
  * 해당 날짜의 "티타임별로 이미 찬 좌석 수". 취소된 예약은 좌석을 잡지 않는다.
