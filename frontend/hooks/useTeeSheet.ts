@@ -23,6 +23,7 @@ import {
   todayIso,
   weekDates as weekDatesFor,
 } from "@/lib/teeSheet/dates";
+import { GUEST_NAME } from "@/lib/teeSheet/tone";
 import type {
   AddPlayerInput,
   BookingStatus,
@@ -79,7 +80,7 @@ function makePlayer(input: Partial<Player> = {}): Player {
   const first = (input.firstName ?? "").trim();
   const last = (input.lastName ?? "").trim();
   const combined = `${first} ${last}`.trim();
-  const name = (input.name ?? "").trim() || combined || "Guest";
+  const name = (input.name ?? "").trim() || combined || GUEST_NAME;
   const parts = name.split(/\s+/);
   const derivedFirst = parts[0] ?? "";
   const derivedLast = parts.slice(1).join(" ");
@@ -93,6 +94,8 @@ function makePlayer(input: Partial<Player> = {}): Player {
     lastName: last || derivedLast,
     email: input.email ?? "",
     phone: input.phone ?? "",
+    // 표시 이름(GUEST_NAME)이 아니라 PlayerType 열거값이다 — 글자가 같다고 섞으면
+    // 표시 이름을 바꾸는 날 playerTone 의 노란 Guest 칸이 조용히 깨진다.
     type: input.type ?? "Guest",
     ratePlan: input.ratePlan ?? "",
     arrived: input.arrived ?? false,
@@ -304,7 +307,17 @@ function touch(booking: TeeBooking): TeeBooking {
 function mergePlayer(player: Player, patch: PatchPlayerInput): Player {
   const next: Player = { ...player, ...stripUndefined(patch), id: player.id };
   if (patch.firstName !== undefined || patch.lastName !== undefined) {
-    next.name = `${next.firstName} ${next.lastName}`.trim() || next.name;
+    const combined = `${next.firstName} ${next.lastName}`.trim();
+    if (combined === "") {
+      // 서버(`pelham_tee_name`)는 이름을 다 지우면 "Guest" 로 채운다. 여기서 옛 이름을
+      // 그대로 들고 있으면 응답이 올 때까지 지운 이름이 화면에 남아 있다가 Guest 로
+      // 툭 바뀐다 — 같은 규칙을 낙관적 갱신에도 적용해 그 깜빡임을 없앤다.
+      next.firstName = GUEST_NAME;
+      next.lastName = "";
+      next.name = GUEST_NAME;
+    } else {
+      next.name = combined;
+    }
   } else if (patch.name !== undefined) {
     const parts = next.name.trim().split(/\s+/);
     next.firstName = parts[0] ?? "";
@@ -888,11 +901,17 @@ export function useTeeSheet(): TeeSheetController {
         return Promise.resolve(null);
       }
 
+      // type 은 "Existing Customer" 다. "Guest" 로 두면 일 시트 셀이
+      // `player.type === "Guest"` 를 보고 이름 대신 늘 <em>Guest</em> 를 그려서,
+      // 직원이 상세 패널에서 이름을 적어 저장해도 격자에는 끝까지 "Guest" 로 남는다.
+      // 이 버튼이 만드는 것은 "이제 이름을 채울 빈 자리" 이지 익명 손님이 아니다
+      // (격자의 + 로 새 예약을 만들 때와 같은 상황 — app/teesheet/page.tsx 참고).
+      // 이름을 안 채운 동안 "Guest" 로 보이는 일은 playerLabel 의 폴백이 한다.
       const payload: AddPlayerInput = {
         name: "Guest",
         firstName: "Guest",
         lastName: "",
-        type: "Guest",
+        type: "Existing Customer",
         ...stripUndefined<AddPlayerInput>(input ?? {}),
       };
       // 로컬 낙관적 플레이어도 실제 id 를 갖는다 (상세 패널의 수정 액션이 살아 있도록).

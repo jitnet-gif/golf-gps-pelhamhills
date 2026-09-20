@@ -51,11 +51,30 @@ export function isDeadPlayer(player: Player): boolean {
 /**
  * 이름 표기는 Chronogolf 방식인 `Lastname, Firstname`.
  * Guest 는 이름 대신 "Guest" 를 이탤릭으로 — 아직 신원이 없는 자리라는 뜻이다.
- * 성/이름이 비어 있는 레거시 레코드를 위해 name → "Player" 로 폴백한다.
+ *
+ * 이름이 하나도 없으면 "Guest" 다. 예전에는 "Player" 였는데, 이름 없는 자리를
+ * 부르는 말이 화면마다 달라졌다 — 서버도(`pelham_tee_name`) 빈 이름을 "Guest" 로
+ * 채우고, 격자의 Guest 칸도 그렇게 읽는다. 한 단어로 통일한다.
  */
 export function playerLabel(player: Player): string {
   const last = player.lastName.trim();
   const first = player.firstName.trim();
   if (last && first) return `${last}, ${first}`;
-  return last || first || player.name.trim() || "Player";
+  return last || first || player.name.trim() || GUEST_NAME;
+}
+
+/** 이름이 없는 자리를 부르는 이름. 서버의 `pelham_tee_name` 과 같은 값이어야 한다. */
+export const GUEST_NAME = "Guest";
+
+/**
+ * 격자 막대(주간 뷰)에 찍히는 예약 이름. 대표자(첫 플레이어) 이름을 그대로 쓴다.
+ *
+ * 예약의 `title` 은 서버 필수값이라 만들 때 한 번 정해지는데, 그 뒤 상세 패널에서
+ * 이름을 고쳐도 자동으로 따라가지 않는다(서버에 동기화 규칙이 없다). 그래서
+ * "지금 이름이라면 title 이 무엇이어야 하는가" 를 이 함수 하나로 정해 두고,
+ * 상세 패널이 이름을 저장할 때 같은 값으로 title 도 맞춘다.
+ */
+export function reservationTitle(players: Player[]): string {
+  const lead = players[0];
+  return lead ? playerLabel(lead) : GUEST_NAME;
 }

@@ -6,7 +6,7 @@
 // 이 화면의 사이드바는 `hidden lg:block` 이라 휴대폰에서는 메뉴가 통째로 사라졌고,
 // 티 시트를 열면 다른 어드민 화면으로 갈 방법이 뒤로 가기밖에 없었다.
 // 이 페이지는 `fill` 모드를 쓴다 — 페이지 자체는 스크롤하지 않고 격자/상세만 스크롤한다.
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import AdminShell from "../../components/admin/AdminShell";
 import BookingDialog from "../../components/teesheet/BookingDialog";
@@ -14,21 +14,77 @@ import DateNav from "../../components/teesheet/DateNav";
 import ReservationDetail from "../../components/teesheet/ReservationDetail";
 import WeekGrid from "../../components/teesheet/WeekGrid";
 import { useTeeSheet } from "../../hooks/useTeeSheet";
+import { GUEST_NAME } from "@/lib/teeSheet/tone";
 
 export default function TeeSheetPage() {
   const controller = useTeeSheet();
+  // 컨트롤러 객체는 useMemo 지만 bookings·busy·toasts 에 딸려 있어 변경 한 번마다
+  // 새로 만들어진다. 아래 콜백이 통째로 그 객체에 의존하면 격자(셀 버튼 수백 개)가
+  // 그때마다 다시 그려지므로, 쓰는 것만 꺼내 쓴다 — 이 넷은 useCallback 으로 고정이다.
+  const { createBooking, focusedDate, select, setFocusedDate } = controller;
+  // 다이얼로그는 이제 상단바의 Add 버튼 전용이다 — 누를 자리가 정해져 있지 않으니
+  // (날짜만 알고 티 타임은 모른다) 인라인으로 만들 예약이 없다. 격자의 빈 칸은
+  // 아래 `createAt` 으로 간다.
   const [dialogOpen, setDialogOpen] = useState(false);
-  const dialogSeed = useRef<{ date?: string; time?: string }>({});
+  // 예전에는 빈 칸이 넘겨주는 날짜·시각을 ref 에 담아 뒀는데, 그 ref 를 렌더 중에
+  // 읽는 바람에 react-hooks/refs 가 걸렸다. Add 버튼만 남은 지금은 시드가
+  // "지금 보고 있는 날짜" 하나뿐이라 그냥 계산하면 된다.
+  const dialogSeed = useMemo(() => ({ date: focusedDate }), [focusedDate]);
 
-  const openBlankDialog = useCallback(() => {
-    dialogSeed.current = { date: controller.focusedDate };
-    setDialogOpen(true);
-  }, [controller.focusedDate]);
+  const openBlankDialog = useCallback(() => setDialogOpen(true), []);
 
-  const openDialogAt = useCallback((date: string, time: string) => {
-    dialogSeed.current = { date, time };
-    setDialogOpen(true);
-  }, []);
+  // 격자의 빈 칸(`+`)은 더 이상 다이얼로그를 띄우지 않는다. 예약 한 건을 그 자리에
+  // 바로 만들고 곧장 선택해서, 아래 상세 패널이 그대로 열리게 한다 — 클릭 한 번에
+  // 이름·요금제·결제를 편집하는 그 화면이다. 상세 패널은 이미 플레이어 단위 자동
+  // 저장(debounce)이라 다이얼로그가 하던 "폼을 채우고 Create" 단계가 통째로 필요 없다.
+  //
+  // 빈 칸은 좌석이 남은 자리에만 그려지므로 정원 검사는 여기서 다시 하지 않는다.
+  // 남의 브라우저가 먼저 채워 경합이 나면 서버의 require_capacity 가 막고
+  // controller 가 에러 토스트를 띄운다 (createBooking 이 null 을 돌려준다).
+  //
+  // 중복 생성만 막는다. `controller.busy` 를 보면 안 된다 — 상세 패널의 이름 입력이
+  // 0.7초마다 patchPlayer 를 날리며 같은 busy 를 켜므로, 이름을 치다가 다른 칸을
+  // 누르면 아무 일도 일어나지 않는 "눌렀는데 안 나오는" 상태가 된다. 그건 지금
+  // 고치려는 바로 그 증상이다. 막아야 할 건 이 칸의 더블클릭뿐이다.
+  const creatingRef = useRef(false);
+  const createAt = useCallback(
+    async (date: string, time: string) => {
+      if (creatingRef.current) return;
+      creatingRef.current = true;
+
+      try {
+        // 상세 패널의 티 타임 드롭다운은 controller.slots(= focusedDate 의 슬롯)에서
+        // 나온다. 주간 뷰에서 다른 날 칸을 눌렀다면 시트를 그 날로 옮겨야 방금 만든
+        // 예약과 슬롯 목록이 같은 날을 가리킨다 (다이얼로그도 같은 일을 했다).
+        if (date !== focusedDate) setFocusedDate(date);
+
+        // 이름 없는 자리는 "Guest" 다. title 은 서버 필수값이고 주간 뷰 막대에 찍히는
+        // 이름이라 비워 둘 수 없는데, 서버도 빈 이름의 플레이어를 "Guest" 로 채우므로
+        // (`pelham_tee_name`) 둘을 같은 말로 맞춘다. 상세 패널에서 이름을 적으면
+        // 플레이어와 title 이 같이 바뀐다 (ReservationDetail 의 commitPlayer 참고).
+        //
+        // 빈 플레이어 한 명을 같이 만든다: 0명짜리 예약은 좌석을 잡지 않아서
+        // 누른 칸이 그대로 `+` 로 남고, 격자 대신 off-grid 줄에 떨어진다.
+        //
+        // `type` 은 반드시 "Existing Customer" 로 넘긴다. 서버 기본값인 "Guest" 로 두면
+        // 일 시트 셀이 `player.type === "Guest"` 를 보고 이름 대신 늘 <em>Guest</em> 를
+        // 그린다(WeekGrid) — 직원이 이름을 다 적어도 격자는 영영 "Guest" 다.
+        // 이름 없는 자리를 Guest 로 부르는 일은 playerLabel 의 폴백이 이미 한다.
+        const created = await createBooking({
+          date,
+          time,
+          title: GUEST_NAME,
+          players: [{ firstName: "", lastName: "", type: "Existing Customer" }],
+        });
+
+        // 실패하면 controller 가 이미 토스트를 띄웠다. 여기서는 아무것도 열지 않는다.
+        if (created) select(created.id);
+      } finally {
+        creatingRef.current = false;
+      }
+    },
+    [createBooking, focusedDate, select, setFocusedDate],
+  );
 
   // 한 화면 고정: 페이지 자체는 절대 스크롤하지 않고, 티 시트와 상세 패널이
   // 각자 내부에서만 스크롤한다. 그래야 예약을 클릭했을 때 격자와 상세가 동시에 보인다.
@@ -68,7 +124,7 @@ export default function TeeSheetPage() {
           </div>
 
           <section className="min-h-0 min-w-0 overflow-hidden">
-            <WeekGrid controller={controller} onCreateAt={openDialogAt} />
+            <WeekGrid controller={controller} onCreateAt={createAt} />
           </section>
 
           {/* 상세 패널은 하단 영역 안에서만 스크롤한다. 이 상한이 티 시트의 최소 높이를
@@ -89,7 +145,7 @@ export default function TeeSheetPage() {
 
       <BookingDialog
         controller={controller}
-        initial={dialogSeed.current}
+        initial={dialogSeed}
         onClose={() => setDialogOpen(false)}
         open={dialogOpen}
       />

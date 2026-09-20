@@ -21,6 +21,7 @@ import { printReceiptDoc, receiptSheetHtml } from "@/lib/retail/printReceipt";
 import { computeTax, formatMoney } from "@/lib/retail/types";
 import { longDate, money } from "@/lib/teeSheet/dates";
 import { confirmationCode, teeReceiptFor } from "@/lib/teeSheet/receipt";
+import { reservationTitle } from "@/lib/teeSheet/tone";
 import type {
   AuditEntry,
   PatchBookingInput,
@@ -284,7 +285,27 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
         dropIfUnchanged();
         return false;
       }
-      await controller.patchPlayer(current.id, playerId, patch);
+
+      // 이름이 바뀌면 예약 제목도 따라가야 한다. 제목은 만들 때 한 번 정해지고 서버에
+      // 동기화 규칙이 없어서, 그냥 두면 주간 뷰 막대가 영영 "Guest" 로 남는다
+      // (이 패널에는 제목 입력칸이 없으니 고칠 방법도 없다).
+      //
+      // 단, **제목이 아직 이름을 따라가고 있을 때만** 바꾼다. 지금 제목이 "고치기 전
+      // 이름" 과 같으면 자동으로 붙어 있던 것이고, 다르면 다이얼로그에서 사람이 직접
+      // 적은 단체명 같은 것이므로 건드리지 않는다. 이름을 다 지우면 reservationTitle
+      // 이 "Guest" 를 돌려주므로 제목도 Guest 로 돌아간다.
+      const leadChanged =
+        current.players[0]?.id === playerId &&
+        (patch.firstName !== undefined || patch.lastName !== undefined);
+      const titleWasTracking = leadChanged && current.title === reservationTitle(current.players);
+
+      const updated = await controller.patchPlayer(current.id, playerId, patch);
+      if (updated && titleWasTracking) {
+        const nextTitle = reservationTitle(updated.players);
+        if (nextTitle !== updated.title) {
+          await controller.patchBooking(updated.id, { title: nextTitle });
+        }
+      }
       dropIfUnchanged();
       return true;
     },
