@@ -129,8 +129,8 @@ class TaskState(str, Enum):
 def _split_name(name: str) -> tuple[str, str]:
     """성은 **마지막 토큰**이다. 구현은 `store.split_name` 하나뿐 (시드와 동일해야 한다).
 
-    "Marie Predote" -> ("Marie", "Predote")
-    "Betty Lou DiMattio" -> ("Betty Lou", "DiMattio")
+    "Micah Xeric" -> ("Micah", "Xeric")
+    "Blake Jo Kestrel" -> ("Blake Jo", "Kestrel")
     "Guest" -> ("Guest", "")
     """
     return store.split_name(name)

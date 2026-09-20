@@ -277,7 +277,7 @@ def test_crud_transcript_is_identical_across_backends(tmp_path):
     # 감사 로그는 최신순이다. 이동 PATCH 는 이동·카트·메모 세 줄을 남긴다.
     assert [e["message"] for e in moved["audit"][:3]] == [
         "Notes updated.", "Cart count set to 2.", f"Moved to {MOVED_DATE} {MOVED_TIME}."]
-    assert [b["id"] for b in bodies["list"]][:2] == ["b-predote", "b-wheeland"]
+    assert [b["id"] for b in bodies["list"]][:2] == ["b-xeric", "b-dune"]
     assert bodies["daily-report"]["booked_slots"] == 32
     assert bodies["week-report"]["summary"]["total_days"] == 4
 
@@ -289,13 +289,13 @@ def test_crud_transcript_is_identical_across_backends(tmp_path):
 
 def test_delete_removes_row_everywhere(backend_env: Env):
     client, fake = backend_env.client, backend_env.fake
-    assert client.delete(f"{API}/tee-sheet/bookings/b-kicul").status_code == 204
-    assert client.get(f"{API}/tee-sheet/bookings/b-kicul").status_code == 404
-    assert client.delete(f"{API}/tee-sheet/bookings/b-kicul").status_code == 404
-    assert "b-kicul" not in {b["id"] for b in store.load_bookings()}
+    assert client.delete(f"{API}/tee-sheet/bookings/b-elm").status_code == 204
+    assert client.get(f"{API}/tee-sheet/bookings/b-elm").status_code == 404
+    assert client.delete(f"{API}/tee-sheet/bookings/b-elm").status_code == 404
+    assert "b-elm" not in {b["id"] for b in store.load_bookings()}
     assert len(store.load_bookings()) == SEED_COUNT - 1
     if fake is not None:
-        assert "b-kicul" not in fake.rows
+        assert "b-elm" not in fake.rows
         assert len(fake.rows) == SEED_COUNT - 1
 
 
@@ -457,16 +457,16 @@ def test_supabase_patch_writes_only_the_changed_row(tmp_path, monkeypatch):
         # 첫 쓰기는 시드 전체를 다시 쓸 수 있다. 시드 doc 은 모델을 거치지 않아
         # (source 키 없음, "+00:00" 시각) API 가 한 번 정규화해 저장한다.
         mark = len(fake.raw_requests)
-        assert client.patch(f"{API}/tee-sheet/bookings/b-kicul", json={"notes": "warm-up"}).status_code == 200
+        assert client.patch(f"{API}/tee-sheet/bookings/b-elm", json={"notes": "warm-up"}).status_code == 200
         assert posted_rows(fake, mark)
 
         mark = len(fake.raw_requests)
-        assert client.patch(f"{API}/tee-sheet/bookings/b-costea", json={"notes": "second"}).status_code == 200
+        assert client.patch(f"{API}/tee-sheet/bookings/b-ash", json={"notes": "second"}).status_code == 200
         rows = posted_rows(fake, mark)
-        assert [row["id"] for row in rows] == ["b-costea"]
+        assert [row["id"] for row in rows] == ["b-ash"]
         assert not [r for r in fake.raw_requests[mark:] if r.method == "DELETE"]
 
         mark = len(fake.raw_requests)
-        assert client.delete(f"{API}/tee-sheet/bookings/b-costea").status_code == 204
+        assert client.delete(f"{API}/tee-sheet/bookings/b-ash").status_code == 204
         assert posted_rows(fake, mark) == []
         assert [r.method for r in fake.raw_requests[mark:]].count("DELETE") == 1

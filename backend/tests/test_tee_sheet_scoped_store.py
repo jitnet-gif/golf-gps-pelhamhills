@@ -132,7 +132,7 @@ def test_scope_refuses_a_bare_string():
     with pytest.raises(TypeError):
         Scope(dates="2026-09-12")
     with pytest.raises(TypeError):
-        Scope(ids="b-kicul")
+        Scope(ids="b-elm")
 
 
 def test_scope_covers_dates_only_through_dates_or_the_range():
@@ -263,7 +263,7 @@ def test_scoped_load_is_the_same_union_in_both_backends(env: Env):
 
 
 def test_capacity_check_refuses_a_list_that_did_not_load_the_date(env: Env):
-    # 7:43 AM 은 b-unrau 2명 + b-carlsson 2명 = 4명.
+    # 7:43 AM 은 b-willow 2명 + b-cedar 2명 = 4명.
     day = ts.read_bookings(Scope(dates={SEED_DATE}))
     assert ts.tee_time_players(day, SEED_DATE, "7:43 AM") == 4
     with pytest.raises(ts.ScopeNotLoaded):
@@ -271,9 +271,9 @@ def test_capacity_check_refuses_a_list_that_did_not_load_the_date(env: Env):
     with pytest.raises(ts.ScopeNotLoaded):
         ts.require_tee_time_capacity(day, TOMORROW, "7:43 AM", incoming=1)
 
-    # 예약 자체는 그 날짜에 있지만, 같은 티 타임의 이웃(b-carlsson)은 안 읽혔다.
+    # 예약 자체는 그 날짜에 있지만, 같은 티 타임의 이웃(b-cedar)은 안 읽혔다.
     # 조용히 세면 2 가 나와 "2자리 남음" → 초과 예약이다.
-    only_one = ts.read_bookings(Scope(ids={"b-unrau"}))
+    only_one = ts.read_bookings(Scope(ids={"b-willow"}))
     assert [b.date for b in only_one] == [SEED_DATE]
     with pytest.raises(ts.ScopeNotLoaded):
         ts.tee_time_players(only_one, SEED_DATE, "7:43 AM")
@@ -291,7 +291,7 @@ def test_capacity_check_inside_an_unscoped_tx_writes_nothing(env: Env):
     mark = len(env.fake.requests) if env.fake else 0
     before = store.load_bookings()
     with pytest.raises(ts.ScopeNotLoaded):
-        with ts.bookings_tx(Scope(ids={"b-unrau"})) as bookings:
+        with ts.bookings_tx(Scope(ids={"b-willow"})) as bookings:
             ts.require_tee_time_capacity(bookings, SEED_DATE, "7:43 AM", incoming=2)
     assert store.load_bookings() == before
     if env.fake is not None:
@@ -329,15 +329,15 @@ def stored(booking_id: str) -> dict[str, Any]:
 
 
 def test_revive_after_a_concurrent_move_is_409(env: Env, monkeypatch):
-    url = f"{API}/tee-sheet/bookings/b-nicalou"
+    url = f"{API}/tee-sheet/bookings/b-ridge"
     assert env.client.patch(url, json={"status": "cancelled"}).status_code == 200
-    fired = race_move(monkeypatch, "b-nicalou", NEW_DATE, "7:25 AM")
+    fired = race_move(monkeypatch, "b-ridge", NEW_DATE, "7:25 AM")
 
     # 9/08 로 범위를 잡았는데 예약은 9/10 에 있다. 9/10 은 안 읽었으니 정원을 셀 수 없다.
     response = env.client.patch(url, json={"status": "reserved"})
     assert fired, "the concurrent move must happen between the pre-read and the transaction"
     assert response.status_code == 409, response.status_code
-    doc = stored("b-nicalou")
+    doc = stored("b-ridge")
     assert (doc["date"], doc["status"]) == (NEW_DATE, "cancelled"), "실패한 트랜잭션은 아무것도 쓰지 않는다"
 
     # 다시 시도하면 새 날짜로 범위를 잡아 통과한다.
@@ -345,20 +345,20 @@ def test_revive_after_a_concurrent_move_is_409(env: Env, monkeypatch):
 
 
 def test_add_player_after_a_concurrent_move_is_409(env: Env, monkeypatch):
-    fired = race_move(monkeypatch, "b-nicalou", NEW_DATE, "7:25 AM")
-    response = env.client.post(f"{API}/tee-sheet/bookings/b-nicalou/players", json={"name": "Third Wheel"})
+    fired = race_move(monkeypatch, "b-ridge", NEW_DATE, "7:25 AM")
+    response = env.client.post(f"{API}/tee-sheet/bookings/b-ridge/players", json={"name": "Third Wheel"})
     assert fired
     assert response.status_code == 409, response.status_code
-    assert len(stored("b-nicalou")["players"]) == 2
+    assert len(stored("b-ridge")["players"]) == 2
 
 
 def test_time_only_move_after_a_concurrent_move_is_409(env: Env, monkeypatch):
     # 시간만 바꾸면 목적지는 예약의 **지금** 날짜(9/10)다. 미리 읽은 날짜(9/08)가 아니다.
-    fired = race_move(monkeypatch, "b-nicalou", NEW_DATE, "7:25 AM")
-    response = env.client.patch(f"{API}/tee-sheet/bookings/b-nicalou", json={"time": "7:34 AM"})
+    fired = race_move(monkeypatch, "b-ridge", NEW_DATE, "7:25 AM")
+    response = env.client.patch(f"{API}/tee-sheet/bookings/b-ridge", json={"time": "7:34 AM"})
     assert fired
     assert response.status_code == 409, response.status_code
-    assert (stored("b-nicalou")["date"], stored("b-nicalou")["time"]) == (NEW_DATE, "7:25 AM")
+    assert (stored("b-ridge")["date"], stored("b-ridge")["time"]) == (NEW_DATE, "7:25 AM")
 
 
 # ===== 요청 모양: 필터가 실제로 나가는가 (supabase) ====================

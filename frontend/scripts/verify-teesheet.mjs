@@ -68,11 +68,11 @@ async function resetBaseline() {
     }
   }
   // 카트 수는 시드 값(2)으로 되돌려 Save 검증이 항상 같은 델타를 보게 한다.
-  const predote = (await listBookings()).find(
-    (b) => b.date === "2026-09-11" && b.title === "Predote, Marie",
+  const xeric = (await listBookings()).find(
+    (b) => b.date === "2026-09-11" && b.title === "Xeric, Micah",
   );
-  if (predote && predote.cartCount !== 2) {
-    await api(`/tee-sheet/bookings/${predote.id}`, {
+  if (xeric && xeric.cartCount !== 2) {
+    await api(`/tee-sheet/bookings/${xeric.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ cartCount: 2 }),
@@ -118,8 +118,8 @@ try {
 
   // ---------- 2. 예약 선택 ----------
   step = "select";
-  const target = sep11.find((b) => b.title === "Predote, Marie");
-  await page.getByRole("button", { name: /Predote, Marie/ }).last().click();
+  const target = sep11.find((b) => b.title === "Xeric, Micah");
+  await page.getByRole("button", { name: /Xeric, Micah/ }).last().click();
   await page.waitForTimeout(600);
   check(
     await page.getByRole("button", { name: "Check In All" }).isVisible(),
@@ -206,7 +206,7 @@ try {
   await page.getByRole("button", { name: "Today" }).click();
   await page.waitForTimeout(1000);
   check(
-    await page.getByRole("button", { name: /Predote, Marie/ }).first().isVisible(),
+    await page.getByRole("button", { name: /Xeric, Micah/ }).first().isVisible(),
     "Today 버튼이 이번 주로 복귀함",
   );
 
@@ -221,9 +221,9 @@ try {
     dayColumns <= 1,
     `Day 뷰가 단일 날짜만 표시 (컬럼 ${dayColumns}개, 이전에는 토글이 무동작)`,
   );
-  // Kicul, Marty 는 9/11 에만 있다 -> 초점 날짜의 예약이 실제로 렌더되는가
+  // Elm, Noel 는 9/11 에만 있다 -> 초점 날짜의 예약이 실제로 렌더되는가
   check(
-    await page.getByRole("button", { name: /Kicul, Marty/ }).first().isVisible().catch(() => false),
+    await page.getByRole("button", { name: /Elm, Noel/ }).first().isVisible().catch(() => false),
     "Day 뷰가 해당 날짜의 예약을 실제로 표시",
   );
   // Day 뷰는 초점 날짜만 보여주는 것이 정상이다. 중요한 건 "돌아오면 전부 복구되는가".
@@ -308,7 +308,7 @@ try {
 
   // ---------- 11. 감사 로그 펼치기 ----------
   step = "history";
-  await page.getByRole("button", { name: /Predote, Marie/ }).last().click();
+  await page.getByRole("button", { name: /Xeric, Micah/ }).last().click();
   await page.waitForTimeout(500);
   await page.getByRole("button", { name: /^History/ }).click();
   await page.waitForTimeout(400);
@@ -394,9 +394,9 @@ try {
       const header = [...document.querySelectorAll("button")].find((e) =>
         /^Show September 11/.test(e.getAttribute("aria-label") || ""),
       );
-      // Kicul, Marty 는 9/11 에만 있으므로 요일 컬럼이 모호하지 않다.
+      // Elm, Noel 는 9/11 에만 있으므로 요일 컬럼이 모호하지 않다.
       const bar = [...document.querySelectorAll("button")].find((e) =>
-        /^Kicul, Marty/.test((e.innerText || "").trim()),
+        /^Elm, Noel/.test((e.innerText || "").trim()),
       );
       if (!header || !bar) return null;
       return Math.abs(header.getBoundingClientRect().left - bar.getBoundingClientRect().left);
@@ -439,7 +439,7 @@ try {
     const unselected = await measure();
     check(!unselected.hasDetail, "예약 선택 전에는 상세 패널이 렌더되지 않음");
 
-    await page.getByRole("button", { name: /Predote, Marie/ }).last().click();
+    await page.getByRole("button", { name: /Xeric, Micah/ }).last().click();
     await page.waitForTimeout(700);
     const selectedLayout = await measure();
     check(
@@ -481,7 +481,7 @@ try {
       !reclosed.hasDetail && reclosed.grid === unselected.grid,
       `Close 로 상세를 닫으면 티 시트가 다시 전체 화면으로 확장됨 (${reclosed.grid}px)`,
     );
-    await page.getByRole("button", { name: /Predote, Marie/ }).last().click();
+    await page.getByRole("button", { name: /Xeric, Micah/ }).last().click();
     await page.waitForTimeout(600);
 
     // 격자를 스크롤해도 헤더 행과 Time 열이 고정("프리즈")되는가
@@ -507,7 +507,7 @@ try {
   await page.goto(`${WEB}/admin`, { waitUntil: "networkidle" });
   await page.waitForTimeout(1500);
   check(
-    await page.getByRole("button", { name: /Predote, Marie/ }).first().isVisible().catch(() => false),
+    await page.getByRole("button", { name: /Xeric, Micah/ }).first().isVisible().catch(() => false),
     "/admin 별칭 라우트도 데이터와 함께 렌더됨",
   );
 

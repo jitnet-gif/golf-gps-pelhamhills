@@ -170,12 +170,12 @@ def split_name(name: str) -> tuple[str, str]:
 
     이름은 토큰이 두 개라는 보장이 없다. 마지막 공백을 기준으로 자른다.
 
-        "Marie Predote"      -> ("Marie", "Predote")
-        "Betty Lou DiMattio" -> ("Betty Lou", "DiMattio")   # 성은 "DiMattio"
+        "Micah Xeric"      -> ("Micah", "Xeric")
+        "Blake Jo Kestrel" -> ("Blake Jo", "Kestrel")   # 성은 "Kestrel"
         "Guest"              -> ("Guest", "")               # ("", "Guest") 가 아니다
 
     프론트는 셀을 `${lastName}, ${firstName}` 로 그린다. 여기서 틀리면
-    시트에 "Lou DiMattio, Betty" 처럼 잘못된 성이 찍힌다.
+    시트에 "Jo Kestrel, Blake" 처럼 잘못된 성이 찍힌다.
 
     `backend/api/routes/tee_sheet.py` 의 `_split_name` 이 이 함수를 그대로 쓴다.
     시드와 API 가 서로 다르게 쪼개면 안 되므로 구현은 여기 하나뿐이다.
@@ -260,8 +260,8 @@ def _stamp_booking_order(bookings: list[dict[str, Any]]) -> list[dict[str, Any]]
 
     티 시트 격자는 한 티 타임 안에서 예약을 createdAt 순으로 왼쪽부터 앉힌다
     (`bySeatOrder`). 시드가 모든 예약에 같은 타임스탬프를 쓰면 그 정렬 키가 무의미해져
-    id 알파벳순이라는 엉뚱한 기준이 자리를 정한다 — 실제로 7:43 AM 에서 b-carlsson 이
-    b-unrau 앞에 앉아, 클론 대상 스크린샷과 좌우가 뒤집혔다.
+    id 알파벳순이라는 엉뚱한 기준이 자리를 정한다 — 실제로 7:43 AM 에서 b-cedar 이
+    b-willow 앞에 앉아, 클론 대상 스크린샷과 좌우가 뒤집혔다.
 
     그래서 시드 리스트의 순서 = 예약이 들어온 순서로 보고 그대로 타임스탬프에 새긴다.
     """
@@ -290,66 +290,66 @@ def seed_bookings() -> list[dict[str, Any]]:
     return _stamp_booking_order(
 [
         _booking(
-            "b-predote", _SEED_DATE, "6:58 AM", "gold", "Predote, Marie", _SEED_RATE, 2,
+            "b-xeric", _SEED_DATE, "6:58 AM", "gold", "Xeric, Micah", _SEED_RATE, 2,
             [
-                _player("Marie Predote", _WEEKDAY_CART),
-                _player("Betty Lou DiMattio", _WEEKDAY_CART),
-                _player("Roseann Norton", _WEEKDAY_CART),
-                _player("Steve Murphy", _FULL_7DAY),
+                _player("Micah Xeric", _WEEKDAY_CART),
+                _player("Blake Jo Kestrel", _WEEKDAY_CART),
+                _player("Tatum Isle", _WEEKDAY_CART),
+                _player("Wren Dell", _FULL_7DAY),
             ],
             _SEP08,
         ),
         _booking(
-            "b-wheeland", _SEED_DATE, "7:07 AM", "gold", "Wheeland, Alf", _SEED_RATE, 0,
+            "b-dune", _SEED_DATE, "7:07 AM", "gold", "Dune, Avery", _SEED_RATE, 0,
             [
-                _player("Alf Wheeland", _WEEKDAY_CART),
-                _player("Colin Scott", _WEEKDAY_SINGLE),
-                _player("David Neville", _WEEKDAY_CART),
+                _player("Avery Dune", _WEEKDAY_CART),
+                _player("Devon Yarrow", _WEEKDAY_SINGLE),
+                _player("Gray North", _WEEKDAY_CART),
             ],
             _SEP08,
         ),
         _booking(
-            "b-marshall", _SEED_DATE, "7:16 AM", "gold", "Marshall, Dan", _SEED_RATE, 0,
+            "b-ford", _SEED_DATE, "7:16 AM", "gold", "Ford, Ellis", _SEED_RATE, 0,
             [
-                _player("Dan Marshall", _WEEKDAY_SINGLE),
-                _player("Peter Catti", _WEEKDAY_SINGLE),
-                _player("Joe Grdovich", _WEEKDAY_SINGLE),
-                _player("Leslie Reid", _WEEKDAY_SINGLE),
+                _player("Ellis Ford", _WEEKDAY_SINGLE),
+                _player("Quinn Thorn", _WEEKDAY_SINGLE),
+                _player("Kai Juniper", _WEEKDAY_SINGLE),
+                _player("Lane Quarry", _WEEKDAY_SINGLE),
             ],
             _SEP08,
         ),
         _booking(
-            "b-nicalou", _SEED_DATE, "7:25 AM", "gold", "Nicalou, Chris", _SEED_RATE, 1,
+            "b-ridge", _SEED_DATE, "7:25 AM", "gold", "Ridge, Casey", _SEED_RATE, 1,
             [
-                _player("Chris Nicalou", _FULL_7DAY),
-                _player("Triada Nicolou", _FULL_7DAY),
+                _player("Casey Ridge", _FULL_7DAY),
+                _player("Xan Ember", _FULL_7DAY),
             ],
             _SEP08,
         ),
         _booking(
-            "b-kicul", _SEED_DATE, "7:34 AM", "gold", "Kicul, Marty", _SEED_RATE, 0,
+            "b-elm", _SEED_DATE, "7:34 AM", "gold", "Elm, Noel", _SEED_RATE, 0,
             [
-                _player("Marty Kicul", _WEEKDAY_SINGLE),
-                _player("David Kaufmann", _WEEKDAY_SINGLE),
-                _player("Wayne Armstrong", _WEEKDAY_SINGLE),
+                _player("Noel Elm", _WEEKDAY_SINGLE),
+                _player("Finley Glade", _WEEKDAY_SINGLE),
+                _player("Zane Crag", _WEEKDAY_SINGLE),
                 _guest(_WEEKDAY_SINGLE),
             ],
             _SEP08,
         ),
         # --- 7:43 AM: 회원 9홀 2인 + GolfNow 2인 = 4자리 ---
         _booking(
-            "b-unrau", _SEED_DATE, "7:43 AM", "gold", "Unrau, Ruth", _SEED_RATE, 0,
+            "b-willow", _SEED_DATE, "7:43 AM", "gold", "Willow, Vale", _SEED_RATE, 0,
             [
-                _player("Ruth Unrau", "Public Senior"),
+                _player("Vale Willow", "Public Senior"),
                 _guest("Public Senior"),
             ],
             _SEP08,
             holes=9,
         ),
         _booking(
-            "b-carlsson", _SEED_DATE, "7:43 AM", "blue", "Carlsson, James", _SEED_RATE, 0,
+            "b-cedar", _SEED_DATE, "7:43 AM", "blue", "Cedar, Jules", _SEED_RATE, 0,
             [
-                _player("James Carlsson", _GOLFNOW),
+                _player("Jules Cedar", _GOLFNOW),
                 _guest(_GOLFNOW),
             ],
             _SEP08,
@@ -357,26 +357,26 @@ def seed_bookings() -> list[dict[str, Any]]:
         ),
         # --- 7:52 AM: 회원 3인 + GolfNow 1인 = 4자리 ---
         _booking(
-            "b-costea", _SEED_DATE, "7:52 AM", "gold", "Costea, Rick", _SEED_RATE, 2,
+            "b-ash", _SEED_DATE, "7:52 AM", "gold", "Ash, Reese", _SEED_RATE, 2,
             [
-                _player("Rick Costea", _WEEKDAY_SINGLE),
-                _player("Rudy Videchak", _WEEKDAY_SINGLE),
-                _player("Roger Denis", _WEEKDAY_SINGLE),
+                _player("Reese Ash", _WEEKDAY_SINGLE),
+                _player("Uma Pike", _WEEKDAY_SINGLE),
+                _player("Sage Birch", _WEEKDAY_SINGLE),
             ],
             _SEP08,
         ),
         _booking(
-            "b-pattemore", _SEED_DATE, "7:52 AM", "blue", "Pattemore, Gregory", _SEED_RATE, 0,
+            "b-brook", _SEED_DATE, "7:52 AM", "blue", "Brook, Indigo", _SEED_RATE, 0,
             [
-                _player("Gregory Pattemore", _GOLFNOW),
+                _player("Indigo Brook", _GOLFNOW),
             ],
             _SEP08,
             notes=_GOLFNOW_NOTE,
         ),
         _booking(
-            "b-hollingworth", _SEED_DATE, "8:01 AM", "gold", "hollingworth, Norm", _SEED_RATE, 0,
+            "b-Frost", _SEED_DATE, "8:01 AM", "gold", "Frost, Oakley", _SEED_RATE, 0,
             [
-                _player("Norm hollingworth", "Public"),
+                _player("Oakley Frost", "Public"),
                 _guest("Public"),
                 _guest("Public"),
                 _guest("Public"),
@@ -385,11 +385,11 @@ def seed_bookings() -> list[dict[str, Any]]:
             holes=9,
         ),
         _booking(
-            "b-allison", _SEED_DATE, "8:10 AM", "gold", "Allison, Glenn", _SEED_RATE, 0,
+            "b-umber", _SEED_DATE, "8:10 AM", "gold", "Umber, Harper", _SEED_RATE, 0,
             [
-                _player("Glenn Allison", _WEEKDAY_CART),
-                _player("Wanda Allison", _WEEKDAY_CART),
-                _player("Paul McLean", _WEEKDAY_SINGLE),
+                _player("Harper Umber", _WEEKDAY_CART),
+                _player("Yuri Larch", _WEEKDAY_CART),
+                _player("Parker Meadow", _WEEKDAY_SINGLE),
             ],
             _SEP08,
         ),

@@ -114,7 +114,7 @@ $$;
 
 -- 전체 이름을 (firstName, lastName) 으로. **성은 마지막 토큰**이다
 -- (`tee_sheet_store.split_name`). 프론트가 셀을 `성, 이름` 으로 그리므로
--- "Betty Lou DiMattio" 가 "Lou DiMattio, Betty" 가 되면 안 된다.
+-- "Blake Jo Kestrel" 가 "Jo Kestrel, Blake" 가 되면 안 된다.
 create or replace function public.pelham_tee_split_name(p_name text)
 returns text[]
 language sql

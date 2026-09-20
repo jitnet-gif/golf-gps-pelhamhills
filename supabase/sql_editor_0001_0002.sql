@@ -83,8 +83,8 @@ create table if not exists public.pelham_customers (
 );
 
 -- 조회 경로. 이메일·전화는 `customer_store.find_customer` 의 매칭 순서와 같다.
--- **unique 를 걸지 않는다**: 소스에 같은 번호를 쓰는 부부가 있고(Hagar, Allison,
--- Nicalou), unique 를 걸면 임포트가 통째로 실패한다.
+-- **unique 를 걸지 않는다**: 소스에 같은 번호를 쓰는 부부가 있고(Hagar, Umber,
+-- Ridge), unique 를 걸면 임포트가 통째로 실패한다.
 create index if not exists pelham_customers_email_idx on public.pelham_customers (email) where email is not null;
 create index if not exists pelham_customers_phone_idx on public.pelham_customers (phone) where phone is not null;
 create index if not exists pelham_customers_last_name_idx on public.pelham_customers (lower(last_name));

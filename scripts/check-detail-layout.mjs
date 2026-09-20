@@ -12,7 +12,7 @@ const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1600, height: 750 } });
 await page.goto("http://localhost:3000/admin", { waitUntil: "networkidle" });
 
-await page.locator("button").filter({ hasText: "Predote, Marie" }).first().click();
+await page.locator("button").filter({ hasText: "Xeric, Micah" }).first().click();
 const anchor = page.getByText("Subtotal Due", { exact: false }).last();
 await anchor.waitFor();
 

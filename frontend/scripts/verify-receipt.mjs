@@ -253,7 +253,7 @@ test("the club logo is embedded in the receipt, not fetched while printing", () 
 
 function teeBooking(overrides = {}) {
   return {
-    id: "b-predote",
+    id: "b-xeric",
     date: "2026-09-15",
     time: "1:30 PM",
     holes: 18,

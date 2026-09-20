@@ -75,7 +75,7 @@ await bookingPage.close();
 const adminPage = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 await adminPage.goto("http://localhost:3000/admin", { waitUntil: "networkidle" });
 const adminTeeSheetVisible = await adminPage.getByText("Tee Sheet").first().isVisible();
-const adminGridVisible = await adminPage.getByText("Predote, Marie").first().isVisible();
+const adminGridVisible = await adminPage.getByText("Xeric, Micah").first().isVisible();
 await adminPage.screenshot({ path: "playwright-admin.png", fullPage: true });
 
 if (!adminTeeSheetVisible) {
@@ -89,7 +89,7 @@ await adminPage.close();
 const teeSheetPage = await browser.newPage({ viewport: { width: 1440, height: 760 } });
 await teeSheetPage.goto("http://localhost:3000/teesheet", { waitUntil: "networkidle" });
 const teeSheetVisible = await teeSheetPage.getByText("Tee Sheet").first().isVisible();
-const selectedBookingVisible = await teeSheetPage.getByText("Predote, Marie").first().isVisible();
+const selectedBookingVisible = await teeSheetPage.getByText("Xeric, Micah").first().isVisible();
 const collectButton = teeSheetPage.getByRole("button", { name: "Collect" }).first();
 if (await collectButton.isVisible().catch(() => false)) {
   await collectButton.click();

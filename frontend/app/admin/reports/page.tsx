@@ -26,11 +26,11 @@ const hourlyOccupancy = [
 ];
 
 const transactions: PaymentRow[] = [
-  { id: "PAY-1048", time: "10:52 AM", customer: "Virani, Yasmin", players: 1, type: "Payment", amount: 58.41, status: "Paid" },
-  { id: "PAY-1047", time: "10:34 AM", customer: "Demers, Danielle", players: 3, type: "Payment", amount: 175.23, status: "Paid" },
-  { id: "CAN-221", time: "10:25 AM", customer: "Bailey, Justin", players: 2, type: "Cancellation", amount: 116.82, status: "Refund Due" },
-  { id: "PAY-1046", time: "10:16 AM", customer: "Elliott, Alex", players: 2, type: "Payment", amount: 116.82, status: "Paid" },
-  { id: "CAN-220", time: "9:44 AM", customer: "Stone, Marla", players: 4, type: "Cancellation", amount: 0, status: "Voided" },
+  { id: "PAY-1048", time: "10:52 AM", customer: "Zephyr, Ari", players: 1, type: "Payment", amount: 58.41, status: "Paid" },
+  { id: "PAY-1047", time: "10:34 AM", customer: "Orchard, Dale", players: 3, type: "Payment", amount: 175.23, status: "Paid" },
+  { id: "CAN-221", time: "10:25 AM", customer: "Hollow, Cove", players: 2, type: "Cancellation", amount: 116.82, status: "Refund Due" },
+  { id: "PAY-1046", time: "10:16 AM", customer: "Vale, Eden", players: 2, type: "Payment", amount: 116.82, status: "Paid" },
+  { id: "CAN-220", time: "9:44 AM", customer: "Crag, Fern", players: 4, type: "Cancellation", amount: 0, status: "Voided" },
 ];
 
 function money(value: number) {

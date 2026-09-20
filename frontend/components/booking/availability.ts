@@ -206,7 +206,7 @@ export function describeFailure(error: unknown, action: string): BookingFailure 
   };
 }
 
-/** "Marie Predote" -> ["Marie", "Predote"]. 서버 `split_name` 과 같은 규칙(성은 마지막 토큰). */
+/** "Micah Xeric" -> ["Micah", "Xeric"]. 서버 `split_name` 과 같은 규칙(성은 마지막 토큰). */
 export function splitName(full: string): [string, string] {
   const parts = full.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return ["Guest", ""];

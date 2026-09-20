@@ -84,28 +84,28 @@ def test_store_seeds_the_file_and_persists(client, tmp_path):
 
 
 def test_seed_names_round_trip(client):
-    booking = client.get(f"{API}/tee-sheet/bookings/b-predote").json()
+    booking = client.get(f"{API}/tee-sheet/bookings/b-xeric").json()
     names = [p["name"] for p in booking["players"]]
-    assert names == ["Marie Predote", "Betty Lou DiMattio", "Roseann Norton", "Steve Murphy"]
+    assert names == ["Micah Xeric", "Blake Jo Kestrel", "Tatum Isle", "Wren Dell"]
 
     # 성은 **마지막 토큰**이다. 프론트가 `${lastName}, ${firstName}` 로 그리므로
-    # 여기서 틀리면 시트에 "Lou DiMattio, Betty" 가 찍힌다.
-    betty = booking["players"][1]
-    assert betty["firstName"] == "Betty Lou"
-    assert betty["lastName"] == "DiMattio"
+    # 여기서 틀리면 시트에 "Jo Kestrel, Blake" 가 찍힌다.
+    kestrel = booking["players"][1]
+    assert kestrel["firstName"] == "Blake Jo"
+    assert kestrel["lastName"] == "Kestrel"
 
-    marie = booking["players"][0]
-    assert (marie["firstName"], marie["lastName"]) == ("Marie", "Predote")
+    xeric = booking["players"][0]
+    assert (xeric["firstName"], xeric["lastName"]) == ("Micah", "Xeric")
 
-    guest = client.get(f"{API}/tee-sheet/bookings/b-carlsson").json()["players"][1]
+    guest = client.get(f"{API}/tee-sheet/bookings/b-cedar").json()["players"][1]
     assert (guest["name"], guest["firstName"], guest["lastName"]) == ("Guest", "Guest", "")
 
 
 @pytest.mark.parametrize(
     ("full_name", "expected"),
     [
-        ("Marie Predote", ("Marie", "Predote")),          # 두 토큰
-        ("Betty Lou DiMattio", ("Betty Lou", "DiMattio")),  # 세 토큰: 성은 마지막 토큰
+        ("Micah Xeric", ("Micah", "Xeric")),          # 두 토큰
+        ("Blake Jo Kestrel", ("Blake Jo", "Kestrel")),  # 세 토큰: 성은 마지막 토큰
         ("Guest", ("Guest", "")),                          # 한 토큰: ("", "Guest") 가 아니다
         ("  Ada  ", ("Ada", "")),
         ("", ("", "")),
@@ -122,14 +122,14 @@ def test_seed_shares_one_tee_time_between_two_reservations(client):
     day = client.get(f"{API}/tee-sheet/bookings", params={"date": "2026-09-08"}).json()
 
     at_743 = [b for b in day if b["time"] == "7:43 AM"]
-    assert [b["id"] for b in at_743] == ["b-unrau", "b-carlsson"]
+    assert [b["id"] for b in at_743] == ["b-willow", "b-cedar"]
     assert sum(len(b["players"]) for b in at_743) == module.PLAYERS_PER_TEE_TIME == 4
     assert {b["color"] for b in at_743} == {"gold", "blue"}
-    assert at_743[0]["holes"] == 9                      # Unrau 는 9홀
+    assert at_743[0]["holes"] == 9                      # Willow 는 9홀
     assert "GolfNow" in at_743[1]["notes"]              # 온라인 예약에는 메모가 붙는다
 
     at_752 = [b for b in day if b["time"] == "7:52 AM"]
-    assert [b["id"] for b in at_752] == ["b-costea", "b-pattemore"]
+    assert [b["id"] for b in at_752] == ["b-ash", "b-brook"]
     assert sum(len(b["players"]) for b in at_752) == 4
 
 
@@ -244,13 +244,13 @@ def test_create_rejects_unknown_slot_with_422(client):
 
 def test_create_shares_a_tee_time_until_it_hits_four_players(client):
     """한 티 타임에 예약이 몇 건이든 상관없다. 합계 인원 4명이 한계다."""
-    # 6:58 AM 은 이미 4명(b-predote). 한 명도 더 못 들어간다.
+    # 6:58 AM 은 이미 4명(b-xeric). 한 명도 더 못 들어간다.
     clash = create(client, date="2026-09-08", time="6:58 AM", title="Clash, Joe",
                    players=[{"name": "Joe Clash"}])
     assert clash.status_code == 409
     assert "only holds 4 players" in clash.json()["detail"]
 
-    # 7:07 AM 은 3명(b-wheeland) -> 두 번째 예약 1명은 통과해야 한다.
+    # 7:07 AM 은 3명(b-dune) -> 두 번째 예약 1명은 통과해야 한다.
     shared = create(client, date="2026-09-08", time="7:07 AM", title="Single, Sam",
                     players=[{"name": "Sam Single"}])
     assert shared.status_code == 201, shared.text
@@ -264,7 +264,7 @@ def test_create_shares_a_tee_time_until_it_hits_four_players(client):
                       players=[{"name": "Larry Late"}])
     assert overflow.status_code == 409
 
-    # 7:25 AM 은 2명(b-nicalou): 3명은 넘치고 2명은 딱 맞는다.
+    # 7:25 AM 은 2명(b-ridge): 3명은 넘치고 2명은 딱 맞는다.
     too_big = create(client, date="2026-09-08", time="7:25 AM", title="Three, Tom",
                      players=[{"name": "A One"}, {"name": "B Two"}, {"name": "C Three"}])
     assert too_big.status_code == 409
@@ -284,7 +284,7 @@ def test_cancelled_reservation_releases_its_tee_time_slots(client):
                      players=[{"name": "Wes Waiting"}])
     assert blocked.status_code == 409
 
-    cancelled = client.patch(f"{API}/tee-sheet/bookings/b-carlsson", json={"status": "cancelled"})
+    cancelled = client.patch(f"{API}/tee-sheet/bookings/b-cedar", json={"status": "cancelled"})
     assert cancelled.status_code == 200
     freed = create(client, date="2026-09-08", time="7:43 AM", title="Waiting, Wes",
                    players=[{"name": "Wes Waiting"}, {"name": "Pat Waiting"}])
@@ -293,7 +293,7 @@ def test_cancelled_reservation_releases_its_tee_time_slots(client):
 
 def test_reinstating_a_cancelled_reservation_cannot_overflow_the_tee_time(client):
     """놓아 준 자리가 이미 팔렸으면 되살리기는 409 여야 한다 (정원 6명이 되면 안 된다)."""
-    url = f"{API}/tee-sheet/bookings/b-carlsson"          # 7:43 AM, 2명
+    url = f"{API}/tee-sheet/bookings/b-cedar"          # 7:43 AM, 2명
     assert client.patch(url, json={"status": "cancelled"}).status_code == 200
 
     taken = create(client, date="2026-09-08", time="7:43 AM", title="Fast, Fran",
@@ -321,14 +321,14 @@ def test_create_splits_supplied_names(client):
         time="9:13 AM",
         title="Names, Test",
         players=[
-            {"name": "Betty Lou DiMattio"},
+            {"name": "Blake Jo Kestrel"},
             {"name": "Guest"},
             {"firstName": "Ada", "lastName": "Lovelace"},
         ],
     )
     assert response.status_code == 201, response.text
     players = response.json()["players"]
-    assert (players[0]["firstName"], players[0]["lastName"]) == ("Betty Lou", "DiMattio")
+    assert (players[0]["firstName"], players[0]["lastName"]) == ("Blake Jo", "Kestrel")
     assert (players[1]["name"], players[1]["firstName"], players[1]["lastName"]) == ("Guest", "Guest", "")
     assert players[2]["name"] == "Ada Lovelace"
 
@@ -336,23 +336,23 @@ def test_create_splits_supplied_names(client):
 # ===== 조회 / 삭제 =====================================================
 
 def test_get_booking_and_404(client):
-    booking = client.get(f"{API}/tee-sheet/bookings/b-kicul")
+    booking = client.get(f"{API}/tee-sheet/bookings/b-elm")
     assert booking.status_code == 200
-    assert booking.json()["title"] == "Kicul, Marty"
+    assert booking.json()["title"] == "Elm, Noel"
     assert client.get(f"{API}/tee-sheet/bookings/nope").status_code == 404
 
 
 def test_delete_booking(client):
-    assert client.delete(f"{API}/tee-sheet/bookings/b-wheeland").status_code == 204
-    assert client.get(f"{API}/tee-sheet/bookings/b-wheeland").status_code == 404
+    assert client.delete(f"{API}/tee-sheet/bookings/b-dune").status_code == 204
+    assert client.get(f"{API}/tee-sheet/bookings/b-dune").status_code == 404
     assert len(client.get(f"{API}/tee-sheet/bookings").json()) == 10
-    assert client.delete(f"{API}/tee-sheet/bookings/b-wheeland").status_code == 404
+    assert client.delete(f"{API}/tee-sheet/bookings/b-dune").status_code == 404
 
 
 # ===== PATCH ==========================================================
 
 def test_patch_status_transitions_and_uncancel(client):
-    url = f"{API}/tee-sheet/bookings/b-nicalou"
+    url = f"{API}/tee-sheet/bookings/b-ridge"
 
     checked_in = client.patch(url, json={"status": "checked_in"}).json()
     assert checked_in["status"] == "checked_in"
@@ -385,16 +385,16 @@ def test_patch_status_transitions_and_uncancel(client):
 
 
 def test_patch_writes_specific_audit_lines(client):
-    url = f"{API}/tee-sheet/bookings/b-kicul"
+    url = f"{API}/tee-sheet/bookings/b-elm"
     booking = client.patch(url, json={"cartCount": 2, "holes": 9, "rate": 30.0,
-                                      "color": "gray", "title": "Kicul, Martin",
+                                      "color": "gray", "title": "Elm, Martin",
                                       "notes": "Back nine only"}).json()
     messages = [entry["message"] for entry in booking["audit"]]
     assert "Cart count set to 2." in messages
     assert "Holes set to 9." in messages
     assert "Rate set to $30.00." in messages
     assert "Color set to gray." in messages
-    assert "Title changed to 'Kicul, Martin'." in messages
+    assert "Title changed to 'Elm, Martin'." in messages
     assert "Notes updated." in messages
     assert booking["cartCount"] == 2 and booking["holes"] == 9 and booking["color"] == "gray"
 
@@ -405,7 +405,7 @@ def test_patch_writes_specific_audit_lines(client):
 
 
 def test_patch_moves_booking_to_another_slot(client):
-    url = f"{API}/tee-sheet/bookings/b-kicul"          # 4명
+    url = f"{API}/tee-sheet/bookings/b-elm"          # 4명
     moved = client.patch(url, json={"date": "2026-09-12", "time": "7:25 AM"})
     assert moved.status_code == 200, moved.text
     body = moved.json()
@@ -424,15 +424,15 @@ def test_patch_moves_booking_to_another_slot(client):
 
 
 def test_patch_moves_into_a_tee_time_that_still_has_room(client):
-    # b-pattemore 는 1명. 7:07 AM 은 3명(b-wheeland) -> 합쳐서 정확히 4명이라 통과해야 한다.
-    moved = client.patch(f"{API}/tee-sheet/bookings/b-pattemore", json={"time": "7:07 AM"})
+    # b-brook 는 1명. 7:07 AM 은 3명(b-dune) -> 합쳐서 정확히 4명이라 통과해야 한다.
+    moved = client.patch(f"{API}/tee-sheet/bookings/b-brook", json={"time": "7:07 AM"})
     assert moved.status_code == 200, moved.text
     assert moved.json()["time"] == "7:07 AM"
 
-    # 그 자리는 이제 꽉 찼다. 4명짜리 b-marshall 은 못 들어간다.
-    blocked = client.patch(f"{API}/tee-sheet/bookings/b-marshall", json={"time": "7:07 AM"})
+    # 그 자리는 이제 꽉 찼다. 4명짜리 b-ford 은 못 들어간다.
+    blocked = client.patch(f"{API}/tee-sheet/bookings/b-ford", json={"time": "7:07 AM"})
     assert blocked.status_code == 409
-    assert client.get(f"{API}/tee-sheet/bookings/b-marshall").json()["time"] == "7:16 AM"
+    assert client.get(f"{API}/tee-sheet/bookings/b-ford").json()["time"] == "7:16 AM"
 
 
 def test_cancelled_booking_moves_into_a_full_tee_time_but_cannot_be_reinstated_there(client):
@@ -440,10 +440,10 @@ def test_cancelled_booking_moves_into_a_full_tee_time_but_cannot_be_reinstated_t
 
     막아야 하는 건 이동이 아니라 **되살리기**다. 그건 별도 게이트가 이미 막는다.
     """
-    url = f"{API}/tee-sheet/bookings/b-carlsson"          # 7:43 AM, 2명
+    url = f"{API}/tee-sheet/bookings/b-cedar"          # 7:43 AM, 2명
     assert client.patch(url, json={"status": "cancelled"}).status_code == 200
 
-    # 6:58 AM 은 b-predote 4명으로 꽉 차 있다. 그래도 취소된 예약은 옮겨갈 수 있다.
+    # 6:58 AM 은 b-xeric 4명으로 꽉 차 있다. 그래도 취소된 예약은 옮겨갈 수 있다.
     moved = client.patch(url, json={"time": "6:58 AM"})
     assert moved.status_code == 200, moved.text
     after_move = client.get(url).json()
@@ -467,7 +467,7 @@ def test_cancelled_booking_moves_into_a_full_tee_time_but_cannot_be_reinstated_t
 
 
 def test_patch_to_its_own_slot_is_a_noop_not_a_conflict(client):
-    url = f"{API}/tee-sheet/bookings/b-predote"
+    url = f"{API}/tee-sheet/bookings/b-xeric"
     response = client.patch(url, json={"date": "2026-09-08", "time": "6:58 AM"})
     assert response.status_code == 200
     assert response.json()["time"] == "6:58 AM"
@@ -476,21 +476,21 @@ def test_patch_to_its_own_slot_is_a_noop_not_a_conflict(client):
 # ===== 플레이어 =======================================================
 
 def test_add_patch_remove_player(client):
-    url = f"{API}/tee-sheet/bookings/b-nicalou"           # 2명, 7:25 AM 에는 자리가 남아 있다
+    url = f"{API}/tee-sheet/bookings/b-ridge"           # 2명, 7:25 AM 에는 자리가 남아 있다
 
-    added = client.post(f"{url}/players", json={"name": "Betty Lou DiMattio"})
+    added = client.post(f"{url}/players", json={"name": "Blake Jo Kestrel"})
     assert added.status_code == 200, added.text
     players = added.json()["players"]
     assert len(players) == 3
     new_player = players[-1]
-    assert (new_player["firstName"], new_player["lastName"]) == ("Betty Lou", "DiMattio")
-    assert added.json()["audit"][0]["message"] == "Player added: Betty Lou DiMattio."
+    assert (new_player["firstName"], new_player["lastName"]) == ("Blake Jo", "Kestrel")
+    assert added.json()["audit"][0]["message"] == "Player added: Blake Jo Kestrel."
 
     # firstName 만 패치하면 name 이 재계산된다
     patched = client.patch(f"{url}/players/{new_player['id']}", json={"firstName": "Elizabeth"}).json()
     updated = patched["players"][-1]
-    assert updated["name"] == "Elizabeth DiMattio"
-    assert updated["lastName"] == "DiMattio"
+    assert updated["name"] == "Elizabeth Kestrel"
+    assert updated["lastName"] == "Kestrel"
 
     # name 만 패치하면 다시 쪼개진다
     patched = client.patch(f"{url}/players/{new_player['id']}", json={"name": "Ada Lovelace"}).json()
@@ -626,7 +626,7 @@ def test_daily_report_counts_cart_fees(client):
 
 def test_player_guards(client):
     # 예약 하나가 담을 수 있는 인원(4명)을 넘기면 422. 티 타임 정원 초과(409)보다 먼저 걸린다.
-    full = f"{API}/tee-sheet/bookings/b-predote"          # 이미 4명
+    full = f"{API}/tee-sheet/bookings/b-xeric"          # 이미 4명
     too_many = client.post(f"{full}/players", json={"name": "Fifth Wheel"})
     assert too_many.status_code == 422
     assert "at most 4 players" in too_many.json()["detail"]
@@ -641,7 +641,7 @@ def test_player_guards(client):
 
 def test_add_player_rejected_when_the_whole_tee_time_is_full(client):
     """예약 자체는 4명 미만이지만 티 타임 전체가 4명이면 409 (자원 충돌)."""
-    url = f"{API}/tee-sheet/bookings/b-unrau"             # 7:43 AM, 2명 (+ b-carlsson 2명)
+    url = f"{API}/tee-sheet/bookings/b-willow"             # 7:43 AM, 2명 (+ b-cedar 2명)
     assert len(client.get(url).json()["players"]) == 2
 
     blocked = client.post(f"{url}/players", json={"name": "Fifth Wheel"})
@@ -649,12 +649,12 @@ def test_add_player_rejected_when_the_whole_tee_time_is_full(client):
     assert "only holds 4 players" in blocked.json()["detail"]
     assert len(client.get(url).json()["players"]) == 2    # 거절이 아무것도 바꾸지 않았다
 
-    # 7:52 AM 도 합계 4명이라 1명짜리 b-pattemore 에도 못 넣는다.
-    solo = f"{API}/tee-sheet/bookings/b-pattemore"
+    # 7:52 AM 도 합계 4명이라 1명짜리 b-brook 에도 못 넣는다.
+    solo = f"{API}/tee-sheet/bookings/b-brook"
     assert client.post(f"{solo}/players", json={"name": "Sixth Wheel"}).status_code == 409
 
     # 자리가 남은 티 타임(7:25 AM, 2명)에는 들어간다.
-    ok = client.post(f"{API}/tee-sheet/bookings/b-nicalou/players", json={"name": "Third Wheel"})
+    ok = client.post(f"{API}/tee-sheet/bookings/b-ridge/players", json={"name": "Third Wheel"})
     assert ok.status_code == 200, ok.text
 
 
@@ -662,14 +662,14 @@ def test_add_player_to_a_cancelled_booking_ignores_tee_time_capacity(client):
     """취소된 예약은 자리를 잡지 않는다. 그러니 그 인원 편집이 **무관한 다른 예약**에
     좌우되어서는 안 된다. 넘치는 걸 막는 건 되살리기 게이트다.
     """
-    crowded = f"{API}/tee-sheet/bookings/b-unrau"   # 7:43 AM, 2명 (b-carlsson 과 티 타임 공유)
-    quiet = f"{API}/tee-sheet/bookings/b-nicalou"   # 7:25 AM, 2명 (같은 티 타임에 다른 예약 없음)
+    crowded = f"{API}/tee-sheet/bookings/b-willow"   # 7:43 AM, 2명 (b-cedar 과 티 타임 공유)
+    quiet = f"{API}/tee-sheet/bookings/b-ridge"   # 7:25 AM, 2명 (같은 티 타임에 다른 예약 없음)
 
     for url in (crowded, quiet):
         assert client.patch(url, json={"status": "cancelled"}).status_code == 200
 
-    # b-unrau 가 비운 자리를 이웃 b-carlsson 이 가져가 7:43 AM 의 4자리를 **혼자** 다 쓴다.
-    neighbour = f"{API}/tee-sheet/bookings/b-carlsson"
+    # b-willow 가 비운 자리를 이웃 b-cedar 이 가져가 7:43 AM 의 4자리를 **혼자** 다 쓴다.
+    neighbour = f"{API}/tee-sheet/bookings/b-cedar"
     for name in ("Third Wheel", "Fourth Wheel"):
         grew = client.post(f"{neighbour}/players", json={"name": name})
         assert grew.status_code == 200, grew.text
@@ -717,12 +717,12 @@ def test_daily_report_numbers(client):
     assert report["checked_in"] == 0 and report["cancelled"] == 0 and report["no_show"] == 0
     assert report["occupancy_rate"] == pytest.approx(32 / report["total_slots"] * 100, abs=0.01)
     line = report["bookings"][0]
-    assert line["title"] == "Predote, Marie" and line["status"] == "reserved" and line["players"] == 4
+    assert line["title"] == "Xeric, Micah" and line["status"] == "reserved" and line["players"] == 4
 
 
 def test_daily_report_revenue_reacts_to_paid_and_cancelled(client):
-    client.patch(f"{API}/tee-sheet/bookings/b-nicalou", json={"status": "paid"})       # 2명 x 47.79
-    client.patch(f"{API}/tee-sheet/bookings/b-carlsson", json={"status": "cancelled"})  # 2명 제외
+    client.patch(f"{API}/tee-sheet/bookings/b-ridge", json={"status": "paid"})       # 2명 x 47.79
+    client.patch(f"{API}/tee-sheet/bookings/b-cedar", json={"status": "cancelled"})  # 2명 제외
 
     report = client.get(f"{API}/tee-sheet/reports/daily", params={"date": "2026-09-08"}).json()
     assert report["total_tee_times"] == 11          # 시트에는 여전히 11건
@@ -731,7 +731,7 @@ def test_daily_report_revenue_reacts_to_paid_and_cancelled(client):
     assert report["total_revenue"] == pytest.approx(30 * 47.79, abs=0.01)
     assert report["collected_revenue"] == pytest.approx(2 * 47.79, abs=0.01)
     assert report["outstanding_revenue"] == pytest.approx(28 * 47.79, abs=0.01)
-    assert report["carts"] == 5 - 0                 # b-carlsson 은 카트 0대였다
+    assert report["carts"] == 5 - 0                 # b-cedar 은 카트 0대였다
 
 
 def test_week_report_explicit_range(client):
