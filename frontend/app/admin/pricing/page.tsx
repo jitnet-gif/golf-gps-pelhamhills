@@ -13,8 +13,13 @@
  * 말하면 그대로 틀린다.
  *
  * 그래서 지금은 백엔드에서 **진짜 값을 읽어** 보여 주기만 한다. 상수를 이 쪽에
- * 옮겨 적지도 않는다 — `GET /tee-sheet/slots?date=` 가 다섯 가지를 전부 말해 준다:
+ * 옮겨 적지도 않는다 — 슬롯 조회가 다섯 가지를 전부 말해 준다:
  * 첫 티 / 마지막 티 / 간격 / 요금 / 티 타임당 카트 수.
+ *
+ * 2026-09-21: 이 화면만 `GET /tee-sheet/slots?date=` 로 Fly 의 FastAPI 를 직접 부르고
+ * 있었다. 그 서버는 체험 종료로 꺼졌고 티 시트는 0004 로 Supabase 함수로 옮겨 갔는데
+ * 여기만 남아, 화면 전체가 "Failed to fetch" 한 줄로 죽어 있었다. 이제 티 시트와
+ * **같은** 클라이언트(`teeSheetApi`)를 쓴다 — 주소를 아는 곳은 `lib/teeSheet` 하나다.
  *
  * ## 편집을 붙이려면
  *
@@ -33,9 +38,9 @@ import { useEffect, useMemo, useState } from "react";
 
 import AdminShell from "@/components/admin/AdminShell";
 import DayTabs from "@/components/admin/DayTabs";
-import { apiBaseUrl } from "@/lib/apiHost";
+import { teeSheetApi } from "@/lib/teeSheet/api";
 import { addDays, longDate, minutesToTime, money, toDate, todayIso } from "@/lib/teeSheet/dates";
-import type { SlotsResponse, TeeSlot } from "@/lib/teeSheet/types";
+import type { TeeSlot } from "@/lib/teeSheet/types";
 
 /**
  * 한 티 타임의 플레이어 자리 수. 백엔드 `PLAYERS_PER_TEE_TIME` 과 같은 값이고,
@@ -45,16 +50,19 @@ const PLAYERS_PER_TEE_TIME = 4;
 
 type Loaded = { slots: TeeSlot[]; weekdayRate: number | null; weekendRate: number | null };
 /** 로딩은 상태로 들고 있지 않고 렌더에서 파생한다 (아래 `useSlotConfig` 주석 참고). */
-type Settled = { kind: "no-api" } | { kind: "error"; detail: string } | { kind: "ready"; data: Loaded };
+/**
+ * `no-api` 분기가 있었다. 주소가 설정되지 않은 배포를 위한 것이었는데, 이제 슬롯을
+ * `teeSheetApi` 로 읽으므로 주소가 없는 상태 자체가 없다 — 로그인이 없으면 401,
+ * 서버에 못 닿으면 0 으로 `error` 에 실려 온다.
+ */
+type Settled = { kind: "error"; detail: string } | { kind: "ready"; data: Loaded };
 type State = { kind: "loading" } | Settled;
 
 /** 안정적인 빈 배열. 매 렌더 새 `[]` 를 만들면 아래 useMemo 가 헛돈다. */
 const NO_SLOTS: TeeSlot[] = [];
 
-async function fetchSlots(base: string, iso: string, signal: AbortSignal): Promise<TeeSlot[]> {
-  const response = await fetch(`${base}/tee-sheet/slots?date=${iso}`, { signal });
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-  const body: SlotsResponse = await response.json();
+async function fetchSlots(iso: string): Promise<TeeSlot[]> {
+  const body = await teeSheetApi.getSlots(iso);
   return body.slots ?? [];
 }
 
@@ -67,14 +75,11 @@ async function loadConfig(
   focusedDate: string,
   weekdayProbe: string | null,
   weekendProbe: string | null,
-  signal: AbortSignal,
 ): Promise<Settled> {
-  const base = apiBaseUrl();
-  if (!base) return { kind: "no-api" };
   const [slots, weekday, weekend] = await Promise.all([
-    fetchSlots(base, focusedDate, signal),
-    weekdayProbe ? fetchSlots(base, weekdayProbe, signal) : Promise.resolve(NO_SLOTS),
-    weekendProbe ? fetchSlots(base, weekendProbe, signal) : Promise.resolve(NO_SLOTS),
+    fetchSlots(focusedDate),
+    weekdayProbe ? fetchSlots(weekdayProbe) : Promise.resolve(NO_SLOTS),
+    weekendProbe ? fetchSlots(weekendProbe) : Promise.resolve(NO_SLOTS),
   ]);
   return {
     kind: "ready",
@@ -111,7 +116,9 @@ function useSlotConfig(focusedDate: string): State {
   useEffect(() => {
     const abort = new AbortController();
     // setState 는 오직 then/catch 안에서만 — effect 본문에서 동기로 부르지 않는다.
-    loadConfig(focusedDate, weekdayProbe, weekendProbe, abort.signal)
+    // 요청 자체를 끊지는 않는다 — RPC 클라이언트는 signal 을 받지 않는다. 대신 응답이
+    // 늦게 와도 아래 `aborted` 가드가 지난 날짜의 값을 화면에 얹는 것을 막는다.
+    loadConfig(focusedDate, weekdayProbe, weekendProbe)
       .then((value) => {
         if (!abort.signal.aborted) setSettled({ date: focusedDate, value });
       })
@@ -261,12 +268,6 @@ export default function PricingPage() {
           time would strand every existing reservation — their time labels (<code>6:58 AM</code>, <code>7:43 AM</code>…)
           sit on this exact grid. Per-date rate overrides are the safe place to add editing.
         </p>
-
-        {state.kind === "no-api" ? (
-          <p className="border border-[#e7c3b6] bg-[#fbe9e2] px-3 py-2 text-xs text-[#8a3f26]">
-            The booking server is not configured for this site, so tee times and rates cannot be read.
-          </p>
-        ) : null}
 
         {state.kind === "error" ? (
           <p className="border border-[#e7c3b6] bg-[#fbe9e2] px-3 py-2 text-xs text-[#8a3f26]">
