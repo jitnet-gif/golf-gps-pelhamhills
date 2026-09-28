@@ -15,6 +15,28 @@ type Player = {
   paid: boolean;
   cancelled?: boolean;
   no_show?: boolean;
+  rateAuto?: boolean;
+  paymentStatus?: "link_sent" | "paid" | "member" | "host_link";
+};
+
+type BookingSource = "voice_ai" | "web" | "shop";
+
+type VoiceCall = {
+  ref: string;
+  receivedAt: string;
+  duration: string;
+  outcome: string;
+  summary: string;
+  sms: { at: string; label: string; status: string }[];
+};
+
+type VoiceHold = {
+  id: string;
+  time: string;
+  dayIndex: number;
+  players: number;
+  caller: string;
+  expiresInSec: number;
 };
 
 type TeeBooking = {
@@ -25,13 +47,19 @@ type TeeBooking = {
   rate: number;
   dayIndex: number;
   span: number;
-  color: "blue" | "gold" | "gray";
+  color: "blue" | "gold" | "gray" | "ai";
   title: string;
   status: BookingStatus;
   cartCount: number;
   players: Player[];
   audit?: { id: string; ts: string; message: string }[];
   cancelReason?: string | null;
+  source?: BookingSource;
+  ref?: string;
+  phoneE164?: string;
+  smsDelivered?: boolean;
+  waitlist?: number;
+  call?: VoiceCall;
 };
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
@@ -55,6 +83,7 @@ const menuLinks = [
   ["Customers", "/customers"],
   ["Tour Operators", "/tour-operators"],
   ["Promotions", "/promotions"],
+  ["Calls & SMS", "/calls"],
   ["Reports", "/reports"],
   ["Business Intelligence", "/business-intelligence"],
   ["Radar", "/radar"],
@@ -282,6 +311,7 @@ const initialBookings: TeeBooking[] = [
     title: "buckley, jami",
     status: "reserved",
     cartCount: 2,
+    waitlist: 2,
     players: [
       { name: "Jami Buckley", email: "", phone: "", type: "Existing Customer", ratePlan: "Public", arrived: false, paid: false },
       { name: "Guest", email: "", phone: "", type: "Guest", ratePlan: "Public", arrived: false, paid: false },
@@ -324,9 +354,51 @@ const initialBookings: TeeBooking[] = [
       { name: "Roger Denis", email: "", phone: "", type: "Existing Customer", ratePlan: "Weekday Member - Single", arrived: false, paid: false },
     ],
   },
+  {
+    id: "b-sep11-kim-ai",
+    date: "September 11, 2026",
+    time: "7:52 AM",
+    holes: 18,
+    rate: 58.41,
+    dayIndex: 4,
+    span: 1,
+    color: "ai",
+    title: "Kim, Daniel",
+    status: "reserved",
+    cartCount: 2,
+    source: "voice_ai",
+    ref: "PH-10392",
+    phoneE164: "+1 905-562-7189",
+    smsDelivered: true,
+    players: [
+      { name: "Daniel Kim", email: "", phone: "+1 905-562-7189", type: "Existing Customer", ratePlan: "Public", rateAuto: true, paymentStatus: "link_sent", arrived: false, paid: false },
+      { name: "Guest", email: "", phone: "", type: "Guest", ratePlan: "Public", paymentStatus: "host_link", arrived: false, paid: false },
+      { name: "Guest", email: "", phone: "", type: "Guest", ratePlan: "Public", paymentStatus: "host_link", arrived: false, paid: false },
+      { name: "Guest", email: "", phone: "", type: "Guest", ratePlan: "Public", paymentStatus: "host_link", arrived: false, paid: false },
+    ],
+    call: {
+      ref: "PH-10392",
+      receivedAt: "09/11 06:42 AM",
+      duration: "1분 34초",
+      outcome: "예약 완료",
+      summary: "오전 4인 18홀 요청. 8:01 제안 → 고객이 7:52 선택. 카트 2대 원함(Half Cart 체크 필요). 게스트 3명 이름 미정.",
+      sms: [
+        { at: "06:44", label: "확정 문자", status: "delivered" },
+        { at: "06:44", label: "결제 링크", status: "delivered" },
+        { at: "05:52", label: "2시간 전 리마인더", status: "예정" },
+      ],
+    },
+  },
 ];
 
+const sampleHolds: VoiceHold[] = [
+  { id: "hold-1", time: "8:01 AM", dayIndex: 4, players: 4, caller: "+1 905-***-7189", expiresInSec: 221 },
+];
+
+const sampleVoiceStats = { calls: 12, booked: 7, transferred: 2 };
+
 function bookingColor(color: TeeBooking["color"]) {
+  if (color === "ai") return "bg-[#d9d0ff] text-[#2a1d7a]";
   if (color === "blue") return "bg-[#0034c9] text-white";
   if (color === "gray") return "bg-[#ececf0] text-[#4e5560]";
   return "bg-[#ffd400] text-[#1d232b]";
@@ -345,12 +417,34 @@ function money(value: number) {
   return `$${value.toFixed(2)}`;
 }
 
+function sourceLabel(source?: BookingSource) {
+  if (source === "voice_ai") return "AI CALL";
+  if (source === "web") return "WEB";
+  return "SHOP";
+}
+
+function paymentLabel(player: Player) {
+  if (player.paid || player.paymentStatus === "paid") return { text: "결제 완료", cls: "border-[#1f9d55] bg-[#e6f5ec] text-[#1f7a45]" };
+  if (player.paymentStatus === "member") return { text: "회원 · 결제 없음", cls: "border-[#1f9d55] bg-[#e6f5ec] text-[#1f7a45]" };
+  if (player.paymentStatus === "link_sent") return { text: "링크 발송 · 미결제", cls: "border-dashed border-[#e0a24a] bg-[#fff4e0] text-[#a15c00]" };
+  if (player.paymentStatus === "host_link") return { text: "호스트 링크에 포함", cls: "border-dashed border-[#e0a24a] bg-[#fff4e0] text-[#a15c00]" };
+  return null;
+}
+
+function mmss(sec: number) {
+  const s = Math.max(0, sec);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
 export default function TeeSheetPage() {
   const [bookings, setBookings] = useState<TeeBooking[]>(initialBookings);
-  const [selectedId, setSelectedId] = useState("b-sep11-predote");
+  const [selectedId, setSelectedId] = useState("b-sep11-kim-ai");
   const [view, setView] = useState<"week" | "day">("week");
   const [apiOnline, setApiOnline] = useState(false);
   const [message, setMessage] = useState("Local sample mode");
+  const [holds, setHolds] = useState<VoiceHold[]>(sampleHolds);
+  const [voiceStats, setVoiceStats] = useState(sampleVoiceStats);
+  const [showCall, setShowCall] = useState(true);
   const selected = useMemo(
     () => bookings.find((booking) => booking.id === selectedId) ?? bookings[0],
     [bookings, selectedId],
@@ -391,7 +485,45 @@ export default function TeeSheetPage() {
         setApiOnline(false);
         setMessage("FastAPI offline: using local sample mode");
       });
+
+    request<{ calls?: number; booked?: number; transferred?: number }>("/voice/stats")
+      .then((data) =>
+        setVoiceStats({
+          calls: data.calls ?? sampleVoiceStats.calls,
+          booked: data.booked ?? sampleVoiceStats.booked,
+          transferred: data.transferred ?? sampleVoiceStats.transferred,
+        }),
+      )
+      .catch(() => undefined);
   }, []);
+
+  // HOLD countdown: expired holds return the slot to open (+)
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setHolds((current) =>
+        current.map((hold) => ({ ...hold, expiresInSec: hold.expiresInSec - 1 })).filter((hold) => hold.expiresInSec > 0),
+      );
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const payAllTotal = selected ? selected.rate * selected.players.filter((p) => !p.paid).length * 1.13 : 0;
+
+  function sendPaymentLink() {
+    setBookings((current) =>
+      current.map((booking) =>
+        booking.id === selected.id
+          ? {
+              ...booking,
+              players: booking.players.map((player, index) =>
+                player.paid ? player : { ...player, paymentStatus: index === 0 ? "link_sent" : "host_link" },
+              ),
+            }
+          : booking,
+      ),
+    );
+    setMessage(`결제 링크 SMS 발송 (샘플) · ${money(payAllTotal)}`);
+  }
 
   async function updateBookingStatus(status: BookingStatus, cancelReason?: string) {
     if (apiOnline) {
@@ -562,6 +694,13 @@ export default function TeeSheetPage() {
                 <span>{totalPlayers} Players</span>
                 <span>{checkedIn} Arrived</span>
                 <span>{carts} Carts</span>
+                <a
+                  className="rounded border border-dashed border-[#8f76ff] bg-[#efeaff] px-2 py-1 font-bold text-[#4b32d6]"
+                  href="/calls"
+                  title="오늘 AI 통화 / 예약 성사 / 직원 연결"
+                >
+                  ☎ AI {voiceStats.calls} · 예약 {voiceStats.booked} · 연결 {voiceStats.transferred}
+                </a>
                 <span className={`rounded px-2 py-1 ${apiOnline ? "bg-[#dbf5e3] text-[#126c31]" : "bg-[#fff3cd] text-[#8a5b00]"}`}>
                   {message}
                 </span>
@@ -634,9 +773,59 @@ export default function TeeSheetPage() {
                           width: Math.max(112, booking.span * 121 - 8),
                         }}
                       >
+                        {booking.source === "voice_ai" && (
+                          <span className="mr-1 rounded-sm bg-[#5a3ff0] px-1 text-[9px] text-white">AI</span>
+                        )}
                         ● {booking.title}
                         {booking.players.length > 1 ? "   ● Guest" : ""}
+                        {booking.source === "voice_ai" && (
+                          <span
+                            className={`absolute right-1 top-[2px] rounded-sm px-1 text-[9px] leading-[14px] text-white ${
+                              booking.smsDelivered ? "bg-[#1f9d55]" : "bg-[#c0392b]"
+                            }`}
+                          >
+                            SMS {booking.smsDelivered ? "✓" : "✕"}
+                          </span>
+                        )}
                       </button>
+                    );
+                  })}
+
+                  {bookings
+                    .filter((booking) => booking.waitlist)
+                    .map((booking) => {
+                      const row = teeTimes.indexOf(booking.time);
+                      if (row < 0) return null;
+                      return (
+                        <span
+                          className="absolute rounded-sm border border-[#5a3ff0] bg-white px-1 text-[9px] font-bold leading-[14px] text-[#5a3ff0]"
+                          key={`wl-${booking.id}`}
+                          style={{ top: row * 29 + 8, left: 86 + 48 + (booking.dayIndex + 1) * 121 - 44 }}
+                          title="AI가 받은 대기 요청 수"
+                        >
+                          대기 {booking.waitlist}
+                        </span>
+                      );
+                    })}
+
+                  {holds.map((hold) => {
+                    const row = teeTimes.indexOf(hold.time);
+                    if (row < 0) return null;
+                    return (
+                      <div
+                        className="pointer-events-auto absolute h-[18px] overflow-hidden rounded-sm px-2 text-[11px] font-bold leading-[18px] text-[#9a3d10]"
+                        key={hold.id}
+                        onClick={() => setMessage("AI 통화 중 확보된 슬롯입니다. 만료 후 예약 가능합니다.")}
+                        style={{
+                          top: row * 29 + 6,
+                          left: 86 + 48 + hold.dayIndex * 121 + 4,
+                          width: 113,
+                          background: "repeating-linear-gradient(135deg,#ffe1cc 0 8px,#fff1e6 8px 16px)",
+                        }}
+                        title={`HOLD · AI 통화 중 · ${hold.players}명 · ${hold.caller}`}
+                      >
+                        HOLD {mmss(hold.expiresInSec)} · {hold.players}명
+                      </div>
                     );
                   })}
                 </div>
@@ -653,6 +842,39 @@ export default function TeeSheetPage() {
                   <span className="rounded border border-[#c7c7cc] bg-white px-2 py-1">{selected.date}</span>
                   <span className="rounded border border-[#c7c7cc] bg-white px-2 py-1">{selected.time}</span>
                   <span className="rounded border border-[#c7c7cc] bg-white px-2 py-1">{statusLabel(selected.status)}</span>
+                  {selected.phoneE164 && (
+                    <span className="rounded border border-[#1f9d55] bg-white px-2 py-1" title="E.164 정규화 번호">
+                      ☎ {selected.phoneE164} <b className="text-[#1f9d55]">✓ SMS</b>
+                    </span>
+                  )}
+                  <span className="rounded border-[1.5px] border-[#5a3ff0] bg-white px-2 py-1 font-bold text-[#5a3ff0]">
+                    Pay all ({selected.players.filter((p) => !p.paid).length}) {money(payAllTotal)}
+                  </span>
+                  <button
+                    className="rounded border-[1.5px] border-dashed border-[#8f76ff] bg-[#efeaff] px-2 py-1 font-bold text-[#4b32d6]"
+                    onClick={sendPaymentLink}
+                  >
+                    결제 링크 SMS
+                  </button>
+                  <span
+                    className={`rounded px-2 py-1 font-bold ${
+                      selected.source === "voice_ai" ? "bg-[#5a3ff0] text-white" : "border border-[#c7c7cc] bg-white text-[#4e5560]"
+                    }`}
+                  >
+                    {sourceLabel(selected.source)}
+                    {selected.ref ? ` · ${selected.ref}` : ""}
+                  </span>
+                  {selected.call && (
+                    <button
+                      className={`rounded border-[1.5px] px-2 py-1 font-bold ${
+                        showCall ? "border-[#5a3ff0] bg-[#d9d0ff] text-[#2a1d7a]" : "border-dashed border-[#8f76ff] bg-white text-[#4b32d6]"
+                      }`}
+                      onClick={() => setShowCall((value) => !value)}
+                      title="통화 요약 · 녹취 · 문자 이력"
+                    >
+                      ☎ 통화
+                    </button>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   <button className="border border-[#c47a63] bg-white px-4 py-2 text-xs font-bold text-[#8a3f26]" onClick={cancelReservation}>
@@ -701,7 +923,15 @@ export default function TeeSheetPage() {
                     >
                       {player.no_show ? "No Show" : "Mark No Show"}
                     </button>
-                    <div className="mt-2 bg-[#ffe5e2] p-1 text-[#9e2f20]">{player.ratePlan ?? "Public"}</div>
+                    <div
+                      className={`mt-2 flex justify-between p-1 ${
+                        player.rateAuto ? "border-[1.5px] border-dashed border-[#8f76ff] bg-[#f6f3ff] text-[#4b32d6]" : "bg-[#ffe5e2] text-[#9e2f20]"
+                      }`}
+                      title={player.rateAuto ? "AI가 발신번호·회원번호로 자동 선택 — 확인 필요" : undefined}
+                    >
+                      <span>{player.ratePlan ?? "Public"}</span>
+                      {player.rateAuto && <b>AI</b>}
+                    </div>
                     <div className="mt-2 flex justify-between">
                       <span>{selected.holes} Hole Gr.</span>
                       <span>{money(selected.rate)}</span>
@@ -710,6 +940,10 @@ export default function TeeSheetPage() {
                       <span>Subtotal Due</span>
                       <span>{player.paid ? "$0.00" : money(selected.rate)}</span>
                     </div>
+                    {(() => {
+                      const pay = paymentLabel(player);
+                      return pay ? <div className={`mt-2 border px-1 py-1 text-center text-[10.5px] font-bold ${pay.cls}`}>{pay.text}</div> : null;
+                    })()}
                     <button
                       className={`mt-2 w-full px-2 py-1 font-bold text-white ${player.paid ? "bg-[#8c7cf6]" : "bg-[#b1a8ff]"}`}
                       onClick={() => updatePlayer(index, { paid: !player.paid })}
@@ -725,6 +959,30 @@ export default function TeeSheetPage() {
                 >
                   +
                 </button>
+
+                {selected.call && showCall && (
+                  <aside className="grid w-[250px] shrink-0 content-start gap-2 border-[1.5px] border-dashed border-[#8f76ff] bg-white p-3 text-xs">
+                    <h4 className="font-bold text-[#4b32d6]">☎ 통화 기록 · {selected.call.ref}</h4>
+                    <div className="flex justify-between text-[#555]"><span>수신</span><span>{selected.call.receivedAt}</span></div>
+                    <div className="flex justify-between text-[#555]"><span>길이</span><span>{selected.call.duration}</span></div>
+                    <div className="flex justify-between text-[#555]">
+                      <span>결과</span>
+                      <b className="text-[#1f7a45]">{selected.call.outcome}</b>
+                    </div>
+                    <p className="rounded bg-[#f6f3ff] p-2 leading-5 text-[#333]">{selected.call.summary}</p>
+                    <button className="border border-[#cfd3da] px-2 py-1" onClick={() => setMessage("녹취 재생은 ElevenLabs 연동 후 활성화됩니다.")}>
+                      ▶ 녹취 재생 · 전문 보기
+                    </button>
+                    <div className="grid gap-1 text-[10.5px] text-[#555]">
+                      <b>SMS</b>
+                      {selected.call.sms.map((sms) => (
+                        <span key={`${sms.at}-${sms.label}`}>
+                          {sms.at} {sms.label} · {sms.status}
+                        </span>
+                      ))}
+                    </div>
+                  </aside>
+                )}
               </div>
             </section>
           )}

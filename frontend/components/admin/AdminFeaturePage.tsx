@@ -22,6 +22,7 @@ const links = [
   ["Customers", "/customers"],
   ["Tour Operators", "/tour-operators"],
   ["Promotions", "/promotions"],
+  ["Calls & SMS", "/calls"],
   ["Reports", "/reports"],
   ["Business Intelligence", "/business-intelligence"],
   ["Radar", "/radar"],
