@@ -67,6 +67,28 @@ class Settings(BaseSettings):
 
     ALLOWED_ORIGINS: str = "http://localhost:3000,https://bepu.app"
 
+    # 외부에서 이 서버에 접근하는 주소 (Twilio 서명 검증·ElevenLabs 도구 URL에 사용)
+    PUBLIC_BASE_URL: str = "http://localhost:8000"
+    COURSE_TIMEZONE: str = "America/Toronto"
+    PROSHOP_PHONE_NUMBER: str = "+19057356768"
+
+    # ElevenLabs 음성 에이전트
+    ELEVENLABS_API_KEY: str = ""
+    ELEVENLABS_AGENT_ID: str = ""
+    ELEVENLABS_VOICE_ID: str = ""
+    ELEVENLABS_WEBHOOK_SECRET: str = ""  # post-call 웹훅 HMAC 시크릿
+    VOICE_TOOL_SECRET: str = ""  # 도구 호출·개인화 웹훅에 붙는 X-Voice-Tool-Secret 헤더 값
+
+    # Twilio 통화·문자
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_PHONE_NUMBER: str = ""
+    TWILIO_MESSAGING_SERVICE_SID: str = ""  # 있으면 From 대신 사용
+
+    @property
+    def TWILIO_ENABLED(self) -> bool:
+        return bool(self.TWILIO_ACCOUNT_SID and self.TWILIO_AUTH_TOKEN and (self.TWILIO_PHONE_NUMBER or self.TWILIO_MESSAGING_SERVICE_SID))
+
     @property
     def OPENAI_API_KEY_LIST(self) -> list[str]:
         if self.OPENAI_API_KEYS:

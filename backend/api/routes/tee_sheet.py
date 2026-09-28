@@ -60,6 +60,9 @@ class TeeBooking(BaseModel):
     players: list[Player] = Field(default_factory=list, max_length=4)
     audit: list[AuditEntry] = Field(default_factory=list)
     cancelReason: str | None = None
+    source: Literal["shop", "web", "voice_ai", "sms"] = "shop"
+    ref: str | None = None
+    voiceCallId: str | None = None
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     @model_validator(mode="after")

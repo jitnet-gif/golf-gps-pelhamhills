@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import os
 import logging
@@ -45,6 +46,25 @@ include_route_module("backend.api.routes.chat", f"{settings.API_V1_STR}/chat", [
 include_route_module("backend.api.routes.agents", f"{settings.API_V1_STR}/agents", ["Agents"])
 include_route_module("backend.api.routes.onboarding", f"{settings.API_V1_STR}/onboarding", ["Onboarding"])
 include_route_module("backend.api.routes.simulator", f"{settings.API_V1_STR}", ["Simulator"])
+include_route_module("backend.api.routes.voice", f"{settings.API_V1_STR}", ["Voice AI (ElevenLabs)"])
+include_route_module("backend.api.routes.sms", f"{settings.API_V1_STR}", ["SMS (Twilio)"])
+
+
+async def _voice_scheduler() -> None:
+    """1분마다 만료 hold 정리 + SMS 리마인더 발송"""
+    from backend.services.voice_booking import run_reminders
+
+    while True:
+        try:
+            await run_reminders()
+        except Exception as exc:
+            logger.error("리마인더 작업 실패: %s", exc)
+        await asyncio.sleep(60)
+
+
+@app.on_event("startup")
+async def start_voice_scheduler() -> None:
+    app.state.voice_scheduler = asyncio.create_task(_voice_scheduler())
 
 @app.get("/")
 def read_root():
