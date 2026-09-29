@@ -36,7 +36,16 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 
-import { ADMIN_HOME, CLUB, SITE_HOME, adminNav, adminQuickNav, isActive } from "@/lib/nav";
+import {
+  ADMIN_HOME,
+  CLUB,
+  SITE_HOME,
+  adminDivisions,
+  adminQuickNav,
+  divisionFor,
+  isActive,
+  type AdminDivision,
+} from "@/lib/nav";
 import { ApiError } from "@/lib/teeSheet/api";
 import { todayIso } from "@/lib/teeSheet/dates";
 import { accessToken, getSession, signIn, signOut, subscribe } from "@/lib/teeSheet/session";
@@ -84,11 +93,16 @@ function AdminFrame({
   // 장식으로 두지 않는 이유: 눌러도 아무 일이 없는 버튼이 상단바 맨 왼쪽에 있으면
   // 사용자는 앱이 멈춘 줄 안다.
   const [railOpen, setRailOpen] = useState(true);
+  // 사이드바에 펼쳐 둘 사업부. 기본은 지금 화면이 속한 곳이고, 드롭다운으로 다른 사업부
+  // 메뉴를 **들여다보기만** 할 수 있다 — 고르는 것만으로 화면을 옮기지는 않는다.
+  // 화면을 옮기면 다시 그 화면의 사업부로 돌아온다.
+  const [division, setDivision] = useState<AdminDivision>(() => divisionFor(pathname));
 
   // 화면을 옮기면 서랍은 닫힌다. 닫지 않으면 새 화면 위에 이전 메뉴가 그대로
   // 덮여 있어서, 사용자가 방금 고른 화면을 볼 수 없다.
   useEffect(() => {
     setDrawerOpen(false);
+    setDivision(divisionFor(pathname));
   }, [pathname]);
 
   // 서랍이 열려 있는 동안 뒤쪽 본문이 스크롤되면(iOS 의 scroll chaining) 서랍을
@@ -130,7 +144,9 @@ function AdminFrame({
           railOpen ? "lg:grid-cols-[188px_minmax(0,1fr)]" : "lg:grid-cols-[minmax(0,1fr)]"
         } ${fill ? "h-full" : "min-h-[100dvh]"}`}
       >
-        {railOpen ? <DesktopSidebar pathname={pathname} /> : null}
+        {railOpen ? (
+          <DesktopSidebar division={division} onDivisionChange={setDivision} pathname={pathname} />
+        ) : null}
 
         <section
           className={`grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] ${
@@ -170,14 +186,53 @@ function AdminFrame({
         </section>
       </div>
 
-      <MobileDrawer onClose={() => setDrawerOpen(false)} open={drawerOpen} pathname={pathname} />
+      <MobileDrawer
+        division={division}
+        onClose={() => setDrawerOpen(false)}
+        onDivisionChange={setDivision}
+        open={drawerOpen}
+        pathname={pathname}
+      />
     </div>
   );
 }
 
 // ===== 데스크톱 사이드바 ================================================
 
-function DesktopSidebar({ pathname }: { pathname: string | null }) {
+type DivisionProps = {
+  division: AdminDivision;
+  onDivisionChange: (division: AdminDivision) => void;
+};
+
+/**
+ * 사업부 드롭다운 (Golf / Snack Bar & Retail / Indoor Golf Simulator).
+ *
+ * 네이티브 <select> 를 쓴다. 직접 만든 목록 팝업은 키보드·스크린리더·모바일 휠 피커를
+ * 전부 다시 구현해야 하는데, 세 항목짜리 선택에 그만한 값어치가 없다.
+ */
+function DivisionPicker({ division, onDivisionChange, className }: DivisionProps & { className: string }) {
+  return (
+    <label className={`flex shrink-0 items-center ${className}`}>
+      <span className="sr-only">Division</span>
+      <select
+        className="w-full cursor-pointer bg-transparent font-semibold text-inherit outline-none"
+        onChange={(event) => {
+          const next = adminDivisions.find((entry) => entry.key === event.target.value);
+          if (next) onDivisionChange(next);
+        }}
+        value={division.key}
+      >
+        {adminDivisions.map((entry) => (
+          <option className="bg-[#1c1f22] text-white" key={entry.key} value={entry.key}>
+            {entry.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function DesktopSidebar({ pathname, division, onDivisionChange }: DivisionProps & { pathname: string | null }) {
   return (
     // Chronogolf 사이드바 순서: 워드마크 / 제품군 / 클럽 / 로그인 사용자 / 메뉴.
     // 클럽·사용자 줄은 메뉴가 아니라 "지금 어느 클럽에 누구로 들어와 있는가" 를
@@ -194,16 +249,11 @@ function DesktopSidebar({ pathname }: { pathname: string | null }) {
         pelhamhills
       </div>
 
-      {/* 제품군 표시. pelhamhills 는 여기에 드롭다운을 두지만 우리는 골프 하나뿐이라
-          고를 것이 없다 — 아무것도 하지 않는 가짜 드롭다운 대신 생김새만 맞춘 표시다.
-          그래서 <button> 이 아니라 <p> 이고, 캐럿에는 aria-hidden 이 붙어 있다. */}
-      <p className="flex shrink-0 items-center justify-between border-b border-white/10 bg-[#1c1f22] px-4 py-2.5 text-xs font-semibold text-white/70">
-        Golf
-        <span aria-hidden className="text-[9px] leading-none">
-          &#9662;
-        </span>
-      </p>
-
+      <DivisionPicker
+        className="border-b border-white/10 bg-[#1c1f22] px-4 py-2.5 text-xs text-white/70"
+        division={division}
+        onDivisionChange={onDivisionChange}
+      />
       <Link
         className="flex shrink-0 items-center gap-2 border-b border-white/10 bg-[#1c1f22] px-4 py-2.5 text-xs font-bold hover:bg-white/10"
         href={SITE_HOME}
@@ -226,7 +276,7 @@ function DesktopSidebar({ pathname }: { pathname: string | null }) {
         aria-label="Club administration"
         className="grid min-h-0 flex-1 content-start overflow-y-auto px-2 py-2 text-xs"
       >
-        {adminNav.map((item) => (
+        {division.links.map((item) => (
           <NavLink item={item} key={item.href} pathname={pathname} />
         ))}
       </nav>
@@ -234,7 +284,7 @@ function DesktopSidebar({ pathname }: { pathname: string | null }) {
       <SidebarNote />
 
       {/* 레퍼런스의 마지막 두 줄. 도움말 센터는 진짜 링크이고, Share 는 붙일 대상이
-          아직 없어서 표시로만 둔다 (Golf 드롭다운과 같은 이유). */}
+          아직 없어서 표시로만 둔다. */}
       <div className="flex shrink-0 items-center justify-between border-t border-white/10 px-4 py-2 text-[10px] text-white/50">
         <span>Help Center</span>
         <span>Share</span>
@@ -329,7 +379,7 @@ function NavLink({
  * 레퍼런스의 상단바 글리프 묶음 (?, 메일, 알림, 인쇄 …).
  *
  * 버튼이 아니라 **표시**다. 뒤에 붙일 기능이 아직 하나도 없는데 <button> 으로 두면
- * 일곱 개짜리 죽은 과녁이 상단바에 생긴다 — 사이드바의 Golf 드롭다운과 같은 판단.
+ * 일곱 개짜리 죽은 과녁이 상단바에 생긴다.
  * 하나라도 실제 기능이 생기면 그 글리프만 버튼으로 승격시키면 된다.
  */
 const HEADER_GLYPHS = ["?", "✉︎", "⊝", "⚑︎", "▤", "⧉", "⋮"];
@@ -453,7 +503,9 @@ function MobileDrawer({
   open,
   onClose,
   pathname,
-}: {
+  division,
+  onDivisionChange,
+}: DivisionProps & {
   open: boolean;
   onClose: () => void;
   pathname: string | null;
@@ -490,11 +542,17 @@ function MobileDrawer({
           <span className="truncate">{CLUB.name}</span>
         </Link>
 
+        <DivisionPicker
+          className="border-b border-white/10 px-4 py-3 text-sm text-white/80"
+          division={division}
+          onDivisionChange={onDivisionChange}
+        />
+
         <nav
           aria-label="Club administration"
           className="grid flex-1 content-start gap-1 overflow-y-auto px-2 py-3 text-sm"
         >
-          {adminNav.map((item) => (
+          {division.links.map((item) => (
             <NavLink item={item} key={item.href} onClick={onClose} pathname={pathname} />
           ))}
         </nav>

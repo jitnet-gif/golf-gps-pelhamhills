@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import os
 import logging
@@ -47,6 +48,28 @@ include_route_module("backend.api.routes.onboarding", f"{settings.API_V1_STR}/on
 include_route_module("backend.api.routes.simulator", f"{settings.API_V1_STR}", ["Simulator"])
 include_route_module("backend.api.routes.retail", f"{settings.API_V1_STR}", ["Retail"])
 include_route_module("backend.api.routes.voice", f"{settings.API_V1_STR}", ["Voice Booking"])
+include_route_module("backend.api.routes.sms", f"{settings.API_V1_STR}", ["SMS (Twilio)"])
+include_route_module("backend.api.routes.simulator_admin", f"{settings.API_V1_STR}", ["Simulator Admin"])
+
+
+async def _reminder_loop() -> None:
+    """1분마다 티타임 리마인더 문자를 보낸다 (`routes/sms.py` 의 `run_reminders`)."""
+    from backend.api.routes.sms import run_reminders
+
+    while True:
+        try:
+            await run_reminders()
+        except Exception as exc:
+            logger.error("리마인더 작업 실패: %s", exc)
+        await asyncio.sleep(60)
+
+
+@app.on_event("startup")
+async def start_reminder_loop() -> None:
+    # Twilio 키가 없으면 돌리지 않는다. 보내지도 못할 문자 때문에 1분마다 티 시트를
+    # 읽고 감사 로그에 "보냈다" 고 적으면 나중에 키를 넣었을 때 리마인더가 빠진다.
+    if settings.TWILIO_ENABLED:
+        app.state.reminder_loop = asyncio.create_task(_reminder_loop())
 
 @app.get("/")
 def read_root():

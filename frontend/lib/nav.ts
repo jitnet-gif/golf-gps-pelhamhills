@@ -99,6 +99,7 @@ export const adminNav: NavItem[] = [
   { label: "Customers", href: "/admin/customers", glyph: "●" },
   { label: "Tour Operators", href: "/admin/tour-operators", glyph: "✈" },
   { label: "Promotions", href: "/admin/promotions", glyph: "▶" },
+  { label: "Calls & SMS", href: "/admin/calls", glyph: "☏" },
   { label: "Reports", href: "/admin/reports", glyph: "▥" },
   { label: "Business Intelligence", href: "/admin/business-intelligence", glyph: "◧" },
   { label: "Radar", href: "/admin/radar", glyph: "◎" },
@@ -120,12 +121,66 @@ export const adminQuickNav: NavItem[] = adminNav.filter((item) =>
 );
 
 /**
- * `/admin/retail` 은 여전히 살아 있는 화면이지만 메뉴에는 없다 — 맞춰 온 pelhamhills
- * 사이드바에 Retail 항목이 없기 때문이다. 주소로 직접 들어가면 그대로 열린다.
- * 다시 노출하려면 `adminNav` 에 `{ label: "Retail", href: "/admin/retail", glyph: "🛒" }`
- * 를 되돌려 놓으면 된다.
+ * `/admin/retail` 은 골프 메뉴(`adminNav`)에는 없다 — 맞춰 온 pelhamhills 사이드바의
+ * Golf 목록에 Retail 항목이 없기 때문이다. 대신 "Snack Bar & Retail" 사업부 메뉴에 있다
+ * (아래 `adminDivisions`).
  */
 export const ADMIN_RETAIL = "/admin/retail";
+
+/**
+ * 사업부(division). 사이드바 맨 위 드롭다운이 이 셋 사이를 오가며 메뉴를 바꿔 끼운다.
+ *
+ * 골프 메뉴는 `adminNav` 를 그대로 쓴다 — 복사하면 다시 두 벌이 된다. 다른 두 사업부는
+ * 자기 화면 몇 개와, 사업부를 가리지 않는 공용 화면(Reports 등)을 골프 쪽과 **같은
+ * 항목 객체**로 가리킨다.
+ */
+export type AdminDivision = {
+  key: "golf" | "snack-retail" | "simulator";
+  label: string;
+  links: NavItem[];
+};
+
+const pick = (label: string): NavItem => {
+  const item = adminNav.find((entry) => entry.label === label);
+  if (!item) throw new Error(`adminNav has no "${label}"`);
+  return item;
+};
+
+export const adminDivisions: AdminDivision[] = [
+  { key: "golf", label: "Golf", links: adminNav },
+  {
+    key: "snack-retail",
+    label: "Snack Bar & Retail",
+    links: [
+      { label: "Snack Bar / Bev Cart", href: "/admin/snack-bar", glyph: "☕" },
+      { label: "Pro Shop Retail", href: ADMIN_RETAIL, glyph: "🛒" },
+      pick("Reports"),
+      pick("Integrations"),
+    ],
+  },
+  {
+    key: "simulator",
+    label: "Indoor Golf Simulator",
+    links: [
+      { label: "Bay Sheet", href: "/admin/simulator-sheet", glyph: "▦" },
+      { label: "Online Booking", href: BOOK_INDOOR, glyph: "🏌" },
+      pick("Customers"),
+      pick("Calls & SMS"),
+      pick("Reports"),
+    ],
+  },
+];
+
+/**
+ * 지금 주소가 속한 사업부. 여러 사업부에 걸친 공용 화면(Reports 등)은 골프가 먼저다 —
+ * 배열 순서가 곧 우선순위.
+ */
+export function divisionFor(pathname: string | null | undefined): AdminDivision {
+  return (
+    adminDivisions.find((division) => division.links.some((item) => isActive(pathname, item.href))) ??
+    adminDivisions[0]
+  );
+}
 
 /**
  * 정적 export 는 뒤에 슬래시가 붙은 주소도 같은 페이지로 서빙한다(`cleanUrls`).

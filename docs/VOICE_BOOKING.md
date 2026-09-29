@@ -24,6 +24,8 @@
 | `frontend/components/booking/VoiceBooking.tsx` | 웹 위젯 |
 | `frontend/lib/voice/session.ts` | signed URL 을 백엔드에서 받아온다 |
 | `backend/tests/test_voice_booking.py` | 29개 테스트 |
+| `backend/services/twilio_sms.py` | 문자 발송, E.164 정규화, Twilio 서명 검증 |
+| `backend/api/routes/sms.py` | 손님 답장(C 취소, STOP), 전달 상태, 리마인더 |
 
 ## 도구 여섯 개
 
@@ -137,6 +139,29 @@ python -m pytest backend/tests/test_voice_booking.py -q
 시간을 2026-09-08 06:00 으로 고정한다. "지나간 티타임은 팔지 않는다", "티오프
 2시간 전 이후에는 취소하지 않는다" 는 지금 몇 시인지에 따라 답이 달라지므로,
 실제 시계로 돌리면 밤과 아침의 결과가 달라진다.
+
+## 전화번호와 문자 (Twilio)
+
+```
+손님 전화 → Twilio 번호 → ElevenLabs 에이전트 ─(도구)→ /api/v1/voice/tools/*
+손님 문자 → Twilio → /api/v1/sms/inbound   ("C <코드>" 취소, STOP/START)
+우리 서버 → Twilio Messages API            (확정 · 취소 · 리마인더)
+```
+
+- **번호 연결.** ElevenLabs 대시보드 → Phone Numbers 에서 Twilio 번호를 가져와
+  에이전트에 붙인다. 기존 프로 샵 번호는 영업시간 외에만 그 번호로 착신전환하면
+  "영업시간 외에만 AI 가 받는" 구성이 된다.
+- **Twilio 콘솔.** 번호의 Messaging 웹훅을 `PUBLIC_API_BASE_URL` + `/sms/inbound` 로.
+  서명 검증이 이 주소로 URL 을 다시 만들므로 두 값이 글자 하나까지 같아야 한다.
+- **확인 문자**는 `confirm_booking` 이 응답을 돌려준 뒤 보낸다. 6자리 확인 코드가 들어
+  있고, 답장 취소는 `C <코드>` 로만 된다 — 발신 번호 하나만으로는 취소하지 않는다
+  (`routes/sms.py` 머리 주석). 티오프 2시간 전부터는 전화와 똑같이 프로 샵으로 넘긴다.
+- **리마인더**는 음성 예약 손님에게만 전날 18:00 와 2시간 전에 간다. 보낸 사실을 예약의
+  감사 로그에 적으므로 서버가 재시작돼도 두 번 가지 않는다.
+- `TWILIO_*` 가 비어 있으면 문자는 `skipped` 로만 기록되고, 리마인더 루프는 돌지 않고,
+  `/sms/*` 웹훅은 **거절한다** (서명을 확인할 수 없으므로).
+- 취소 키워드가 `C` 인 이유: Twilio 표준 수신거부 키워드에 `CANCEL` 이 들어 있다.
+- 수신거부(STOP) 목록과 문자 기록은 아직 메모리에만 있다. 재시작하면 사라진다.
 
 ## 알아 둘 것
 

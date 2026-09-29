@@ -28,12 +28,13 @@ from time import monotonic
 from typing import Any, Literal, Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from backend.api.routes import tee_sheet as ts
 from backend.services import voice_agent
 from backend.services.tee_sheet_store import Scope
+from backend.services.twilio_sms import send_sms
 
 logger = logging.getLogger(__name__)
 
@@ -639,7 +640,7 @@ def release_hold(body: ReleaseHoldRequest) -> ReleaseHoldResponse:
 # ===== 도구 4: 예약 확정 ===============================================
 
 @tools_router.post("/voice/tools/confirm-booking", response_model=ConfirmResponse)
-def confirm_booking(body: ConfirmRequest) -> ConfirmResponse:
+def confirm_booking(body: ConfirmRequest, background: BackgroundTasks) -> ConfirmResponse:
     session = _touch_session(body.conversation_id)
 
     first = body.first_name.strip()
@@ -701,6 +702,19 @@ def confirm_booking(body: ConfirmRequest) -> ConfirmResponse:
         session.revealed.add(summary.booking_id)
 
     players_word = "player" if summary.party_size == 1 else "players"
+    # 확인 문자. 응답이 나간 뒤에 보낸다 — Twilio 가 느려도 에이전트가 기다리지 않게.
+    # 취소 답장에 코드를 요구하는 이유는 `routes/sms.py` 참고.
+    background.add_task(
+        send_sms,
+        phone,
+        (
+            f"{CLUB_NAME}: booked {summary.party_size} {players_word}, {summary.spoken_date} at "
+            f"{summary.time}. Code {summary.confirmation_code}. "
+            f"Reply C {summary.confirmation_code} to cancel."
+        ),
+        template="confirm",
+        booking_ref=summary.confirmation_code,
+    )
     return ConfirmResponse(
         ok=True,
         booking=summary,
@@ -787,7 +801,7 @@ def lookup_booking(body: LookupRequest) -> LookupResponse:
 # ===== 도구 6: 예약 취소 ===============================================
 
 @tools_router.post("/voice/tools/cancel-booking", response_model=CancelResponse)
-def cancel_booking(body: CancelRequest) -> CancelResponse:
+def cancel_booking(body: CancelRequest, background: BackgroundTasks) -> CancelResponse:
     """조회로 확인된 예약만, 티오프 2시간 전까지만 취소한다.
 
     취소는 되돌리기 어려운 쪽의 동작이라 문을 셋 세워 둔다.
@@ -828,7 +842,10 @@ def cancel_booking(body: CancelRequest) -> CancelResponse:
                 message="That reservation was already cancelled. There is nothing else to do.",
             )
 
-        if not any(p.lastName.strip().casefold() == wanted_last for p in booking.players):
+        caller = next(
+            (p for p in booking.players if p.lastName.strip().casefold() == wanted_last), None
+        )
+        if caller is None:
             raise HTTPException(
                 status_code=403,
                 detail=(
@@ -852,6 +869,15 @@ def cancel_booking(body: CancelRequest) -> CancelResponse:
         )
         ts._audit(booking, message)
         iso_date, time_label = booking.date, booking.time
+
+    if caller.phone:
+        background.add_task(
+            send_sms,
+            caller.phone,
+            f"{CLUB_NAME}: cancelled your tee time, {spoken_date(iso_date)} at {time_label}.",
+            template="cancel",
+            booking_ref=_confirmation_code(body.booking_id),
+        )
 
     return CancelResponse(
         ok=True,
