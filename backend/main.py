@@ -46,6 +46,7 @@ include_route_module("backend.api.routes.chat", f"{settings.API_V1_STR}/chat", [
 include_route_module("backend.api.routes.agents", f"{settings.API_V1_STR}/agents", ["Agents"])
 include_route_module("backend.api.routes.onboarding", f"{settings.API_V1_STR}/onboarding", ["Onboarding"])
 include_route_module("backend.api.routes.simulator", f"{settings.API_V1_STR}", ["Simulator"])
+include_route_module("backend.api.routes.simulator_admin", f"{settings.API_V1_STR}", ["Simulator Admin"])
 include_route_module("backend.api.routes.voice", f"{settings.API_V1_STR}", ["Voice AI (ElevenLabs)"])
 include_route_module("backend.api.routes.sms", f"{settings.API_V1_STR}", ["SMS (Twilio)"])
 

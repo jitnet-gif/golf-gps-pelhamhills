@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import AdminSidebar from "@/components/admin/AdminSidebar";
 
 type Metric = {
   label: string;
@@ -12,23 +13,6 @@ type Row = {
   detail: string;
   status: string;
 };
-
-const links = [
-  ["Pelham Hills Golf Club", "/"],
-  ["Tee Sheet", "/admin"],
-  ["Tee Times & Pricing", "/pricing"],
-  ["Dynamic Pricing", "/dynamic-pricing"],
-  ["Events", "/events"],
-  ["Customers", "/customers"],
-  ["Tour Operators", "/tour-operators"],
-  ["Promotions", "/promotions"],
-  ["Calls & SMS", "/calls"],
-  ["Reports", "/reports"],
-  ["Business Intelligence", "/business-intelligence"],
-  ["Radar", "/radar"],
-  ["Integrations", "/integrations"],
-  ["Settings", "/settings"],
-];
 
 export default function AdminFeaturePage({
   active,
@@ -71,21 +55,8 @@ export default function AdminFeaturePage({
 
   return (
     <main className="min-h-screen bg-[#f2f2f4] text-[#1f2328]">
-      <div className="grid min-h-screen lg:grid-cols-[148px_1fr]">
-        <aside className="hidden bg-[#111315] text-white lg:block">
-          <div className="border-b border-white/10 px-4 py-4 text-sm font-bold">lightspeed</div>
-          <nav className="grid gap-1 px-2 py-3 text-xs">
-            {links.map(([label, href]) => (
-              <a
-                className={`px-3 py-2 font-semibold ${label === active ? "bg-[#4533ff]" : "hover:bg-white/10"}`}
-                href={href}
-                key={label}
-              >
-                {label}
-              </a>
-            ))}
-          </nav>
-        </aside>
+      <div className="grid min-h-screen lg:grid-cols-[168px_1fr]">
+        <AdminSidebar active={active} />
 
         <section className="min-w-0">
           <header className="flex items-center justify-between border-b border-[#d4d4d8] bg-white px-4 py-3">
