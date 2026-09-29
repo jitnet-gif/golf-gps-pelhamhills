@@ -11,6 +11,8 @@
 
 import { useMemo, useState } from "react";
 
+import { useBarcodeScanner } from "@/hooks/useBarcodeScanner";
+
 import retailApi, { toRetailError } from "@/lib/retail/api";
 import {
   RETAIL_CATEGORIES,
@@ -41,9 +43,18 @@ type Props = {
   demo: boolean;
   /** 저장 후 목록을 다시 읽는다. 서버가 붙인 id·타임스탬프가 정답이기 때문. */
   onChanged: () => void;
+  /** 새 상품의 기본 분류. 스낵바 화면은 `Food & Beverage` 로 연다. */
+  defaultCategory?: RetailCategory;
 };
 
-export default function ProductsTab({ products, lowStock, loading, demo, onChanged }: Props) {
+export default function ProductsTab({
+  products,
+  lowStock,
+  loading,
+  demo,
+  onChanged,
+  defaultCategory = "Accessories",
+}: Props) {
   const [search, setSearch] = useState("");
   const [showInactive, setShowInactive] = useState(false);
   const [editing, setEditing] = useState<Product | "new" | null>(null);
@@ -250,6 +261,7 @@ export default function ProductsTab({ products, lowStock, loading, demo, onChang
 
       {editing ? (
         <ProductDialog
+          defaultCategory={defaultCategory}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -318,12 +330,12 @@ type FormState = {
   isActive: boolean;
 };
 
-function toForm(product: Product | null): FormState {
+function toForm(product: Product | null, defaultCategory: RetailCategory): FormState {
   if (!product) {
     return {
       sku: "",
       name: "",
-      category: "Accessories",
+      category: defaultCategory,
       price: "",
       cost: "",
       stock: "",
@@ -345,20 +357,27 @@ function toForm(product: Product | null): FormState {
 
 function ProductDialog({
   product,
+  defaultCategory,
   onClose,
   onSaved,
 }: {
   product: Product | null;
+  defaultCategory: RetailCategory;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [form, setForm] = useState<FormState>(() => toForm(product));
+  const [form, setForm] = useState<FormState>(() => toForm(product, defaultCategory));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((current) => ({ ...current, [key]: value }));
   }
+
+  // 상품 바코드(UPC 등)를 쏘면 SKU 칸이 그 값이 된다. 칸에 포커스가 있든 없든 같다 —
+  // 입력기가 한글이면 칸에 자모가 찍히므로 칸의 글자가 아니라 스캐너가 보낸 키를 믿는다.
+  // 계산대는 이 SKU 로 정확 일치 검색을 한다.
+  useBarcodeScanner((code) => set("sku", code));
 
   // `parseMoney` 는 쓰레기 입력을 조용히 0 으로 떨어뜨린다. 그러면 "$0.00 짜리
   // Pro V1" 이 만들어지고 아무도 모른다 — 저장 버튼을 켜기 전에 직접 본다.
@@ -397,9 +416,10 @@ function ProductDialog({
   return (
     <Modal onClose={onClose} title={product ? "Edit product" : "Add product"}>
       <div className="grid gap-3">
-        <Field label="SKU">
+        <Field label="SKU (scan the barcode)">
           <TextInput
             autoComplete="off"
+            data-scan-target=""
             onChange={(event) => set("sku", event.target.value)}
             placeholder="PH-BALL-PV1"
             value={form.sku}

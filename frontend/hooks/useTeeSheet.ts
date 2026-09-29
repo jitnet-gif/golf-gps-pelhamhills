@@ -1100,6 +1100,7 @@ export function useTeeSheet(): TeeSheetController {
       toasts,
       busy,
       dismissToast,
+      pushToast,
 
       // stats
       stats,
@@ -1143,6 +1144,7 @@ export function useTeeSheet(): TeeSheetController {
       moveBooking,
       patchBooking,
       patchPlayer,
+      pushToast,
       refresh,
       removePlayer,
       select,

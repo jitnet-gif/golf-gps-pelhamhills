@@ -223,6 +223,8 @@ export type TeeSheetController = {
   toasts: Toast[];
   busy: boolean;
   dismissToast: (id: string) => void;
+  /** 화면 쪽 알림(예: 스캐너가 읽은 코드에 맞는 예약이 없음). 돌려받은 id 로 지울 수 있다. */
+  pushToast: (kind: Toast["kind"], text: string) => string;
 
   // stats for the visible range
   stats: {

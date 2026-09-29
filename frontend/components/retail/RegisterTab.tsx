@@ -13,7 +13,9 @@
  * 문서 맨 아래에 있어서, 고정 줄이 늘 떠 있으면 다른 화면으로 갈 길을 덮는다.
  */
 
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useMemo, useState, useSyncExternalStore, type KeyboardEvent } from "react";
+
+import { useBarcodeScanner } from "@/hooks/useBarcodeScanner";
 
 import {
   computeCartTotals,
@@ -104,11 +106,26 @@ type Props = {
   demo: boolean;
   /** 판매가 성사되면 상품 목록(재고)을 다시 읽게 한다. */
   onSold: () => void;
+  /** 스캐너를 듣는가. 탭이 숨겨져 있을 때 꺼야 Products 탭에서 쏜 스캔이 장바구니로 새지 않는다. */
+  scanEnabled?: boolean;
+  /** 스낵바처럼 한 분류만 파는 계산대. 칩 줄을 감추고 그 분류만 보인다. */
+  lockedCategory?: RetailCategory;
 };
 
-export default function RegisterTab({ products, loading, demo, onSold }: Props) {
+/** 리테일 영수증 번호(`PH-20260915-0001`). 상품이 아니라 영수증을 쏜 경우를 알아본다. */
+const RECEIPT_NO = /^PH-\d{8}-\d+$/i;
+
+export default function RegisterTab({
+  products,
+  loading,
+  demo,
+  onSold,
+  scanEnabled = true,
+  lockedCategory,
+}: Props) {
   const [search, setSearch] = useState("");
-  const [category, setCategory] = useState<RetailCategory | "All">("All");
+  const [pickedCategory, setCategory] = useState<RetailCategory | "All">("All");
+  const category = lockedCategory ?? pickedCategory;
 
   const [entries, setEntries] = useState<CartEntry[]>([]);
   const [orderDiscountInput, setOrderDiscountInput] = useState("");
@@ -119,6 +136,9 @@ export default function RegisterTab({ products, loading, demo, onSold }: Props) 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  // 스캔 실패 문구는 검색칸 바로 밑에 띄운다. 결제 오류 자리(장바구니 안)는 휴대폰에서
+  // 접힌 시트 속이라, 스캐너를 쏜 직원 눈에 안 보인다.
+  const [scanNote, setScanNote] = useState("");
   const [receipt, setReceipt] = useState<Sale | null>(null);
   // 미리 구운 정적 HTML 은 세 번째 인자(꺼짐)로 그리고, 브라우저에서 저장된 값으로
   // 바꾼다. 첫 렌더에서 localStorage 를 읽으면 체크 상태가 달라져 하이드레이션이 어긋난다.
@@ -173,6 +193,50 @@ export default function RegisterTab({ products, loading, demo, onSold }: Props) 
       next[index] = { ...next[index], quantity: next[index].quantity + 1 };
       return next;
     });
+  }
+
+  /**
+   * 스캔 = SKU **정확 일치**(대소문자 무시 — 백엔드 `_sku_key` 와 같은 규칙).
+   * 부분 일치로 담으면 `PH-BALL` 을 쏘았는데 `PH-BALL-PV1` 이 담기는 식의 사고가 난다.
+   * 공산품의 UPC 로 찾으려면 상품의 SKU 칸에 그 UPC 를 등록해 둬야 한다(Products 탭에서 스캔).
+   */
+  function addBySku(raw: string): boolean {
+    const wanted = raw.trim().toLowerCase();
+    const product = products.find(
+      (item) =>
+        item.is_active &&
+        item.sku.trim().toLowerCase() === wanted &&
+        (lockedCategory ? item.category === lockedCategory : true),
+    );
+    if (!product) return false;
+    addToCart(product);
+    return true;
+  }
+
+  function handleScan(code: string) {
+    // 검색칸에서 쏜 스캔이면 칸에 글자(IME 가 한글이면 자모)가 남아 있다. 비운다.
+    setSearch("");
+    if (addBySku(code)) {
+      setScanNote("");
+      return;
+    }
+    setScanNote(
+      RECEIPT_NO.test(code)
+        ? `"${code}" is a receipt, not a product. Look it up on the Sales tab.`
+        : `No product with barcode "${code}". Add it on the Products tab (scan into the SKU field).`,
+    );
+  }
+
+  useBarcodeScanner(handleScan, { enabled: scanEnabled && !loading });
+
+  /** 스캐너가 아닌 손으로 SKU 를 다 치고 Enter 를 눌러도 담는다. 스캔은 훅이 먼저 가로챈다. */
+  function onSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter" || event.defaultPrevented || event.nativeEvent.isComposing) return;
+    if (search.trim() && addBySku(search)) {
+      event.preventDefault();
+      setSearch("");
+      setScanNote("");
+    }
   }
 
   function changeQuantity(productId: number, delta: number) {
@@ -270,13 +334,18 @@ export default function RegisterTab({ products, loading, demo, onSold }: Props) 
           <div className="grid gap-2">
             <TextInput
               aria-label="Search products by name or SKU"
+              data-scan-target=""
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search name or SKU…"
+              onKeyDown={onSearchKeyDown}
+              placeholder="Scan a barcode, or search name or SKU…"
               type="search"
               value={search}
             />
+            {scanNote ? <ErrorNote>{scanNote}</ErrorNote> : null}
             {/* 칩 줄은 자기 자신 안에서 가로 스크롤한다. 페이지를 밀면 안 된다. */}
-            <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+            <div
+              className={`-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 ${lockedCategory ? "hidden" : ""}`}
+            >
               <Chip active={category === "All"} onClick={() => setCategory("All")}>
                 All
               </Chip>

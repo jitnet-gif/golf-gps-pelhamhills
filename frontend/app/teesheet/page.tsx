@@ -13,15 +13,20 @@ import BookingDialog, { SEATS_PER_TEE_TIME } from "../../components/teesheet/Boo
 import DateNav from "../../components/teesheet/DateNav";
 import ReservationDetail from "../../components/teesheet/ReservationDetail";
 import WeekGrid from "../../components/teesheet/WeekGrid";
+import { useBarcodeScanner } from "../../hooks/useBarcodeScanner";
 import { useTeeSheet } from "../../hooks/useTeeSheet";
+import { confirmationCode } from "@/lib/teeSheet/receipt";
 import { GUEST_NAME } from "@/lib/teeSheet/tone";
+
+/** 티 시트 영수증 바코드: `ABCD-1234`(확인 코드), 뒤에 `-플레이어4자` 또는 `-ALL`. */
+const TEE_TICKET = /^([A-Z0-9]{4}-[A-Z0-9]{4})(?:-([A-Z0-9]{4}|ALL))?$/;
 
 export default function TeeSheetPage() {
   const controller = useTeeSheet();
   // 컨트롤러 객체는 useMemo 지만 bookings·busy·toasts 에 딸려 있어 변경 한 번마다
   // 새로 만들어진다. 아래 콜백이 통째로 그 객체에 의존하면 격자(셀 버튼 수백 개)가
   // 그때마다 다시 그려지므로, 쓰는 것만 꺼내 쓴다 — 이 넷은 useCallback 으로 고정이다.
-  const { bookings, createBooking, focusedDate, select, setFocusedDate, slots } = controller;
+  const { bookings, createBooking, focusedDate, pushToast, select, setFocusedDate, slots } = controller;
   // 다이얼로그는 이제 **막다른 길을 막는 용도**로만 남는다 (아래 addReservation 참고).
   const [dialogOpen, setDialogOpen] = useState(false);
   // 예전에는 빈 칸이 넘겨주는 날짜·시각을 ref 에 담아 뒀는데, 그 ref 를 렌더 중에
@@ -115,6 +120,35 @@ export default function TeeSheetPage() {
     if (firstFreeTime) void createAt(focusedDate, firstFreeTime);
     else setDialogOpen(true);
   }, [createAt, firstFreeTime, focusedDate]);
+
+  /**
+   * 프로 샵 스캐너(DS2208)로 티 시트 영수증을 쏘면 그 예약을 연다 — 재인쇄·결제 확인·환불 문의 때
+   * 종이를 들고 온 손님의 예약을 격자에서 찾지 않아도 된다.
+   *
+   * 확인 코드는 id 의 **뒤 8자**라 되돌릴 수 없다. 그래서 서버에 묻지 않고 지금 읽어 둔 예약
+   * (보이는 주) 안에서만 찾는다. 다른 주의 영수증이면 그 주로 가서 다시 쏘라고 알린다.
+   */
+  const onScan = useCallback(
+    (raw: string) => {
+      const match = TEE_TICKET.exec(raw.trim().toUpperCase());
+      if (!match) {
+        pushToast("error", `"${raw}" is not a tee sheet receipt.`);
+        return;
+      }
+      const found = bookings.find((booking) => confirmationCode(booking.id) === match[1]);
+      if (!found) {
+        pushToast(
+          "error",
+          `No reservation ${match[1]} in the loaded week — go to the receipt's date and scan again.`,
+        );
+        return;
+      }
+      if (found.date !== focusedDate) setFocusedDate(found.date);
+      select(found.id);
+    },
+    [bookings, focusedDate, pushToast, select, setFocusedDate],
+  );
+  useBarcodeScanner(onScan);
 
   // 한 화면 고정: 페이지 자체는 절대 스크롤하지 않고, 티 시트와 상세 패널이
   // 각자 내부에서만 스크롤한다. 그래야 예약을 클릭했을 때 격자와 상세가 동시에 보인다.
