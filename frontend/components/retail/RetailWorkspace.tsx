@@ -43,9 +43,11 @@ type Props = {
   title: string;
   /** 이 분류만 파는 계산대(스낵바). 없으면 프로 샵 전체. */
   category?: RetailCategory;
+  /** 계산대를 카메라 스캔이 켜진 채로 연다(`/admin/scan` 바로가기). */
+  startWithCamera?: boolean;
 };
 
-export default function RetailWorkspace({ title, category }: Props) {
+export default function RetailWorkspace({ title, category, startWithCamera }: Props) {
   const [tab, setTab] = useState<TabId>("register");
   const [products, setProducts] = useState<Product[]>([]);
   const [lowStock, setLowStock] = useState<LowStockItem[]>([]);
@@ -165,6 +167,8 @@ export default function RetailWorkspace({ title, category }: Props) {
             onSold={refresh}
             products={shownProducts}
             scanEnabled={tab === "register"}
+            scanProducts={products}
+            startWithCamera={startWithCamera}
           />
         </div>
 

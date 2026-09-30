@@ -130,6 +130,9 @@ export const adminQuickNav: NavItem[] = adminNav.filter((item) =>
  */
 export const ADMIN_RETAIL = "/admin/retail";
 
+/** 카메라 스캔 바로가기 — 켜자마자 카메라가 켜진 계산대. 홈 화면에 붙여 두는 주소. */
+export const ADMIN_SCAN = "/admin/scan";
+
 /**
  * 사업부(division). 사이드바 맨 위 드롭다운이 이 셋 사이를 오가며 메뉴를 바꿔 끼우고,
  * 그 사업부의 첫 화면(`home`)으로 바로 이동한다.
@@ -164,6 +167,7 @@ export const adminDivisions: AdminDivision[] = [
     links: [
       { label: "Snack Bar / Bev Cart", href: "/admin/snack-bar", glyph: "☕" },
       { label: "Pro Shop Retail", href: ADMIN_RETAIL, glyph: "🛒" },
+      { label: "Camera Scan", href: ADMIN_SCAN, glyph: "📷" },
       pick("Reports"),
       pick("Integrations"),
     ],

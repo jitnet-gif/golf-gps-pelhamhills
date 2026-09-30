@@ -16,6 +16,7 @@
   "shortcuts": [
     { "name": "Book a Tee Time", "url": "/book/tee-time" },
     { "name": "Book Indoor Golf", "url": "/book/indoor" },
-    { "name": "Tee Sheet (Staff)", "url": "/admin" }
+    { "name": "Tee Sheet (Staff)", "url": "/admin" },
+    { "name": "Camera Scan (Staff)", "url": "/admin/scan" }
   ]
 }

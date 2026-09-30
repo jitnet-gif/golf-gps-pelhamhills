@@ -19,6 +19,7 @@
 import { useMemo, useState, type KeyboardEvent } from "react";
 
 import BillPanel from "@/components/pos/BillPanel";
+import CameraScanner, { type ScanOutcome } from "@/components/pos/CameraScanner";
 import { useBarcodeScanner } from "@/hooks/useBarcodeScanner";
 import type { BillStation } from "@/lib/pos/api";
 import { findProductByCode } from "@/lib/retail/findProduct";
@@ -29,6 +30,8 @@ import { Chip, EmptyNote, ErrorNote, SkeletonCards, TextInput, useOverlayDismiss
 
 type Props = {
   products: Product[];
+  /** 스캔으로 찾을 상품 전체. 스낵바에서 프로 샵 물건을 쏘아도 담긴다(격자는 `products` 만). */
+  scanProducts?: Product[];
   loading: boolean;
   /** 서버가 없어서 예시 데이터를 보고 있는 상태. 계산서를 만들지 않는다. */
   demo: boolean;
@@ -38,6 +41,8 @@ type Props = {
   scanEnabled?: boolean;
   /** 스낵바처럼 한 분류만 파는 계산대. 칩 줄을 감추고 그 분류만 보인다. */
   lockedCategory?: RetailCategory;
+  /** 카메라 스캔을 켠 채로 연다. 바로가기 주소(`/admin/scan`)용. */
+  startWithCamera?: boolean;
 };
 
 /** 리테일 영수증 번호(`PH-20260915-0001`). 상품이 아니라 영수증을 쏜 경우를 알아본다. */
@@ -45,11 +50,13 @@ const RECEIPT_NO = /^PH-\d{8}-\d+$/i;
 
 export default function RegisterTab({
   products,
+  scanProducts,
   loading,
   demo,
   onSold,
   scanEnabled = true,
   lockedCategory,
+  startWithCamera = false,
 }: Props) {
   const [search, setSearch] = useState("");
   const [pickedCategory, setCategory] = useState<RetailCategory | "All">("All");
@@ -63,6 +70,7 @@ export default function RegisterTab({
   const [scanNote, setScanNote] = useState("");
   // 스캔으로 담으면 결제 칸을 바로 띄운다. 값이 바뀔 때마다 BillPanel 이 결제 칸으로 스크롤한다.
   const [revealPayments, setRevealPayments] = useState(0);
+  const [cameraOpen, setCameraOpen] = useState(startWithCamera);
 
   // 판매 화면에는 **활성 상품만** 올린다. 비활성 상품이 격자에 섞이면 이미
   // 안 파는 물건을 눌러 찍게 된다.
@@ -105,9 +113,13 @@ export default function RegisterTab({
     });
   }
 
-  /** 스캔 = 바코드 → SKU 정확 일치. 공산품은 Products 탭에서 바코드 칸에 쏘아 등록해 둔다. */
+  /**
+   * 스캔 = 바코드 → SKU 정확 일치. 공산품은 Products 탭에서 바코드 칸에 쏘아 등록해 둔다.
+   * 분류로 거르지 않는다 — 손님이 스낵바에서 프로 샵 물건을 같이 사면 한 계산서로 받는다.
+   * 줄의 분류는 상품 것이라 매출 보고서의 구분은 그대로다.
+   */
   function findBySku(raw: string): Product | null {
-    return findProductByCode(products, raw, lockedCategory);
+    return findProductByCode(scanProducts ?? products, raw);
   }
 
   function handleScan(code: string) {
@@ -125,7 +137,35 @@ export default function RegisterTab({
     );
   }
 
-  useBarcodeScanner(handleScan, { enabled: scanEnabled && !loading });
+  useBarcodeScanner(handleScan, { enabled: scanEnabled && !loading && !cameraOpen });
+
+  /**
+   * 카메라 스캔 = 마트 계산대. 읽을 때마다 **담기만** 하고 결제 칸은 열지 않는다 —
+   * 물건마다 시트가 튀어나오면 카메라를 가린다. 결제는 카메라 화면의 Pay 로 간다.
+   */
+  async function handleCameraCode(code: string): Promise<ScanOutcome> {
+    if (loading) return { ok: false, message: "Products are still loading — try again in a moment." };
+    const product = findBySku(code);
+    if (!product) {
+      return {
+        ok: false,
+        message: RECEIPT_NO.test(code)
+          ? `"${code}" is a receipt, not a product.`
+          : `No product with barcode "${code}". Add it on the Products tab first.`,
+      };
+    }
+    if (demo) return { ok: false, message: "Demo data — the server is not connected, nothing was added." };
+    const added = await addToBill(product);
+    return added
+      ? { ok: true, message: `${product.name} · ${formatMoney(product.price)}` }
+      : { ok: false, message: `Could not add ${product.name} — the bill shows why. Try again.` };
+  }
+
+  function payFromCamera() {
+    setCameraOpen(false);
+    if (!window.matchMedia("(min-width: 1024px)").matches) setSheetOpen(true);
+    setRevealPayments((n) => n + 1);
+  }
 
   /** 스캐너가 아닌 손으로 SKU 를 다 치고 Enter 를 눌러도 담는다. 스캔은 훅이 먼저 가로챈다. */
   function onSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -149,15 +189,28 @@ export default function RegisterTab({
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="min-w-0">
           <div className="grid gap-2">
-            <TextInput
-              aria-label="Search products by name or SKU"
-              data-scan-target=""
-              onChange={(event) => setSearch(event.target.value)}
-              onKeyDown={onSearchKeyDown}
-              placeholder="Scan a barcode, or search name or SKU…"
-              type="search"
-              value={search}
-            />
+            <div className="flex min-w-0 gap-2">
+              <div className="min-w-0 flex-1">
+                <TextInput
+                  aria-label="Search products by name or SKU"
+                  data-scan-target=""
+                  onChange={(event) => setSearch(event.target.value)}
+                  onKeyDown={onSearchKeyDown}
+                  placeholder="Scan a barcode, or search name or SKU…"
+                  type="search"
+                  value={search}
+                />
+              </div>
+              <button
+                aria-label="Scan with camera"
+                className="inline-flex min-h-11 shrink-0 items-center gap-1.5 border border-[#d4d4d8] bg-white px-3 text-sm font-bold text-[#3f434a] hover:bg-[#f2f2f4]"
+                onClick={() => setCameraOpen(true)}
+                type="button"
+              >
+                <span aria-hidden>📷</span>
+                <span className="hidden sm:inline">Camera</span>
+              </button>
+            </div>
             {scanNote ? <ErrorNote>{scanNote}</ErrorNote> : null}
             {/* 칩 줄은 자기 자신 안에서 가로 스크롤한다. 페이지를 밀면 안 된다. */}
             <div
@@ -216,6 +269,23 @@ export default function RegisterTab({
             <span className="shrink-0 bg-[#4533ff] px-4 py-2.5 text-sm font-bold text-white">Review</span>
           </button>
         </div>
+      ) : null}
+
+      {cameraOpen ? (
+        <CameraScanner
+          canPay={lineCount > 0}
+          onClose={() => setCameraOpen(false)}
+          onCode={handleCameraCode}
+          onDone={payFromCamera}
+          summary={
+            <>
+              <span className="block text-xs font-bold text-[#6b7280]">
+                {bill ? `Bill #${bill.id} · ${lineCount} line${lineCount === 1 ? "" : "s"}` : "Nothing scanned yet"}
+              </span>
+              <span className="block text-lg font-bold tabular-nums">{formatMoney(bill?.total ?? 0)}</span>
+            </>
+          }
+        />
       ) : null}
 
       {sheetOpen ? (
