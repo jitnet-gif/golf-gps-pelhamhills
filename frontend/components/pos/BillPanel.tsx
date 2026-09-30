@@ -151,7 +151,9 @@ export default function BillPanel({ station, demo = false, onPaid, revealPayment
         <EmptyNote>
           {station === "tee_sheet"
             ? "Pick a reservation and press Add to bill. Products scanned at the register land on the same bill."
-            : "Scan or tap a product to start. Green fees added on the tee sheet show up here too."}
+            : station === "simulator"
+              ? "Pick a bay booking and press Pay. Products scanned at the register land on the same bill."
+              : "Scan or tap a product to start. Green fees and simulator bays added on their sheets show up here too."}
         </EmptyNote>
       ) : (
         <ul className="grid gap-2">
@@ -301,14 +303,20 @@ function BillHeader({
 // ===== 줄 ==============================================================
 
 function BillLineRow({ line, station }: { line: Bill["lines"][number]; station: BillStation }) {
+  // 그린피·베이 줄은 예약 하나 = 한 줄. 수량을 바꿀 수 없다.
   const isTee = line.kind === "tee_player";
+  const isSim = line.kind === "sim_booking";
   return (
     <li className="min-w-0 border border-[#e4e4e8] p-2">
       <div className="flex items-start justify-between gap-2">
         <span className="min-w-0">
           <span className="block text-sm leading-tight font-bold">{line.name}</span>
           <span className="block text-[11px] text-[#6b7280]">
-            {isTee ? `Tee sheet · ${line.tee_date ?? ""}` : `${line.sku} · ${formatMoney(line.unit_price)} each`}
+            {isTee
+              ? `Tee sheet · ${line.tee_date ?? ""}`
+              : isSim
+                ? `Bay Sheet · ${line.tee_date ?? ""}`
+                : `${line.sku} · ${formatMoney(line.unit_price)} each`}
           </span>
         </span>
         <button
@@ -321,8 +329,8 @@ function BillLineRow({ line, station }: { line: Bill["lines"][number]; station: 
         </button>
       </div>
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-        {isTee ? (
-          <span className="text-xs text-[#6b7280]">1 player</span>
+        {isTee || isSim ? (
+          <span className="text-xs text-[#6b7280]">{isTee ? "1 player" : "1 booking"}</span>
         ) : (
           <div className="flex items-center">
             <button

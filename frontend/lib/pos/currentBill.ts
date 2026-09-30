@@ -142,6 +142,8 @@ export const billActions = {
     mutate((id) => posApi.addProduct(id, productId, quantity), station),
   addTee: (bookingId: string, playerIds: string[] | undefined, station: BillStation = "tee_sheet") =>
     mutate((id) => posApi.addTee(id, bookingId, playerIds), station),
+  addSim: (reservationId: number, station: BillStation = "simulator") =>
+    mutate((id) => posApi.addSim(id, reservationId), station),
   setQuantity: (lineId: number, quantity: number, station: BillStation) =>
     mutate((id) => posApi.updateLine(id, lineId, { quantity }), station),
   setLineDiscount: (lineId: number, discount: number, station: BillStation) =>

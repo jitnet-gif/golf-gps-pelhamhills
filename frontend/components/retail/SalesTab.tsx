@@ -336,7 +336,11 @@ function SaleDetail({
                 <span className="shrink-0 tabular-nums">{formatMoney(line.line_total)}</span>
               </div>
               <p className="text-[11px] text-[#6b7280]">
-                {line.kind === "tee_player" ? `Green fee · tee time ${line.tee_date ?? ""}` : line.sku} ·{" "}
+                {line.kind === "tee_player"
+                  ? `Green fee · tee time ${line.tee_date ?? ""}`
+                  : line.kind === "sim_booking"
+                    ? `Simulator · ${line.tee_date ?? ""} ${line.tee_time ?? ""}`
+                    : line.sku} ·{" "}
                 {formatMoney(line.unit_price)} each
                 {line.discount > 0 ? ` · −${formatMoney(line.discount)}` : ""}
               </p>

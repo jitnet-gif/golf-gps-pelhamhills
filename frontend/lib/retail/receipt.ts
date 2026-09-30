@@ -132,7 +132,12 @@ export function saleReceipt(sale: Sale): ReceiptDoc {
       // 실물 영수증의 품목 아래 줄("Guest ... - Tee Time: ...")처럼 " - " 로 잇는다.
       // Price 칸은 줄 합계(line_total) 그대로다 — 할인은 설명으로만 적어서 칸의 합이 Subtotal 과 맞는다.
       // 그린피 줄은 SKU 가 없다(`TEE`). 이름에 이미 시각과 사람이 들어 있다.
-      const detail = line.kind === "tee_player" ? [`Tee time ${line.tee_date ?? ""}`.trim()] : [line.sku];
+      const detail =
+        line.kind === "tee_player"
+          ? [`Tee time ${line.tee_date ?? ""}`.trim()]
+          : line.kind === "sim_booking"
+            ? [`Simulator ${line.tee_date ?? ""}`.trim()]
+            : [line.sku];
       if (line.quantity > 1) detail.push(`${line.quantity} @ ${formatMoney(line.unit_price)}`);
       if (line.discount > 0) detail.push(`Discount ${formatMoney(line.discount)}`);
       return { name: line.name, detail: detail.join(" - "), quantity: line.quantity, amount: line.line_total };

@@ -78,8 +78,8 @@ export type ProductUpdate = Partial<ProductCreate>;
 export type SaleLine = {
   /** 계산서 줄 id. Supabase 계산서(0005)에서만 온다. */
   id?: number;
-  /** product = 상품, tee_player = 티 시트 플레이어의 그린피. 없으면 product. */
-  kind?: "product" | "tee_player";
+  /** product = 상품, tee_player = 티 시트 플레이어의 그린피, sim_booking = 실내 골프 베이. 없으면 product. */
+  kind?: "product" | "tee_player" | "sim_booking";
   /** 그린피 줄은 null. */
   product_id: number | null;
   /** 그린피 줄만: 티 타임 날짜(YYYY-MM-DD)와 시각 라벨. */
@@ -166,8 +166,8 @@ export type RetailDailyReport = {
   refunded_count: number;
   refunded_total: Cents;
   by_payment: Array<{ method: PaymentMethod; count: number; total: Cents }>;
-  /** 합산 계산서라 그린피가 'Green Fees' 로 함께 잡힌다. */
-  by_category: Array<{ category: RetailCategory | "Green Fees"; quantity: number; total: Cents }>;
+  /** 합산 계산서라 그린피가 'Green Fees', 베이 요금이 'Simulator' 로 함께 잡힌다. */
+  by_category: Array<{ category: RetailCategory | "Green Fees" | "Simulator"; quantity: number; total: Cents }>;
   /** 어디서 연 계산서인가(Supabase 계산서에서만). */
   by_station?: Array<{ station: string; count: number; total: Cents }>;
   tips?: Cents;

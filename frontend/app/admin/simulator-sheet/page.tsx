@@ -17,6 +17,9 @@ import {
 import Link from "next/link";
 
 import AdminShell from "@/components/admin/AdminShell";
+import BillDrawer from "@/components/pos/BillDrawer";
+import BillPanel from "@/components/pos/BillPanel";
+import { billActions } from "@/lib/pos/currentBill";
 import { BOOK_INDOOR } from "@/lib/nav";
 import { ApiError } from "@/lib/teeSheet/api";
 import {
@@ -125,9 +128,14 @@ export default function SimulatorSheetPage() {
   const [ok, setOk] = useState(true);
   const [message, setMessage] = useState("Loading…");
   const [draft, setDraft] = useState<Draft | null>(null);
+  // 예약·빈칸을 열 때마다 1씩 는다(좁은 화면에서 편집 패널로 스크롤하는 신호).
+  const [opened, setOpened] = useState(0);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [showCancelled, setShowCancelled] = useState(false);
   const [nowMin, setNowMin] = useState<number | null>(null);
+  const [billOpen, setBillOpen] = useState(false);
+  // 담은 뒤 서랍의 결제 칸으로 스크롤시키는 값(BillPanel 참고).
+  const [revealPayments, setRevealPayments] = useState(0);
 
   const closed = isClosed(date);
 
@@ -293,11 +301,13 @@ export default function SimulatorSheetPage() {
       status: "confirmed",
       source: "walk_in",
     });
+    setOpened((n) => n + 1);
   }
 
   function openExisting(r: Reservation) {
     setConfirmCancel(false);
     setDraft({ ...r });
+    setOpened((n) => n + 1);
   }
 
   async function saveDraft() {
@@ -353,6 +363,14 @@ export default function SimulatorSheetPage() {
     }
   }
 
+  // 손님이 와서 낸다: 예약을 지금 계산서에 담고 결제 서랍을 연다. 담기에 실패해도 서랍은
+  // 연다 — 오류 문구(이미 다른 계산서에 있음 등)가 서랍 안 BillPanel 에 뜬다.
+  async function payReservation(id: Reservation["id"]) {
+    const bill = await billActions.addSim(Number(id));
+    setBillOpen(true);
+    if (bill) setRevealPayments((n) => n + 1);
+  }
+
   async function changeBayStatus(bay: Bay, status: BayStatus) {
     try {
       const updated = await simApi.setBayStatus(bay.id, status);
@@ -372,10 +390,20 @@ export default function SimulatorSheetPage() {
 
   // ---------- drag to move ----------
   const gridRef = useRef<HTMLDivElement>(null);
+  const drawerRef = useRef<HTMLElement>(null);
+
+  // xl 보다 좁으면(iPad) 편집 패널이 그리드 아래로 내려간다. 예약을 열면 거기로 스크롤해
+  // 준다 — 안 하면 화면 밖에서 열려 탭이 먹지 않은 것처럼 보인다.
+  useEffect(() => {
+    if (!opened || !drawerRef.current) return;
+    if (!window.matchMedia("(max-width: 1279px)").matches) return;
+    drawerRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [opened]);
   const [drag, setDrag] = useState<{
     id: Reservation["id"];
     startX: number;
     startY: number;
+    slop: number;
     moved: boolean;
     bay_id: number;
     start_time: string;
@@ -401,6 +429,9 @@ export default function SimulatorSheetPage() {
       id: r.id,
       startX: e.clientX,
       startY: e.clientY,
+      // 손가락은 탭하는 동안에도 몇 px 흔들린다. 마우스 기준(6px)을 쓰면 iPad 에서 탭이
+      // 드래그로 잡혀 예약이 열리지 않는다.
+      slop: e.pointerType === "mouse" ? 6 : 14,
       moved: false,
       bay_id: r.bay_id,
       start_time: r.start_time,
@@ -412,7 +443,8 @@ export default function SimulatorSheetPage() {
     if (!drag || drag.id !== r.id) return;
     const moved =
       drag.moved ||
-      Math.abs(e.clientX - drag.startX) + Math.abs(e.clientY - drag.startY) > 6;
+      Math.abs(e.clientX - drag.startX) + Math.abs(e.clientY - drag.startY) >
+        drag.slop;
     if (!moved) return;
     // 블록의 윗부분을 잡은 위치를 유지하기 위해 이동량 기준으로 계산
     const dy = Math.round((e.clientY - drag.startY) / ROW_H);
@@ -439,14 +471,15 @@ export default function SimulatorSheetPage() {
     if (!drag || drag.id !== r.id) return;
     const d = drag;
     setDrag(null);
-    if (!d.moved) return openExisting(r);
+    // 제자리에 내려놓았으면 탭으로 본다.
+    if (!d.moved || (d.bay_id === r.bay_id && d.start_time === r.start_time))
+      return openExisting(r);
     if (!d.ok) {
       setMessage(
         "Can't move there — overlaps another booking or the bay is unavailable.",
       );
       return;
     }
-    if (d.bay_id === r.bay_id && d.start_time === r.start_time) return;
     patchReservation(
       r.id,
       { bay_id: d.bay_id, start_time: d.start_time },
@@ -793,7 +826,10 @@ export default function SimulatorSheetPage() {
           </div>
 
           {/* drawer */}
-          <aside className="border-l border-[#d4d4d8] bg-[#dedee2] p-3">
+          <aside
+            className="scroll-mt-4 border-l border-[#d4d4d8] bg-[#dedee2] p-3"
+            ref={drawerRef}
+          >
             {!draft ? (
               <div className="grid gap-3 text-xs">
                 <p className="font-bold">Bay status now</p>
@@ -1061,17 +1097,18 @@ export default function SimulatorSheetPage() {
                     >
                       Check In
                     </button>
+                    {/* 결제는 계산서로만(0008). 예약은 계산서가 결제될 때 서버가 paid 로 바꾼다. */}
                     <button
-                      className="bg-[#16a34a] px-1 py-1.5 font-bold text-white"
-                      onClick={() =>
-                        patchReservation(
-                          draft.id!,
-                          { status: "paid" },
-                          "Marked paid",
-                        )
+                      className="bg-[#16a34a] px-1 py-1.5 font-bold text-white disabled:opacity-60"
+                      disabled={draft.status === "paid"}
+                      onClick={() => void payReservation(draft.id!)}
+                      title={
+                        draft.status === "paid"
+                          ? "Paid on a bill. Refund that bill in Retail → Sales to undo."
+                          : "Put this booking on the bill and take payment"
                       }
                     >
-                      Paid
+                      {draft.status === "paid" ? "Paid ✓" : "Pay"}
                     </button>
                     <button
                       className="border border-[#c47a63] bg-white px-1 py-1.5 font-bold text-[#8a3f26]"
@@ -1130,6 +1167,25 @@ export default function SimulatorSheetPage() {
           </aside>
         </section>
       </div>
+
+      {billOpen ? (
+        <BillDrawer
+          onClose={() => {
+            setBillOpen(false);
+            setRevealPayments(0);
+          }}
+        >
+          <BillPanel
+            onPaid={() => {
+              // 서버가 예약을 paid 로 바꿨다. 열린 편집 칸은 옛 상태라 닫고 표를 새로 읽는다.
+              setDraft(null);
+              reload();
+            }}
+            revealPayments={revealPayments}
+            station="simulator"
+          />
+        </BillDrawer>
+      ) : null}
     </AdminShell>
   );
 }

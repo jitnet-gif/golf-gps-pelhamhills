@@ -622,6 +622,10 @@ export default function IndoorGolfBooking() {
           {/* Booking Policies */}
           <div className="mb-6 text-sm text-[#5c6459]">
             <ul className="list-disc space-y-2 pl-5">
+              {/* 온라인에서는 돈을 받지 않는다. 와서 프런트에서 계산서로 낸다(0008). */}
+              <li className="font-semibold text-[#214d2f]">
+                No payment now — you pay at the front desk when you arrive.
+              </li>
               <li>Free cancellations up to 12 hours before reservation start time.</li>
               <li>
                 Cancellations after the 12 hour delay will be billed 50% of reservation
@@ -689,6 +693,7 @@ export default function IndoorGolfBooking() {
                 <p className="font-semibold text-[#214d2f]">
                   ${reservation.total_price.toFixed(2)}
                 </p>
+                <p className="text-xs text-[#5c6459]">+ HST · pay on arrival</p>
                 <p className="text-[#5c6459]">
                   {reservation.player_count} player
                   {reservation.player_count > 1 ? "s" : ""}

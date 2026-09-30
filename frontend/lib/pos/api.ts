@@ -11,7 +11,7 @@ import { ApiError } from "@/lib/teeSheet/api";
 import { staffRpc } from "@/lib/teeSheet/staffRpc";
 import type { Cents, PaymentMethod, Sale } from "@/lib/retail/types";
 
-export type BillStation = "pro_shop" | "snack_bar" | "tee_sheet";
+export type BillStation = "pro_shop" | "snack_bar" | "tee_sheet" | "simulator";
 
 /** 계산서 한 장. 결제된 계산서는 기존 `Sale` 과 같은 필드를 갖는다. */
 export type Bill = Omit<Sale, "lines" | "status" | "receipt_no"> & {
@@ -28,7 +28,8 @@ export type Bill = Omit<Sale, "lines" | "status" | "receipt_no"> & {
 
 export type BillLine = Sale["lines"][number] & {
   id: number;
-  kind: "product" | "tee_player";
+  /** sim_booking = 실내 골프 베이 예약(0008). 날짜·시각은 tee_date·tee_time 칸을 같이 쓴다. */
+  kind: "product" | "tee_player" | "sim_booking";
   category: string;
   booking_id: string | null;
   player_id: string | null;
@@ -66,6 +67,9 @@ export const posApi = {
       p_booking: booking,
       p_players: players && players.length > 0 ? players : null,
     }),
+  /** 실내 골프 베이 예약 하나(0008). 계산서가 결제되면 예약이 paid 가 된다. */
+  addSim: (bill: number, reservation: number) =>
+    staffRpc<Bill>("pelham_staff_bill_add_sim", { p_bill: bill, p_reservation: reservation }),
   void: (bill: number) => staffRpc<Bill>("pelham_staff_bill_void", { p_bill: bill }),
   pay: (bill: number, checkoutId: string, payments: PaymentInput[]) =>
     staffRpc<Bill>("pelham_staff_bill_pay", { p_bill: bill, p: { checkout_id: checkoutId, payments } }),
