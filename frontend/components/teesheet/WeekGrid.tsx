@@ -34,7 +34,7 @@ import {
   toDate,
   todayIso,
 } from "@/lib/teeSheet/dates";
-import { TONE_CLASS, isDeadPlayer, playerLabel, playerTone } from "@/lib/teeSheet/tone";
+import { GUEST_NAME, TONE_CLASS, isDeadPlayer, playerLabel, playerTone } from "@/lib/teeSheet/tone";
 import type {
   BookingColor,
   BookingStatus,
@@ -1076,7 +1076,10 @@ function DaySegmentCard({
                 className="h-[7px] w-[7px] shrink-0 rounded-full border border-current opacity-70"
               />
               <span className="truncate">
-                {player.type === "Guest" ? <em>Guest</em> : playerLabel(player)}
+                {/* type 이 아니라 이름으로 가른다. 온라인 예약(0003 `pelham_tee_book`)은
+                    예약한 본인까지 type "Guest" 로 저장하므로, type 을 보면 대표자 이름이
+                    격자에서 사라진다. 이름 없는 자리만 이탤릭 Guest 다. */}
+                {playerLabel(player) === GUEST_NAME ? <em>{GUEST_NAME}</em> : playerLabel(player)}
               </span>
             </span>
           );

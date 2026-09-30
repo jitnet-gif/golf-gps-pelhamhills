@@ -1044,10 +1044,8 @@ export function useTeeSheet({ live = false }: { live?: boolean } = {}): TeeSheet
         return Promise.resolve(null);
       }
 
-      // type 은 "Existing Customer" 다. "Guest" 로 두면 일 시트 셀이
-      // `player.type === "Guest"` 를 보고 이름 대신 늘 <em>Guest</em> 를 그려서,
-      // 직원이 상세 패널에서 이름을 적어 저장해도 격자에는 끝까지 "Guest" 로 남는다.
-      // 이 버튼이 만드는 것은 "이제 이름을 채울 빈 자리" 이지 익명 손님이 아니다
+      // type 은 "Existing Customer" 다. "Guest" 로 두면 셀이 노란 게스트 톤으로
+      // 칠해진다(playerTone). 이 버튼이 만드는 것은 "이제 이름을 채울 빈 자리" 이지 익명 손님이 아니다
       // (격자의 + 로 새 예약을 만들 때와 같은 상황 — app/teesheet/page.tsx 참고).
       // 이름을 안 채운 동안 "Guest" 로 보이는 일은 playerLabel 의 폴백이 한다.
       const payload: AddPlayerInput = {

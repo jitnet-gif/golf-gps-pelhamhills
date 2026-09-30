@@ -78,10 +78,10 @@ export default function TeeSheetPage() {
         // 빈 플레이어 한 명을 같이 만든다: 0명짜리 예약은 좌석을 잡지 않아서
         // 누른 칸이 그대로 `+` 로 남고, 격자 대신 off-grid 줄에 떨어진다.
         //
-        // `type` 은 반드시 "Existing Customer" 로 넘긴다. 서버 기본값인 "Guest" 로 두면
-        // 일 시트 셀이 `player.type === "Guest"` 를 보고 이름 대신 늘 <em>Guest</em> 를
-        // 그린다(WeekGrid) — 직원이 이름을 다 적어도 격자는 영영 "Guest" 다.
-        // 이름 없는 자리를 Guest 로 부르는 일은 playerLabel 의 폴백이 이미 한다.
+        // `type` 은 "Existing Customer" 로 넘긴다. 서버 기본값인 "Guest" 로 두면 셀이
+        // 노란 게스트 톤(playerTone)으로 칠해진다 — 이 자리는 익명 손님이 아니라 직원이
+        // 이름을 채울 빈 자리다. 이름 없는 자리를 Guest 로 부르는 일은 playerLabel 의
+        // 폴백이 한다.
         const created = await createBooking({
           date,
           time,

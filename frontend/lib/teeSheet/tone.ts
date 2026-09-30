@@ -50,7 +50,8 @@ export function isDeadPlayer(player: Player): boolean {
 
 /**
  * 이름 표기는 Chronogolf 방식인 `Lastname, Firstname`.
- * Guest 는 이름 대신 "Guest" 를 이탤릭으로 — 아직 신원이 없는 자리라는 뜻이다.
+ * 이름 없는 자리는 격자에서 "Guest" 를 이탤릭으로 — 아직 신원이 없는 자리라는 뜻이다.
+ * type "Guest" 라도 이름이 있으면 이름을 보인다(온라인 예약의 대표자가 그렇다).
  *
  * 이름이 하나도 없으면 "Guest" 다. 예전에는 "Player" 였는데, 이름 없는 자리를
  * 부르는 말이 화면마다 달라졌다 — 서버도(`pelham_tee_name`) 빈 이름을 "Guest" 로
