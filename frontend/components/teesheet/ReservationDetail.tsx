@@ -732,7 +732,9 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
               className="border border-[#8a3f26] bg-[#8a3f26] px-4 py-2 font-bold text-white disabled:opacity-40"
               disabled={busy || cancelReason.trim().length === 0}
               onClick={async () => {
-                await controller.setStatus(booking.id, "cancelled", cancelReason.trim());
+                // 실패(오프라인 거절·응답 없음)면 사유를 그대로 두고 폼을 열어 둔다 — 다시 누를 수 있게.
+                const saved = await controller.setStatus(booking.id, "cancelled", cancelReason.trim());
+                if (!saved) return;
                 setMode("none");
                 setCancelReason("");
               }}
@@ -766,7 +768,7 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
               className="border border-[#8a3f26] bg-[#8a3f26] px-4 py-2 font-bold text-white disabled:opacity-40"
               disabled={busy}
               onClick={async () => {
-                await controller.deleteBooking(booking.id);
+                if (!(await controller.deleteBooking(booking.id))) return;
                 setMode("none");
               }}
               type="button"

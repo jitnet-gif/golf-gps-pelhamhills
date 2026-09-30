@@ -26,7 +26,7 @@ import { GUEST_NAME } from "@/lib/teeSheet/tone";
 const TEE_TICKET = /^([A-Z0-9]{4}-[A-Z0-9]{4})(?:-([A-Z0-9]{4}|ALL))?$/;
 
 export default function TeeSheetPage() {
-  const controller = useTeeSheet();
+  const controller = useTeeSheet({ live: true }); // 5초마다 Supabase 에서 예약을 다시 읽는다
   // 컨트롤러 객체는 useMemo 지만 bookings·busy·toasts 에 딸려 있어 변경 한 번마다
   // 새로 만들어진다. 아래 콜백이 통째로 그 객체에 의존하면 격자(셀 버튼 수백 개)가
   // 그때마다 다시 그려지므로, 쓰는 것만 꺼내 쓴다 — 이 넷은 useCallback 으로 고정이다.

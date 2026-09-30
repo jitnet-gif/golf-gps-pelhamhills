@@ -7,10 +7,16 @@
 //  2. 모든 액션은 내부에서 await 되고 절대 reject 하지 않는다. 실패는 `null` / `false`
 //     + 에러 토스트로 표면화된다. 그래야 호출부가 `void controller.setStatus(...)`를
 //     안전하게 쓸 수 있다.
-//  3. 네트워크 장애(ApiError status 0)는 영구적인 사망 선고가 아니다 — 로컬 사본으로
-//     내려앉았다가 주기적으로 재시도해서 복구한다.
+//  3. 네트워크 장애(ApiError status 0)는 영구적인 사망 선고가 아니다 — 마지막 사본을
+//     **읽기 전용**으로 보여 주다가 주기적으로 재시도해서 복구한다. 오프라인에서는 예약·
+//     취소·수정을 받지 않는다: 예전에는 "로컬에만 저장" 하고 받아 줬는데, 복구하면서
+//     서버 목록으로 덮여 조용히 사라졌다(전화로 받은 취소가 없어지는 식). 게다가 그때
+//     화면의 자료는 스냅샷이나 자리표시자 시드일 수 있다.
 //  4. 낙관적 업데이트는 실패 시 반드시 롤백되고, 늦게 도착한 응답은 최신 상태를
 //     덮어쓰지 못한다(예약별 시퀀스 번호).
+//  5. 온라인이면 5초마다 Supabase 에서 이번 주 예약을 다시 읽는다(다른 기기·손님 예약
+//     반영). 이 폴링은 조용하다 — 바뀐 게 있을 때만 그리고, 오류는 상태가 바뀔 때 한 번만
+//     알린다. 쓰기가 진행 중이거나 폴링 도중 쓰기가 있었으면 그 응답은 버린다(writeEpochRef).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -45,7 +51,12 @@ import type {
 const MAX_PLAYERS_PER_TEE_TIME = 4;
 const MIN_PLAYERS_PER_BOOKING = 1;
 const TOAST_TTL_MS = 5000;
-const RETRY_INTERVAL_MS = 15000;
+// 오프라인이면 쓰기를 막으므로 복구를 오래 기다리게 하지 않는다.
+const RETRY_INTERVAL_MS = 5000;
+/** 온라인일 때 예약을 다시 읽는 간격. */
+const POLL_INTERVAL_MS = 5000;
+/** 폴링이 연달아 이만큼 네트워크 오류를 내면 오프라인으로 본다(한 번 끊겼다고 넘어가지 않는다). */
+const POLL_OFFLINE_AFTER_FAILURES = 2;
 
 // ===== Local id helper =====
 
@@ -347,7 +358,11 @@ function applyStatusLocally(booking: TeeBooking, status: BookingStatus, cancelRe
 
 // ===== The hook =====
 
-export function useTeeSheet(): TeeSheetController {
+/**
+ * `live` — 5초 폴링을 켠다. 티 시트 화면만 켠다: 같은 훅을 쓰는 다른 어드민 화면
+ * (integrations 등)이 뒤에서 예약을 두드리고 "실시간 갱신 실패" 토스트를 띄우면 안 된다.
+ */
+export function useTeeSheet({ live = false }: { live?: boolean } = {}): TeeSheetController {
   // --- state ---
   const [bookings, setBookings] = useState<TeeBooking[]>([]);
   const [slots, setSlots] = useState<TeeSlot[]>([]);
@@ -380,6 +395,23 @@ export function useTeeSheet(): TeeSheetController {
   const toastTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const weekLoadRef = useRef(0);
   const slotLoadRef = useRef(0);
+  /** 진행 중인 서버 쓰기(와 수동 새로고침) 수. busyCount 는 state 라 폴러가 옛 값을 읽는다. */
+  const inflightRef = useRef(0);
+  /**
+   * 쓰기가 **시작하거나 끝날 때마다** 1 씩 오른다. 폴링은 보낼 때 값을 적어 두고, 응답 때
+   * 달라져 있으면 버린다. 끝날 때도 올리는 이유: 폴링이 날아가 있는 동안 시작해서 끝난
+   * 쓰기는 inflight 검사로는 안 보인다 — 그 폴링 응답은 쓰기 전 상태라 취소를 되살리고,
+   * 지운 예약을 다시 띄우고, 방금 만든 예약을 없앤다.
+   */
+  const writeEpochRef = useRef(0);
+  const pollFailuresRef = useRef(0);
+  /** 마지막으로 알린 폴링 오류. 같은 오류를 5초마다 다시 띄우지 않는다. */
+  const pollErrorRef = useRef<string | null>(null);
+  /** 401/403 — 폴링을 멈춘다. 새로고침이나 주 이동으로 다시 읽기에 성공하면 풀린다. */
+  const pollHaltedRef = useRef(false);
+  /** 폴러에게 "지금 한 번 읽어라" 를 부탁한다(결과를 모르는 쓰기 뒤). */
+  const pollNowRef = useRef<() => void>(() => {});
+  const selectedIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -392,6 +424,10 @@ export function useTeeSheet(): TeeSheetController {
   // --- derived dates ---
   const weekStart = useMemo(() => startOfWeek(focusedDate), [focusedDate]);
   const weekDateList = useMemo(() => weekDatesFor(focusedDate), [focusedDate]);
+
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
 
   useEffect(() => {
     focusedDateRef.current = focusedDate;
@@ -445,8 +481,23 @@ export function useTeeSheet(): TeeSheetController {
     setConnection(next);
   }, []);
 
-  const beginBusy = useCallback(() => setBusyCount((count) => count + 1), []);
-  const endBusy = useCallback(() => setBusyCount((count) => Math.max(0, count - 1)), []);
+  const beginBusy = useCallback(() => {
+    inflightRef.current += 1;
+    writeEpochRef.current += 1;
+    setBusyCount((count) => count + 1);
+  }, []);
+  const endBusy = useCallback(() => {
+    inflightRef.current = Math.max(0, inflightRef.current - 1);
+    writeEpochRef.current += 1;
+    setBusyCount((count) => Math.max(0, count - 1));
+  }, []);
+
+  /** 폴링을 정상 상태로 돌린다 — 서버에서 한 주를 제대로 읽었을 때마다 부른다. */
+  const resetPollHealth = useCallback(() => {
+    pollFailuresRef.current = 0;
+    pollErrorRef.current = null;
+    pollHaltedRef.current = false;
+  }, []);
 
   const replaceBooking = useCallback(
     (next: TeeBooking) => {
@@ -523,12 +574,41 @@ export function useTeeSheet(): TeeSheetController {
         reconcileSelection(seed);
         if (slotsRef.current.length === 0) commitSlots(FALLBACK_SLOTS);
       }
-      pushToast("error", `Server unreachable — working offline. ${detail}`);
+      pushToast("error", `Server unreachable — read-only until it reconnects. ${detail}`);
       setMessage(
-        "서버에 연결할 수 없습니다. 로컬 샘플 데이터로 계속 볼 수 있지만, 여기서 수정한 내용은 저장되지 않고 서버 복구 시 사라집니다.",
+        "서버에 연결할 수 없습니다. 마지막으로 받은 사본(없으면 샘플)을 읽기 전용으로 보여 줍니다 — 예약·취소·수정은 연결이 돌아온 뒤에 해 주세요.",
       );
     },
     [commitBookings, commitConnection, commitSlots, pushToast, reconcileSelection],
+  );
+
+  /** 오프라인이면 쓰기를 거절한다(설계 원칙 3). 거절했으면 true. */
+  const refuseWhileOffline = useCallback(
+    (failText: string): boolean => {
+      if (connectionRef.current !== "offline") return false;
+      pushToast("error", "Offline — not saved. Try again when the server is back.");
+      setMessage(`${failText}: 서버에 연결되지 않아 저장하지 않았습니다. 연결이 돌아오면(자동 재시도 중) 다시 해 주세요.`);
+      return true;
+    },
+    [pushToast],
+  );
+
+  /**
+   * 쓰기 요청이 네트워크 오류로 끝났다. 요청이 Supabase 에 **닿았는지 알 수 없다** —
+   * 취소가 이미 저장됐을 수도, 아닐 수도 있다. 그래서 로컬 결과를 꾸며 내지 않고
+   * (그러면 직원이 같은 예약을 다시 만들어 이중 예약이 된다) 곧바로 서버를 다시 읽어
+   * 실제 상태를 보여 준다. 그 읽기도 실패하면 폴러가 오프라인으로 넘긴다.
+   */
+  const noteUnconfirmedWrite = useCallback(
+    (failText: string, detail: string) => {
+      pushToast("error", "No reply from the server — it may have saved. Don't retry until the sheet refreshes (a few seconds).");
+      setMessage(
+        `${failText}: 서버 응답을 받지 못했습니다(${detail}). 저장됐는지 확인하려고 시트를 다시 읽는 중입니다 — 다시 누르기 전에 시트를 확인하세요.`,
+      );
+      pollFailuresRef.current += 1;
+      pollNowRef.current();
+    },
+    [pushToast],
   );
 
   // --- loaders ---
@@ -542,6 +622,7 @@ export function useTeeSheet(): TeeSheetController {
         if (isStale() || !mountedRef.current) return;
         const wasOffline = connectionRef.current === "offline";
         lastGoodRef.current = data;
+        resetPollHealth();
         commitBookings(() => data);
         reconcileSelection(data);
         commitConnection("online");
@@ -561,7 +642,7 @@ export function useTeeSheet(): TeeSheetController {
         setMessage(`예약을 불러오지 못했습니다 — could not load bookings: ${detail}`);
       }
     },
-    [commitBookings, commitConnection, enterOffline, pushToast, reconcileSelection],
+    [commitBookings, commitConnection, enterOffline, pushToast, reconcileSelection, resetPollHealth],
   );
 
   const loadSlots = useCallback(
@@ -622,6 +703,7 @@ export function useTeeSheet(): TeeSheetController {
         if (isNetworkError(error)) return;
       }
       if (!mountedRef.current || connectionRef.current !== "offline") return;
+      pollFailuresRef.current = 0;
       commitConnection("online");
       pushToast("success", "Connection restored — reloading from the server.");
       setMessage("서버 연결이 복구되었습니다 — reloading the tee sheet from the server.");
@@ -641,6 +723,112 @@ export function useTeeSheet(): TeeSheetController {
     };
   }, [commitConnection, pushToast]);
 
+  // 온라인이면 5초마다 이번 주 예약을 Supabase 에서 다시 읽는다.
+  // setInterval 이 아니라 setTimeout 사슬이다 — 응답이 느려도 요청이 겹치지 않는다.
+  useEffect(() => {
+    if (!live) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let running = false;
+    let disposed = false;
+
+    const schedule = (delay: number) => {
+      if (disposed) return;
+      if (timer !== null) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        void tick();
+      }, delay);
+    };
+
+    const tick = async () => {
+      if (disposed || running) return; // 진행 중인 폴링이 끝나면서 다음을 잡는다.
+      // 오프라인 복구는 위 probe 가, "connecting" 은 첫 로드가 맡는다.
+      if (
+        document.hidden ||
+        connectionRef.current !== "online" ||
+        pollHaltedRef.current ||
+        inflightRef.current > 0
+      ) {
+        schedule(POLL_INTERVAL_MS);
+        return;
+      }
+
+      running = true;
+      const anchor = weekStartRef.current;
+      const generation = weekLoadRef.current;
+      const epoch = writeEpochRef.current;
+      try {
+        const data = await teeSheetApi.listBookings({ from: anchor, to: addDays(anchor, 6) });
+        if (disposed || !mountedRef.current) return;
+        const hadError = pollErrorRef.current !== null;
+        pollFailuresRef.current = 0;
+        pollErrorRef.current = null;
+        if (hadError) pushToast("success", "Live updates resumed.");
+
+        // 보낸 뒤에 무슨 일이 있었는지 모르는 응답은 버린다 — 다음 틱이 새로 읽는다.
+        const stale =
+          inflightRef.current > 0 ||
+          writeEpochRef.current !== epoch ||
+          weekLoadRef.current !== generation ||
+          weekStartRef.current !== anchor ||
+          connectionRef.current !== "online";
+        if (stale) return;
+
+        lastGoodRef.current = data;
+        const next = sortBookings(data);
+        if (JSON.stringify(next) === JSON.stringify(bookingsRef.current)) return;
+
+        const openId = selectedIdRef.current;
+        commitBookings(() => next);
+        reconcileSelection(next);
+        if (openId && !next.some((booking) => booking.id === openId)) {
+          pushToast("info", "The reservation you had open was removed on another screen.");
+        }
+      } catch (error) {
+        if (disposed || !mountedRef.current) return;
+        const detail = errorDetail(error);
+        if (isNetworkError(error)) {
+          pollFailuresRef.current += 1;
+          if (pollFailuresRef.current >= POLL_OFFLINE_AFTER_FAILURES) {
+            // 화면에 있는 것이 이미 마지막 서버 사본이다 — 다시 깔지 않는다.
+            enterOffline(detail, false);
+          }
+          return;
+        }
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+          // 세션 만료면 AdminShell 이 로그인 화면으로 바꾼다. 직원이 아니면 계속 두드려 봐야 같다.
+          pollHaltedRef.current = true;
+          pushToast("error", `Live updates stopped — ${detail}`);
+          setMessage(`실시간 갱신을 멈췄습니다 — ${detail}`);
+          return;
+        }
+        // 404(함수 없음)·5xx: 상태가 바뀔 때 한 번만 알리고 조용히 계속 시도한다.
+        if (pollErrorRef.current !== detail) {
+          pollErrorRef.current = detail;
+          pushToast("error", `Live updates paused — ${detail}`);
+          setMessage(`실시간 갱신 실패(계속 재시도 중) — ${detail}`);
+        }
+      } finally {
+        running = false;
+        schedule(POLL_INTERVAL_MS);
+      }
+    };
+
+    const onVisible = () => {
+      if (!document.hidden) schedule(0);
+    };
+
+    pollNowRef.current = () => schedule(0);
+    document.addEventListener("visibilitychange", onVisible);
+    schedule(POLL_INTERVAL_MS);
+    return () => {
+      disposed = true;
+      if (timer !== null) clearTimeout(timer);
+      pollNowRef.current = () => {};
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [live, commitBookings, enterOffline, pushToast, reconcileSelection]);
+
   // --- shared booking mutation runner ---
   const runBookingMutation = useCallback(
     async (params: {
@@ -659,15 +847,11 @@ export function useTeeSheet(): TeeSheetController {
         return null;
       }
 
+      if (refuseWhileOffline(params.failText)) return null;
+
       const seq = nextSeq(params.bookingId);
       const optimistic = touch(params.apply(before));
       replaceBooking(optimistic);
-
-      if (connectionRef.current === "offline") {
-        setMessage(`${params.statusText} (오프라인 로컬 사본 — not saved to the server yet.)`);
-        if (params.successToast) pushToast("info", `${params.successToast} — saved locally only (offline).`);
-        return optimistic;
-      }
 
       beginBusy();
       try {
@@ -682,10 +866,10 @@ export function useTeeSheet(): TeeSheetController {
         if (!mountedRef.current) return null;
         const detail = errorDetail(error);
         if (isNetworkError(error)) {
-          // 연결이 끊긴 것뿐이므로 낙관적 변경을 유지하고 오프라인으로 전환한다.
-          enterOffline(detail, false);
-          setMessage(`${params.statusText} — 로컬에만 적용됨 (server unreachable).`);
-          return isCurrentSeq(params.bookingId, seq) ? optimistic : null;
+          // 저장됐는지 모른다 — 낙관적 결과를 성공처럼 남기지 않고 되돌린 뒤 서버를 다시 읽는다.
+          if (isCurrentSeq(params.bookingId, seq)) replaceBooking(before);
+          noteUnconfirmedWrite(params.failText, detail);
+          return null;
         }
         // 실패는 언제나 표면화한다 — 같은 예약에 더 최신 요청이 있어도 에러를 삼키지 않는다.
         pushToast("error", detail);
@@ -697,7 +881,7 @@ export function useTeeSheet(): TeeSheetController {
         endBusy();
       }
     },
-    [beginBusy, endBusy, enterOffline, isCurrentSeq, nextSeq, pushToast, replaceBooking],
+    [beginBusy, endBusy, isCurrentSeq, nextSeq, noteUnconfirmedWrite, pushToast, refuseWhileOffline, replaceBooking],
   );
 
   // --- booking actions ---
@@ -715,39 +899,7 @@ export function useTeeSheet(): TeeSheetController {
         return null;
       }
 
-      const buildLocal = (): TeeBooking => {
-        const now = new Date().toISOString();
-        const slotRate = slotsRef.current.find((slot) => slot.time === input.time)?.rate;
-        return {
-          id: localId("lb"),
-          date: input.date,
-          time: input.time,
-          holes: input.holes ?? 18,
-          rate: input.rate ?? slotRate ?? FALLBACK_RATE,
-          span: 1,
-          color: input.color ?? "blue",
-          title: input.title || "New reservation",
-          status: "reserved",
-          cartCount: input.cartCount ?? 0,
-          notes: input.notes ?? "",
-          players: requested.map((player) => makePlayer(player as Partial<Player>)),
-          audit: [{ id: localId("la"), ts: now, message: "Created offline (local copy)." }],
-          cancelReason: null,
-          source: "staff",
-          holdExpiresAt: null,
-          createdAt: now,
-          updatedAt: now,
-        };
-      };
-
-      if (connectionRef.current === "offline") {
-        const local = buildLocal();
-        commitBookings((current) => [...current, local]);
-        setSelectedId(local.id);
-        pushToast("info", `Created "${local.title}" locally — offline, not saved to the server.`);
-        setMessage(`오프라인 로컬 예약 생성 — created "${local.title}" at ${local.time} on this device only.`);
-        return local;
-      }
+      if (refuseWhileOffline("예약 생성 실패 — could not create the reservation")) return null;
 
       beginBusy();
       try {
@@ -762,12 +914,9 @@ export function useTeeSheet(): TeeSheetController {
         if (!mountedRef.current) return null;
         const detail = errorDetail(error);
         if (isNetworkError(error)) {
-          enterOffline(detail, false);
-          const local = buildLocal();
-          commitBookings((current) => [...current, local]);
-          setSelectedId(local.id);
-          setMessage(`서버 연결 없음 — created "${local.title}" locally only.`);
-          return local;
+          // 예약이 이미 들어갔을 수 있다. 로컬 사본을 만들면 직원이 다시 눌러 이중 예약이 된다.
+          noteUnconfirmedWrite("예약 생성 — could not confirm the reservation", detail);
+          return null;
         }
         pushToast("error", detail);
         setMessage(`예약 생성 실패 — could not create the reservation: ${detail}`);
@@ -776,7 +925,7 @@ export function useTeeSheet(): TeeSheetController {
         endBusy();
       }
     },
-    [beginBusy, commitBookings, endBusy, enterOffline, pushToast, replaceBooking],
+    [beginBusy, endBusy, noteUnconfirmedWrite, pushToast, refuseWhileOffline, replaceBooking],
   );
 
   const patchBookingWith = useCallback(
@@ -849,14 +998,10 @@ export function useTeeSheet(): TeeSheetController {
         return false;
       }
 
-      const seq = nextSeq(bookingId);
+      if (refuseWhileOffline("예약 삭제 실패 — could not delete the reservation")) return false;
 
-      if (connectionRef.current === "offline") {
-        dropBooking(bookingId);
-        pushToast("info", `Deleted "${before.title}" locally — offline, not saved to the server.`);
-        setMessage(`오프라인 로컬 삭제 — removed "${before.title}" on this device only.`);
-        return true;
-      }
+      // 이 예약에 떠 있던 이전 수정 응답이 삭제 뒤에 도착해도 예약을 되살리지 못하게 한다.
+      nextSeq(bookingId);
 
       beginBusy();
       try {
@@ -871,10 +1016,8 @@ export function useTeeSheet(): TeeSheetController {
         if (!mountedRef.current) return false;
         const detail = errorDetail(error);
         if (isNetworkError(error)) {
-          enterOffline(detail, false);
-          if (isCurrentSeq(bookingId, seq)) dropBooking(bookingId);
-          setMessage(`서버 연결 없음 — removed "${before.title}" locally only.`);
-          return true;
+          noteUnconfirmedWrite("예약 삭제 — could not confirm the delete", detail);
+          return false;
         }
         pushToast("error", detail);
         setMessage(`예약 삭제 실패 — could not delete the reservation: ${detail}`);
@@ -883,7 +1026,7 @@ export function useTeeSheet(): TeeSheetController {
         endBusy();
       }
     },
-    [beginBusy, dropBooking, endBusy, enterOffline, isCurrentSeq, nextSeq, pushToast],
+    [beginBusy, dropBooking, endBusy, nextSeq, noteUnconfirmedWrite, pushToast, refuseWhileOffline],
   );
 
   // --- player actions ---
@@ -991,6 +1134,7 @@ export function useTeeSheet(): TeeSheetController {
       ]);
       if (!mountedRef.current) return;
       lastGoodRef.current = bookingsData;
+      resetPollHealth();
       commitBookings(() => bookingsData);
       reconcileSelection(bookingsData);
       commitSlots(slotsData.slots);
@@ -1017,7 +1161,7 @@ export function useTeeSheet(): TeeSheetController {
     } finally {
       endBusy();
     }
-  }, [beginBusy, commitBookings, commitConnection, commitSlots, endBusy, enterOffline, pushToast, reconcileSelection]);
+  }, [beginBusy, commitBookings, commitConnection, commitSlots, endBusy, enterOffline, pushToast, reconcileSelection, resetPollHealth]);
 
   const setView = useCallback((next: ViewMode) => setViewState(next), []);
   const setFocusedDate = useCallback((isoDate: string) => {
