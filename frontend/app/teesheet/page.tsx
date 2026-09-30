@@ -17,7 +17,9 @@ import ReservationDetail from "../../components/teesheet/ReservationDetail";
 import WeekGrid from "../../components/teesheet/WeekGrid";
 import { useBarcodeScanner } from "../../hooks/useBarcodeScanner";
 import { useTeeSheet } from "../../hooks/useTeeSheet";
-import { useCurrentBill } from "@/lib/pos/currentBill";
+import { billActions, useCurrentBill } from "@/lib/pos/currentBill";
+import { retailApi, toRetailError } from "@/lib/retail/api";
+import { findProductByCode } from "@/lib/retail/findProduct";
 import { formatMoney } from "@/lib/retail/types";
 import { confirmationCode } from "@/lib/teeSheet/receipt";
 import { GUEST_NAME } from "@/lib/teeSheet/tone";
@@ -35,6 +37,8 @@ export default function TeeSheetPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   // 합산 계산서 서랍. 그린피를 담고 여기서 바로 결제하거나, 리테일 화면으로 넘어가 상품을 더 담는다.
   const [billOpen, setBillOpen] = useState(false);
+  // 상품을 스캔해 담았을 때 서랍의 결제 칸으로 스크롤시키는 값(BillPanel 참고).
+  const [revealPayments, setRevealPayments] = useState(0);
   const billState = useCurrentBill();
   // 예전에는 빈 칸이 넘겨주는 날짜·시각을 ref 에 담아 뒀는데, 그 ref 를 렌더 중에
   // 읽는 바람에 react-hooks/refs 가 걸렸다. 지금 시드는 "보고 있는 날짜" 하나뿐이라
@@ -135,11 +139,42 @@ export default function TeeSheetPage() {
    * 확인 코드는 id 의 **뒤 8자**라 되돌릴 수 없다. 그래서 서버에 묻지 않고 지금 읽어 둔 예약
    * (보이는 주) 안에서만 찾는다. 다른 주의 영수증이면 그 주로 가서 다시 쏘라고 알린다.
    */
+  /**
+   * 티 시트 영수증이 아니면 상품 바코드로 본다 — 카운터에서 그린피와 함께 물건을 사는 손님.
+   * 그 상품을 지금 계산서에 담고 결제 서랍을 연다(리테일 계산대와 같다).
+   * 상품 목록은 스캔할 때마다 새로 읽는다. 수십 개라 가볍고, 방금 Products 탭에서 등록한
+   * 상품도 바로 찾는다.
+   */
+  const sellScannedProduct = useCallback(
+    async (raw: string) => {
+      let products;
+      try {
+        products = await retailApi.listProducts({ active: true });
+      } catch (error) {
+        pushToast("error", toRetailError(error).message);
+        return;
+      }
+      const product = findProductByCode(products, raw);
+      if (!product) {
+        pushToast(
+          "error",
+          `"${raw}" is not a tee sheet receipt or a product. Add it on Retail → Products — scan it into the Barcode field.`,
+        );
+        return;
+      }
+      const bill = await billActions.addProduct(product.id, "tee_sheet");
+      // 실패해도 서랍은 연다 — 오류 문구가 서랍 안 BillPanel 에 뜬다.
+      setBillOpen(true);
+      if (bill) setRevealPayments((n) => n + 1);
+    },
+    [pushToast],
+  );
+
   const onScan = useCallback(
     (raw: string) => {
       const match = TEE_TICKET.exec(raw.trim().toUpperCase());
       if (!match) {
-        pushToast("error", `"${raw}" is not a tee sheet receipt.`);
+        void sellScannedProduct(raw);
         return;
       }
       const found = bookings.find((booking) => confirmationCode(booking.id) === match[1]);
@@ -153,7 +188,7 @@ export default function TeeSheetPage() {
       if (found.date !== focusedDate) setFocusedDate(found.date);
       select(found.id);
     },
-    [bookings, focusedDate, pushToast, select, setFocusedDate],
+    [bookings, focusedDate, pushToast, select, sellScannedProduct, setFocusedDate],
   );
   useBarcodeScanner(onScan);
 
@@ -231,8 +266,13 @@ export default function TeeSheetPage() {
         </section>
 
       {billOpen ? (
-        <BillDrawer onClose={() => setBillOpen(false)}>
-          <BillPanel onPaid={() => void controller.refresh()} station="tee_sheet" />
+        <BillDrawer
+          onClose={() => {
+            setBillOpen(false);
+            setRevealPayments(0);
+          }}
+        >
+          <BillPanel onPaid={() => void controller.refresh()} revealPayments={revealPayments} station="tee_sheet" />
         </BillDrawer>
       ) : null}
 

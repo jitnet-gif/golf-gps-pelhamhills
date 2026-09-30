@@ -21,6 +21,7 @@ import { useMemo, useState, type KeyboardEvent } from "react";
 import BillPanel from "@/components/pos/BillPanel";
 import { useBarcodeScanner } from "@/hooks/useBarcodeScanner";
 import type { BillStation } from "@/lib/pos/api";
+import { findProductByCode } from "@/lib/retail/findProduct";
 import { billActions, useCurrentBill } from "@/lib/pos/currentBill";
 import { RETAIL_CATEGORIES, formatMoney, type Product, type RetailCategory } from "@/lib/retail/types";
 
@@ -104,21 +105,9 @@ export default function RegisterTab({
     });
   }
 
-  /**
-   * 스캔 = SKU **정확 일치**(대소문자 무시 — 서버의 SKU 중복 규칙과 같다).
-   * 부분 일치로 담으면 `PH-BALL` 을 쏘았는데 `PH-BALL-PV1` 이 담기는 식의 사고가 난다.
-   * 공산품의 UPC 로 찾으려면 상품의 SKU 칸에 그 UPC 를 등록해 둬야 한다(Products 탭에서 스캔).
-   */
+  /** 스캔 = 바코드 → SKU 정확 일치. 공산품은 Products 탭에서 바코드 칸에 쏘아 등록해 둔다. */
   function findBySku(raw: string): Product | null {
-    const wanted = raw.trim().toLowerCase();
-    const sellable = (item: Product) =>
-      item.is_active && (lockedCategory ? item.category === lockedCategory : true);
-    // 제조사 바코드를 먼저, 없으면 클럽 SKU. 둘 다 정확 일치다.
-    return (
-      products.find((item) => sellable(item) && (item.barcode ?? "").trim().toLowerCase() === wanted) ??
-      products.find((item) => sellable(item) && item.sku.trim().toLowerCase() === wanted) ??
-      null
-    );
+    return findProductByCode(products, raw, lockedCategory);
   }
 
   function handleScan(code: string) {
