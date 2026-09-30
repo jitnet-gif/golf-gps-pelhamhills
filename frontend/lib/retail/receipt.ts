@@ -37,6 +37,18 @@ export const PAYMENT_LABELS: Record<PaymentMethod, string> = {
   gift_card: "Gift card",
 };
 
+/** 계산서를 연 자리(`pelham_bills.station`) 표시 이름. 매출 화면·Reports 가 같이 쓴다. */
+export const STATION_LABELS: Record<string, string> = {
+  pro_shop: "Pro Shop",
+  snack_bar: "Snack Bar",
+  tee_sheet: "Tee Sheet (green fees)",
+  simulator: "Indoor Simulator",
+};
+
+export function stationLabel(station: string | null | undefined): string {
+  return station ? (STATION_LABELS[station] ?? station) : "";
+}
+
 /**
  * 영수증 시각은 클럽 현지 시각이다. 서버 `created_at` 은 UTC 라서, 브라우저 시간대에
  * 맡기면 시간대가 다른 PC 에서 다시 찍은 영수증의 시각이 달라진다.

@@ -12,7 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import retailApi, { localBusinessDate, toRetailError } from "@/lib/retail/api";
 import { printReceipt } from "@/lib/retail/printReceipt";
-import { PAYMENT_LABELS } from "@/lib/retail/receipt";
+import { PAYMENT_LABELS, stationLabel } from "@/lib/retail/receipt";
 import { formatMoney, type RetailDailyReport, type Sale } from "@/lib/retail/types";
 
 import {
@@ -32,14 +32,14 @@ import {
 type Props = {
   demo: boolean;
   /** 데모일 때 보여 줄 예시. 서버가 붙으면 무시된다. */
-  demoSales: Sale[];
-  demoReport: RetailDailyReport;
-  demoDate: string;
+  demoSales?: Sale[];
+  demoReport?: RetailDailyReport;
+  demoDate?: string;
   /** 서버가 아예 없을 때(설정/네트워크). 요청을 시도하지 않는다. */
   offline: boolean;
 };
 
-export default function SalesTab({ demo, demoSales, demoReport, demoDate, offline }: Props) {
+export default function SalesTab({ demo, demoSales = [], demoReport, demoDate = "", offline }: Props) {
   const [date, setDate] = useState(() => (demo ? demoDate : localBusinessDate()));
   const [sales, setSales] = useState<Sale[]>([]);
   const [report, setReport] = useState<RetailDailyReport | null>(null);
@@ -75,7 +75,7 @@ export default function SalesTab({ demo, demoSales, demoReport, demoDate, offlin
   }, [date, offline]);
 
   const shownSales = demo ? demoSales : sales;
-  const shownReport = demo ? demoReport : report;
+  const shownReport = demo ? (demoReport ?? null) : report;
 
   function applyRefund(updated: Sale) {
     setSales((current) => current.map((sale) => (sale.id === updated.id ? updated : sale)));
@@ -146,7 +146,27 @@ export default function SalesTab({ demo, demoSales, demoReport, demoDate, offlin
             />
           </div>
 
-          <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
+          <div className="grid min-w-0 gap-3 lg:grid-cols-2 xl:grid-cols-4">
+            {/* 프로 샵·스낵바·티 시트·실내 베이 계산서가 한 장부라서, 어디서 팔렸는지는
+                계산서를 연 자리(station)로만 나뉜다. 합이 위 Net 과 같다. */}
+            <Panel title="By station">
+              {!shownReport.by_station || shownReport.by_station.length === 0 ? (
+                <EmptyNote>Nothing rung in yet.</EmptyNote>
+              ) : (
+                <ul className="grid gap-1 text-sm">
+                  {shownReport.by_station.map((row) => (
+                    <li className="flex items-baseline justify-between gap-2" key={row.station}>
+                      <span className="min-w-0 truncate">
+                        {stationLabel(row.station)}{" "}
+                        <span className="text-xs text-[#6b7280]">×{row.count}</span>
+                      </span>
+                      <span className="shrink-0 tabular-nums">{formatMoney(row.total)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Panel>
+
             <Panel title="By payment">
               {shownReport.by_payment.length === 0 ? (
                 <EmptyNote>Nothing rung in yet.</EmptyNote>
@@ -233,6 +253,7 @@ export default function SalesTab({ demo, demoSales, demoReport, demoDate, offlin
                       ) : null}
                     </span>
                     <span className="block truncate text-xs text-[#6b7280]">
+                      {sale.station ? `${stationLabel(sale.station)} · ` : ""}
                       {(sale.payment_method ? PAYMENT_LABELS[sale.payment_method] : "No charge")} · {sale.lines.length} line(s)
                       {sale.cashier ? ` · ${sale.cashier}` : ""}
                     </span>

@@ -116,6 +116,8 @@ export type Sale = {
   /** 팁 합계(센트). total 밖이다. */
   tip?: Cents;
   status?: "open" | "paid" | "refunded" | "void";
+  /** 어디서 연 계산서인가(Supabase 계산서에서만). 키는 `STATION_LABELS`. */
+  station?: string;
   /** 판매 담당 직원 이름. 지금은 자유 입력. */
   cashier: string | null;
   note: string | null;

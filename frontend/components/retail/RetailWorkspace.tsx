@@ -17,7 +17,7 @@
  *
  * 프로 샵(`/admin/retail`)과 스낵바(`/admin/snack-bar`)가 이 한 벌을 같이 쓴다. 스낵바는
  * `category` 로 `Food & Beverage` 만 보는 계산대다 — 계산대를 두 개 만들면 결제·영수증·
- * 스캐너 규칙이 따로 늙는다. 매출(Sales) 탭은 아직 분류로 나누지 않아 두 곳의 합계가 섞인다.
+ * 스캐너 규칙이 따로 늙는다. 매출(Sales) 탭은 클럽 전체 장부를 보여 주고, 어디서 팔렸는지는 "By station" 칸이 나눈다.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
