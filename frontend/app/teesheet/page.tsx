@@ -9,12 +9,16 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 
 import AdminShell from "../../components/admin/AdminShell";
+import BillPanel from "../../components/pos/BillPanel";
+import { useOverlayDismiss } from "../../components/retail/ui";
 import BookingDialog, { SEATS_PER_TEE_TIME } from "../../components/teesheet/BookingDialog";
 import DateNav from "../../components/teesheet/DateNav";
 import ReservationDetail from "../../components/teesheet/ReservationDetail";
 import WeekGrid from "../../components/teesheet/WeekGrid";
 import { useBarcodeScanner } from "../../hooks/useBarcodeScanner";
 import { useTeeSheet } from "../../hooks/useTeeSheet";
+import { useCurrentBill } from "@/lib/pos/currentBill";
+import { formatMoney } from "@/lib/retail/types";
 import { confirmationCode } from "@/lib/teeSheet/receipt";
 import { GUEST_NAME } from "@/lib/teeSheet/tone";
 
@@ -29,6 +33,9 @@ export default function TeeSheetPage() {
   const { bookings, createBooking, focusedDate, pushToast, select, setFocusedDate, slots } = controller;
   // 다이얼로그는 이제 **막다른 길을 막는 용도**로만 남는다 (아래 addReservation 참고).
   const [dialogOpen, setDialogOpen] = useState(false);
+  // 합산 계산서 서랍. 그린피를 담고 여기서 바로 결제하거나, 리테일 화면으로 넘어가 상품을 더 담는다.
+  const [billOpen, setBillOpen] = useState(false);
+  const billState = useCurrentBill();
   // 예전에는 빈 칸이 넘겨주는 날짜·시각을 ref 에 담아 뒀는데, 그 ref 를 렌더 중에
   // 읽는 바람에 react-hooks/refs 가 걸렸다. 지금 시드는 "보고 있는 날짜" 하나뿐이라
   // 그냥 계산하면 된다.
@@ -157,6 +164,21 @@ export default function TeeSheetPage() {
       actions={
         // 레퍼런스에서는 파란 Add 버튼이 상단바 오른쪽 끝에 있다. 예전에는 티 시트가
         // 자기 헤더 줄을 하나 더 그려서 거기 달았는데, 그래서 화면 머리가 세 겹이었다.
+        <span className="flex items-center gap-1.5">
+        {billState.missing ? null : (
+          <button
+            className="inline-flex min-h-11 items-center gap-1 border border-[#4533ff] bg-white px-3 text-xs font-bold text-[#4533ff] lg:min-h-0 lg:py-1.5"
+            onClick={() => setBillOpen(true)}
+            title="Open the current bill: green fees, pro shop and snack bar on one payment"
+            type="button"
+          >
+            {billState.bill
+              ? `Bill #${billState.bill.id} · ${formatMoney(billState.bill.total)}`
+              : billState.openBills.length > 0
+                ? `Bills (${billState.openBills.length})`
+                : "Bill"}
+          </button>
+        )}
         <button
           className="inline-flex min-h-11 items-center gap-1 bg-[#4533ff] px-4 text-xs font-bold text-white lg:min-h-0 lg:py-1.5"
           onClick={addReservation}
@@ -167,6 +189,7 @@ export default function TeeSheetPage() {
             &#9662;
           </span>
         </button>
+        </span>
       }
       fill
       title="Tee Sheet"
@@ -207,6 +230,12 @@ export default function TeeSheetPage() {
           </div>
         </section>
 
+      {billOpen ? (
+        <BillDrawer onClose={() => setBillOpen(false)}>
+          <BillPanel onPaid={() => void controller.refresh()} station="tee_sheet" />
+        </BillDrawer>
+      ) : null}
+
       <BookingDialog
         controller={controller}
         initial={dialogSeed}
@@ -214,5 +243,29 @@ export default function TeeSheetPage() {
         open={dialogOpen}
       />
     </AdminShell>
+  );
+}
+
+/** 오른쪽에서 나오는 계산서 서랍. Esc·바깥 누르기로 닫힌다(계산서는 열린 채 DB 에 남는다). */
+function BillDrawer({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
+  useOverlayDismiss(onClose);
+  return (
+    <div className="fixed inset-0 z-40 flex justify-end">
+      <button aria-label="Close bill" className="absolute inset-0 bg-black/40" onClick={onClose} type="button" />
+      <div className="relative flex h-full w-full max-w-[420px] flex-col bg-white">
+        <header className="flex items-center justify-between border-b border-[#d4d4d8] px-3 py-2.5">
+          <h2 className="text-sm font-bold">Bill</h2>
+          <button
+            aria-label="Close bill"
+            className="tap-target -mr-2 flex items-center justify-center text-xl leading-none"
+            onClick={onClose}
+            type="button"
+          >
+            <span aria-hidden>×</span>
+          </button>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto pb-safe">{children}</div>
+      </div>
+    </div>
   );
 }

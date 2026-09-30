@@ -1,25 +1,25 @@
 /**
- * 프로 샵 리테일(POS) 의 **유일한** fetch 래퍼. 다른 곳에 두 번째 래퍼를 만들지 마라.
+ * 프로 샵 리테일(POS) 의 **유일한** 서버 래퍼. 다른 곳에 두 번째 래퍼를 만들지 마라.
  *
- * 주소 해석은 `lib/apiHost.ts` 가 맡는다 — 배포된 사이트에 개발용 localhost 가
- * 굳어 나간 사고가 실제로 있었고, 그걸 한 자리에서 막는 장치다. 여기서
- * `process.env` 를 직접 읽으면 그 장치를 우회하게 된다.
+ * ## 왜 FastAPI 가 아니라 Supabase 함수인가
+ * 리테일 API(`backend/api/routes/retail.py`)는 2026-09-16 Fly.io 체험 종료로 꺼졌다. 클럽은
+ * 2026-09-29 에 리테일·스낵바를 티 시트처럼 Supabase 로 옮기기로 했다. 그래서 여기서는
+ * `supabase/migrations/0005_pos_bills.sql` 의 `pelham_staff_pos_*` / `pelham_staff_bill*` 함수를
+ * 티 시트와 같은 `staffRpc`(직원 로그인 토큰)로 부른다. 판매는 이제 "계산서"다 —
+ * 담기와 결제는 `lib/pos/currentBill.ts` 가 맡고, 이 파일은 상품·매출·리포트를 읽고 쓴다.
  *
- * 티 시트 래퍼(`lib/teeSheet/api.ts`)와 같은 결로 쓰되 두 가지가 다르다.
+ * 화면이 받는 JSON 모양은 예전 FastAPI 와 같다(`types.ts`). 그래서 Products·Sales 탭은
+ * 전송만 바뀌고 그대로 돈다.
  *
- * 1. 티 시트는 "주소가 없다" 와 "네트워크가 끊겼다" 를 둘 다 `status 0` 으로
- *    뭉쳤다. 리테일 화면은 그 둘에 다른 문장을 보여야 해서(설정 문제 vs 연결 문제)
- *    `kind` 로 구분한다.
- * 2. 티 시트는 네트워크 실패 시 `cause.message` 를 그대로 올린다. 런타임에 따라
- *    그 문장 안에 요청 URL 이 들어 있어서 화면에 서버 주소가 새어 나간다.
- *    그래서 네트워크 분기는 **고정 문장**을 쓴다. HTTP 오류의 `detail` 은
- *    서버가 직접 쓴 사람용 문구라 그대로 살린다.
+ * 오류: `ApiError` 를 `RetailApiError` 로 옮긴다. status 0 → network(연결 실패),
+ * 그 밖은 http. 0005 가 아직 안 돌았으면(함수 없음) 그 사실을 문장으로 알린다.
  */
 
-import { apiBaseUrl } from "@/lib/apiHost";
+import { ApiError } from "@/lib/teeSheet/api";
+import { staffRpc } from "@/lib/teeSheet/staffRpc";
+import { MISSING_MIGRATION_MESSAGE, isMissingMigration } from "@/lib/pos/api";
 
 import {
-  RETAIL_ROUTES,
   computeTax,
   type Cents,
   type LowStockItem,
@@ -32,14 +32,10 @@ import {
   type SaleCreate,
 } from "./types";
 
-export { apiBaseUrl };
-
 /**
  * 리테일 서버가 없을 때 화면에 쓰는 문구. `NO_API_MESSAGE` 를 재사용하지 않는 이유:
  * 그쪽은 "전화로 예약하세요" 라는 **고객용** 문장이다. 계산대 앞의 직원에게
  * 클럽 전화번호를 안내해 봐야 아무 소용이 없다.
- *
- * 주소는 넣지 않는다 — `lib/apiHost.ts` 의 docstring 참고.
  */
 export const NO_RETAIL_API_MESSAGE = "리테일 서버에 연결할 수 없습니다.";
 
@@ -67,110 +63,73 @@ export class RetailApiError extends Error {
 /** 알 수 없는 throw 값을 화면이 다룰 수 있는 형태로. */
 export function toRetailError(cause: unknown): RetailApiError {
   if (cause instanceof RetailApiError) return cause;
+  if (isMissingMigration(cause)) return new RetailApiError("http", 404, MISSING_MIGRATION_MESSAGE);
+  if (cause instanceof ApiError) {
+    return cause.status === 0
+      ? new RetailApiError("network", 0, NO_RETAIL_API_MESSAGE)
+      : new RetailApiError("http", cause.status, cause.message);
+  }
   return new RetailApiError("network", 0, NO_RETAIL_API_MESSAGE);
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const base = apiBaseUrl();
-  // 주소가 없으면 요청을 흉내내지 않는다. 없는 주소로 fetch 하면 콘솔에
-  // 빨간 오류만 남고 사용자에게는 아무 설명도 가지 않는다.
-  if (!base) {
-    throw new RetailApiError("unconfigured", 0, NO_RETAIL_API_MESSAGE);
-  }
-
-  let response: Response;
+async function call<T>(fn: string, args: Record<string, unknown> = {}): Promise<T> {
   try {
-    response = await fetch(`${base}${path}`, {
-      ...init,
-      headers: { "Content-Type": "application/json", ...init?.headers },
-    });
-  } catch {
-    // 여기서 잡히는 것은 대부분 fetch 의 TypeError(연결 실패/CORS) 다.
-    // `cause.message` 를 올리지 않는다 — 런타임에 따라 요청 URL 이 문장 안에
-    // 들어 있고, 그러면 화면에 서버 주소가 그대로 찍힌다.
-    throw new RetailApiError("network", 0, NO_RETAIL_API_MESSAGE);
+    return await staffRpc<T>(fn, args);
+  } catch (cause) {
+    throw toRetailError(cause);
   }
-
-  if (!response.ok) {
-    let detail = `${response.status} ${response.statusText}`.trim();
-    try {
-      const body: unknown = await response.json();
-      if (body && typeof body === "object" && "detail" in body) {
-        const value = (body as { detail: unknown }).detail;
-        detail = typeof value === "string" ? value : JSON.stringify(value);
-      }
-    } catch {
-      // JSON 이 아닌 오류 본문. 상태 줄을 그대로 쓴다.
-    }
-    throw new RetailApiError("http", response.status, detail);
-  }
-
-  if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
 }
 
-function query(params: Record<string, string | number | undefined>): string {
-  const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== "") search.set(key, String(value));
-  }
-  const serialized = search.toString();
-  return serialized ? `?${serialized}` : "";
+/** 매장 현지 날짜 `YYYY-MM-DD`. `toISOString()` 은 UTC 라 저녁에 하루가 밀린다. */
+export function localBusinessDate(date: Date = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 export const retailApi = {
   // ===== 상품 =====
   /**
-   * 필터를 주지 않으면 서버는 **비활성 상품까지 포함해** 돌려준다(재활성화용).
-   * 판매 화면은 반드시 `active: true` 를 줘야 한다 — 이미 안 파는 물건을
-   * 격자에서 눌러 찍는 사고가 난다.
-   *
-   * 파라미터 이름은 서버(`backend/api/routes/retail.py`)와 글자 그대로 맞춘다.
-   * 틀려도 타입 검사도 빌드도 잡아 주지 않고, 런타임에 "필터가 없는 것처럼
-   * 전부 나온다" 로만 조용히 나타난다.
+   * 필터를 주지 않으면 **비활성 상품까지 포함해** 돌려준다(재활성화용).
+   * 분류·검색 필터는 여기서 거른다 — 상품은 수십 개라 서버에서 나눌 이유가 없다.
    */
-  listProducts: (filters?: { category?: string; q?: string; active?: boolean }) =>
-    request<Product[]>(
-      `${RETAIL_ROUTES.products}${query({
-        category: filters?.category,
-        q: filters?.q,
-        active: filters?.active === undefined ? undefined : String(filters.active),
-      })}`,
-    ),
+  listProducts: async (filters?: { category?: string; q?: string; active?: boolean }) => {
+    const list = await call<Product[]>("pelham_staff_pos_products", {
+      p_active: filters?.active === undefined ? null : filters.active,
+    });
+    const needle = filters?.q?.trim().toLowerCase();
+    return list
+      .filter((item) => (filters?.category ? item.category === filters.category : true))
+      .filter((item) =>
+        needle ? item.name.toLowerCase().includes(needle) || item.sku.toLowerCase().includes(needle) : true,
+      );
+  },
 
-  createProduct: (input: ProductCreate) =>
-    request<Product>(RETAIL_ROUTES.products, { method: "POST", body: JSON.stringify(input) }),
+  createProduct: (input: ProductCreate) => call<Product>("pelham_staff_pos_product_create", { p: input }),
 
   updateProduct: (id: number, patch: ProductUpdate) =>
-    request<Product>(RETAIL_ROUTES.product(id), { method: "PATCH", body: JSON.stringify(patch) }),
+    call<Product>("pelham_staff_pos_product_update", { p_id: id, p: patch }),
+
+  /** 지우지 않고 `is_active = false`. 지난 계산서가 이 상품을 가리키기 때문이다. */
+  deactivateProduct: (id: number) => call<Product>("pelham_staff_pos_product_deactivate", { p_id: id }),
+
+  // ===== 매출 (= 결제된·환불된 계산서) =====
+  listSales: (businessDate?: string) =>
+    call<Sale[]>("pelham_staff_bills", { p_date: businessDate || localBusinessDate() }),
+
+  getSale: (id: number) => call<Sale>("pelham_staff_bill", { p_id: id }),
 
   /**
-   * 서버는 소프트 삭제한다(`is_active = false`). 과거 매출이 상품을 참조하므로
-   * 진짜로 지울 수 없기 때문이다 — 화면에서도 "Deactivate" 라고 부른다.
-   * 204 를 돌려줄지 갱신된 상품을 돌려줄지 계약에 없어서 둘 다 받아들인다.
+   * 카드·체크카드 환불은 **Chase 단말기에서 먼저** 한다. 이 호출은 그 뒤에 장부를 맞춘다:
+   * 계산서를 refunded 로, 재고를 되돌리고, 그린피를 미결제로.
    */
-  deactivateProduct: (id: number) =>
-    request<Product | void>(RETAIL_ROUTES.product(id), { method: "DELETE" }),
-
-  // ===== 판매 =====
-  listSales: (businessDate?: string) =>
-    request<Sale[]>(`${RETAIL_ROUTES.sales}${query({ business_date: businessDate })}`),
-
-  getSale: (id: number) => request<Sale>(RETAIL_ROUTES.sale(id)),
-
-  createSale: (input: SaleCreate) =>
-    request<Sale>(RETAIL_ROUTES.sales, { method: "POST", body: JSON.stringify(input) }),
-
   refundSale: (id: number, body: RefundRequest) =>
-    request<Sale>(RETAIL_ROUTES.refund(id), { method: "POST", body: JSON.stringify(body) }),
+    call<Sale>("pelham_staff_bill_refund", { p_bill: id, p_reason: body.reason }),
 
   // ===== 리포트 =====
   getDailyReport: (businessDate: string) =>
-    request<RetailDailyReport>(
-      `${RETAIL_ROUTES.dailyReport}${query({ business_date: businessDate })}`,
-    ),
+    call<RetailDailyReport>("pelham_staff_pos_report_daily", { p_date: businessDate }),
 
-  listLowStock: () => request<LowStockItem[]>(RETAIL_ROUTES.lowStock),
+  listLowStock: () => call<LowStockItem[]>("pelham_staff_pos_low_stock"),
 };
 
 export default retailApi;
@@ -265,10 +224,4 @@ export function toSaleCreate(
     note: fields.note?.trim() || null,
     ...(fields.businessDate ? { business_date: fields.businessDate } : {}),
   };
-}
-
-/** 매장 현지 날짜 `YYYY-MM-DD`. `toISOString()` 은 UTC 라 저녁에 하루가 밀린다. */
-export function localBusinessDate(date: Date = new Date()): string {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }

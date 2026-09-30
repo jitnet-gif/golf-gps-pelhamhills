@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { billActions, getBillState, useCurrentBill } from "@/lib/pos/currentBill";
 import { printReceiptDoc, receiptSheetHtml } from "@/lib/retail/printReceipt";
 import { computeTax, formatMoney } from "@/lib/retail/types";
 import { longDate, money } from "@/lib/teeSheet/dates";
@@ -174,6 +175,8 @@ function Glyph({ name, className = "h-3.5 w-3.5" }: { name: keyof typeof GLYPH_P
 // ===== component =====
 
 export default function ReservationDetail({ controller }: ReservationDetailProps) {
+  // 합산 계산서(0005). 훅이라 아래 이른 return 보다 위에 둔다.
+  const billState = useCurrentBill();
   const booking = controller.selected;
   const bookingId = booking?.id ?? null;
 
@@ -484,6 +487,31 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
     setPreview({ playerIds: people.map((person) => person.id), reprint, at: new Date().toISOString() });
   };
 
+  /**
+   * 합산 계산서(0005)가 켜져 있으면 Payment 는 **계산서에 담기**다. 돈은 계산서 결제(카드면
+   * Chase 단말기 승인번호)에서만 받는다 — 여기서 paid 를 직접 켜지 않는다(2026-09-10 결정).
+   * 0005 가 아직 안 돌았으면(`missing`) 예전 영수증 결제 흐름으로 남는다. 그래야 마이그레이션
+   * 전에 배포돼도 그린피를 받을 길이 끊기지 않는다.
+   */
+  const useBills = !billState.missing;
+  const billOf = (playerId: string) =>
+    billState.openBills.find((item) =>
+      item.lines.some((line) => line.booking_id === booking.id && line.player_id === playerId),
+    ) ?? null;
+  const addToBill = async (people: Player[] | null) => {
+    setReceiptNote(null);
+    // 저장 안 된 편집(카트 요금 등)을 먼저 보낸다. 계산서는 서버의 예약 값으로 금액을 매긴다.
+    for (const person of people ?? unpaidPlayers) await feeCommitsRef.current.get(person.id);
+    if (dirty) await saveAll();
+    const added = await billActions.addTee(booking.id, people?.map((person) => person.id));
+    if (added) {
+      controller.pushToast("success", `Added to bill #${added.id} — ${formatMoney(added.total)} so far. Charge it from the Bill button.`);
+    } else {
+      controller.pushToast("error", getBillState().error || "Could not add to the bill.");
+    }
+  };
+  const unbilledUnpaid = unpaidPlayers.filter((player) => !billOf(player.id));
+
   /** 재인쇄: 서버 상태는 건드리지 않는다. */
   const reprintReceipt = (people: Player[]) => {
     setPreview(null);
@@ -621,15 +649,27 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
         {/* 일행 전체 결제. 카드의 Payment 는 한 사람, 이 버튼은 아직 안 낸 사람 전부를 한 장에 담는다.
             금액은 세금까지 더한 **실제 청구액**이다 — 카드의 Subtotal Due(세전)와 다른 숫자라
             버튼에 금액을 직접 적어 둔다. */}
-        <button
-          className="border border-[#4533ff] bg-white px-3 py-1.5 font-bold text-[#4533ff] hover:bg-[#f0eeff] disabled:cursor-not-allowed disabled:border-[#c7c7cc] disabled:bg-white disabled:text-[#b6b6c0]"
-          disabled={busy || unpaidPlayers.length === 0}
-          onClick={() => openReceipt(unpaidPlayers, false)}
-          title="Take payment for everyone who has not paid yet — one receipt for the group"
-          type="button"
-        >
-          Pay all ({unpaidPlayers.length}) {formatMoney(unpaidTotal)}
-        </button>
+        {useBills ? (
+          <button
+            className="border border-[#4533ff] bg-white px-3 py-1.5 font-bold text-[#4533ff] hover:bg-[#f0eeff] disabled:cursor-not-allowed disabled:border-[#c7c7cc] disabled:bg-white disabled:text-[#b6b6c0]"
+            disabled={busy || billState.busy || unbilledUnpaid.length === 0}
+            onClick={() => void addToBill(null)}
+            title="Put everyone who has not paid yet on the current bill. Pro shop and snack bar items can go on the same bill."
+            type="button"
+          >
+            Add all to bill ({unbilledUnpaid.length})
+          </button>
+        ) : (
+          <button
+            className="border border-[#4533ff] bg-white px-3 py-1.5 font-bold text-[#4533ff] hover:bg-[#f0eeff] disabled:cursor-not-allowed disabled:border-[#c7c7cc] disabled:bg-white disabled:text-[#b6b6c0]"
+            disabled={busy || unpaidPlayers.length === 0}
+            onClick={() => openReceipt(unpaidPlayers, false)}
+            title="Take payment for everyone who has not paid yet — one receipt for the group"
+            type="button"
+          >
+            Pay all ({unpaidPlayers.length}) {formatMoney(unpaidTotal)}
+          </button>
+        )}
 
         <span
           aria-live="polite"
@@ -1019,12 +1059,32 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
                     className={`flex items-center justify-center gap-1 px-1 py-1 font-bold text-white disabled:opacity-40 ${
                       player.paid ? "bg-[#4533ff]" : "bg-[#b1a8ff]"
                     }`}
-                    disabled={busy || player.cancelled}
-                    onClick={() => openReceipt([player], player.paid)}
-                    title={player.paid ? "Paid — show the receipt to print again" : "Show the receipt, then take payment"}
+                    disabled={
+                      busy ||
+                      player.cancelled ||
+                      (useBills && !player.paid && (billState.busy || Boolean(billOf(player.id))))
+                    }
+                    onClick={() =>
+                      player.paid || !useBills ? openReceipt([player], player.paid) : void addToBill([player])
+                    }
+                    title={
+                      player.paid
+                        ? "Paid — show the receipt to print again"
+                        : useBills
+                          ? billOf(player.id)
+                            ? `Already on bill #${billOf(player.id)?.id}`
+                            : "Put this player's green fee on the current bill"
+                          : "Show the receipt, then take payment"
+                    }
                     type="button"
                   >
-                    Payment
+                    {player.paid
+                      ? "Payment"
+                      : useBills
+                        ? billOf(player.id)
+                          ? `On bill #${billOf(player.id)?.id}`
+                          : "Add to bill"
+                        : "Payment"}
                     <Glyph className="h-3 w-3" name="card" />
                   </button>
                 </div>

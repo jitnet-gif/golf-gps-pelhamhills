@@ -19,8 +19,9 @@
  *
  * 실물 영수증에 있지만 **일부러 넣지 않은 것**:
  * - `Fee total` — Lightspeed 의 예약 수수료다. 우리에게는 그런 요금이 없어 늘 $0.00 이 된다.
- * - `TRANSACTION DETAILS`(카드 끝자리·승인코드·AID·암호문) — Chase 단말이 승인 결과를 돌려주기
- *   전에는 채울 값이 없다. 지어낸 승인 정보가 찍힌 영수증은 거짓 금융 기록이다.
+ * - `TRANSACTION DETAILS`(AID·암호문 등) — Chase 단말이 앱과 연동되기 전에는 채울 값이 없다.
+ *   지어낸 승인 정보가 찍힌 영수증은 거짓 금융 기록이다. 지금 찍는 것은 직원이 단말기 전표에서
+ *   옮겨 적은 승인번호·끝 4자리뿐이고, "keyed" 로 표시한다.
  */
 
 import { code128Svg } from "./barcode";
@@ -31,6 +32,7 @@ import { TAX_RATE, formatMoney, type Cents, type PaymentMethod, type Sale } from
 export const PAYMENT_LABELS: Record<PaymentMethod, string> = {
   cash: "Cash",
   card: "Card",
+  debit: "Debit (Interac)",
   member_account: "Member account",
   gift_card: "Gift card",
 };
@@ -87,12 +89,34 @@ export type ReceiptDoc = {
   discount: Cents;
   tax: Cents;
   total: Cents;
-  /** PAYMENTS 아래 줄의 이름(결제 수단). */
+  /** PAYMENTS 아래 줄의 이름(결제 수단). `payments` 가 있으면 그쪽을 찍는다. */
   paymentLabel: string;
+  /**
+   * 결제 한 줄씩(분할 결제). 카드·체크카드는 Chase 단말기가 준 승인번호가 붙는다 — 단말기가
+   * 실제로 찍어 준 값이라 영수증에 옮겨도 된다. 지어낸 승인 정보는 절대 넣지 않는다.
+   */
+  payments?: ReceiptPayment[];
+  /** 팁 합계. Total 밖이다. */
+  tip?: Cents;
   note: string | null;
   refundedAt: string | null;
   refundReason: string | null;
 };
+
+export type ReceiptPayment = {
+  label: string;
+  amount: Cents;
+  /** "Approval 083412 · ****4242 · keyed on Chase DX8000" 같은 한 줄. 없으면 null. */
+  detail: string | null;
+};
+
+function paymentDetail(payment: NonNullable<Sale["payments"]>[number]): string | null {
+  if (!payment.auth_code) return null;
+  const parts = [`Approval ${payment.auth_code}`];
+  if (payment.card_last4) parts.push(`****${payment.card_last4}`);
+  if (payment.entry === "keyed") parts.push(`keyed on ${payment.terminal ?? "Chase terminal"}`);
+  return parts.join(" · ");
+}
 
 /**
  * 리테일 판매 → 영수증 내용. 날짜는 `business_date` 다 — 마감 리포트가 묶는 날짜와 영수증
@@ -107,7 +131,8 @@ export function saleReceipt(sale: Sale): ReceiptDoc {
     lines: sale.lines.map((line) => {
       // 실물 영수증의 품목 아래 줄("Guest ... - Tee Time: ...")처럼 " - " 로 잇는다.
       // Price 칸은 줄 합계(line_total) 그대로다 — 할인은 설명으로만 적어서 칸의 합이 Subtotal 과 맞는다.
-      const detail = [line.sku];
+      // 그린피 줄은 SKU 가 없다(`TEE`). 이름에 이미 시각과 사람이 들어 있다.
+      const detail = line.kind === "tee_player" ? [`Tee time ${line.tee_date ?? ""}`.trim()] : [line.sku];
       if (line.quantity > 1) detail.push(`${line.quantity} @ ${formatMoney(line.unit_price)}`);
       if (line.discount > 0) detail.push(`Discount ${formatMoney(line.discount)}`);
       return { name: line.name, detail: detail.join(" - "), quantity: line.quantity, amount: line.line_total };
@@ -116,7 +141,14 @@ export function saleReceipt(sale: Sale): ReceiptDoc {
     discount: sale.discount,
     tax: sale.tax,
     total: sale.total,
-    paymentLabel: PAYMENT_LABELS[sale.payment_method] ?? sale.payment_method,
+    // 결제 줄이 없는 계산서(전액 할인)는 payment_method 가 null 이다.
+    paymentLabel: sale.payment_method ? (PAYMENT_LABELS[sale.payment_method] ?? sale.payment_method) : "No charge",
+    payments: sale.payments?.map((payment) => ({
+      label: PAYMENT_LABELS[payment.method] ?? payment.method,
+      amount: payment.amount,
+      detail: paymentDetail(payment),
+    })),
+    tip: sale.tip,
     note: sale.note,
     refundedAt: sale.refunded_at,
     refundReason: sale.refund_reason,
@@ -205,7 +237,15 @@ export function receiptDocBlocks(doc: ReceiptDoc, options: ReceiptOptions): Rece
   blocks.push({ kind: "total", label: "Total", amount: formatMoney(doc.total), bold: true });
 
   blocks.push({ kind: "section", title: "PAYMENTS" });
-  blocks.push({ kind: "total", label: doc.paymentLabel, amount: formatMoney(doc.total) });
+  if (doc.payments && doc.payments.length > 0) {
+    for (const payment of doc.payments) {
+      blocks.push({ kind: "total", label: payment.label, amount: formatMoney(payment.amount) });
+      if (payment.detail) blocks.push({ kind: "text", text: payment.detail, align: "left" });
+    }
+  } else {
+    blocks.push({ kind: "total", label: doc.paymentLabel, amount: formatMoney(doc.total) });
+  }
+  if (doc.tip && doc.tip > 0) blocks.push({ kind: "total", label: "Tip", amount: formatMoney(doc.tip) });
   if (doc.note) blocks.push({ kind: "text", text: `Note: ${doc.note}`, align: "left" });
 
   if (doc.refundedAt) {

@@ -25,7 +25,8 @@ export const RETAIL_CATEGORIES = [
 
 export type RetailCategory = (typeof RETAIL_CATEGORIES)[number];
 
-export const PAYMENT_METHODS = ["cash", "card", "member_account", "gift_card"] as const;
+// `debit` = Interac 체크카드. 카드처럼 Chase 단말기 승인번호가 있어야 기록된다.
+export const PAYMENT_METHODS = ["cash", "card", "debit", "member_account", "gift_card"] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 // ===== 상품 =============================================================
@@ -71,7 +72,15 @@ export type ProductUpdate = Partial<ProductCreate>;
  * 저장하면 나중에 가격을 올렸을 때 지난달 영수증 금액까지 같이 바뀐다.
  */
 export type SaleLine = {
-  product_id: number;
+  /** 계산서 줄 id. Supabase 계산서(0005)에서만 온다. */
+  id?: number;
+  /** product = 상품, tee_player = 티 시트 플레이어의 그린피. 없으면 product. */
+  kind?: "product" | "tee_player";
+  /** 그린피 줄은 null. */
+  product_id: number | null;
+  /** 그린피 줄만: 티 타임 날짜(YYYY-MM-DD)와 시각 라벨. */
+  tee_date?: string | null;
+  tee_time?: string | null;
   sku: string;
   name: string;
   quantity: number;
@@ -96,7 +105,13 @@ export type Sale = {
   /** 온타리오 HST 13%. 서버가 계산한다. */
   tax: Cents;
   total: Cents;
-  payment_method: PaymentMethod;
+  /** 결제 줄이 없는 계산서(전액 할인)는 null. */
+  payment_method: PaymentMethod | null;
+  /** 결제 한 줄 한 줄(분할 결제). Supabase 계산서(0005)에서만 온다. */
+  payments?: SalePayment[];
+  /** 팁 합계(센트). total 밖이다. */
+  tip?: Cents;
+  status?: "open" | "paid" | "refunded" | "void";
   /** 판매 담당 직원 이름. 지금은 자유 입력. */
   cashier: string | null;
   note: string | null;
@@ -104,6 +119,20 @@ export type Sale = {
   refunded_at: string | null;
   refund_reason: string | null;
   created_at: string;
+};
+
+/**
+ * 결제 한 줄. 카드·체크카드는 Chase 단말기(DX8000)가 찍어 준 승인번호가 있다.
+ * `entry: "keyed"` = 직원이 단말기에 금액을 직접 쳤다(아직 앱과 연동 전).
+ */
+export type SalePayment = {
+  method: PaymentMethod;
+  amount: Cents;
+  tip: Cents;
+  entry: "keyed" | "integrated" | "none";
+  auth_code: string | null;
+  card_last4: string | null;
+  terminal: string | null;
 };
 
 /** 계산 입력. 금액 계산과 재고 차감은 전부 서버가 한다. */
@@ -133,7 +162,11 @@ export type RetailDailyReport = {
   refunded_count: number;
   refunded_total: Cents;
   by_payment: Array<{ method: PaymentMethod; count: number; total: Cents }>;
-  by_category: Array<{ category: RetailCategory; quantity: number; total: Cents }>;
+  /** 합산 계산서라 그린피가 'Green Fees' 로 함께 잡힌다. */
+  by_category: Array<{ category: RetailCategory | "Green Fees"; quantity: number; total: Cents }>;
+  /** 어디서 연 계산서인가(Supabase 계산서에서만). */
+  by_station?: Array<{ station: string; count: number; total: Cents }>;
+  tips?: Cents;
   top_products: Array<{ product_id: number; name: string; quantity: number; total: Cents }>;
 };
 

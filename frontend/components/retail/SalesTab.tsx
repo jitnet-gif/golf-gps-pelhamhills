@@ -233,7 +233,7 @@ export default function SalesTab({ demo, demoSales, demoReport, demoDate, offlin
                       ) : null}
                     </span>
                     <span className="block truncate text-xs text-[#6b7280]">
-                      {PAYMENT_LABELS[sale.payment_method]} · {sale.lines.length} line(s)
+                      {(sale.payment_method ? PAYMENT_LABELS[sale.payment_method] : "No charge")} · {sale.lines.length} line(s)
                       {sale.cashier ? ` · ${sale.cashier}` : ""}
                     </span>
                   </span>
@@ -312,7 +312,9 @@ function SaleDetail({
             {sale.business_date} · {created}
           </p>
           <p className="text-xs text-[#6b7280]">
-            {PAYMENT_LABELS[sale.payment_method]}
+            {sale.payments && sale.payments.length > 1
+              ? sale.payments.map((payment) => PAYMENT_LABELS[payment.method]).join(" + ")
+              : (sale.payment_method ? PAYMENT_LABELS[sale.payment_method] : "No charge")}
             {sale.cashier ? ` · ${sale.cashier}` : ""}
           </p>
         </div>
@@ -325,8 +327,8 @@ function SaleDetail({
         ) : null}
 
         <ul className="grid gap-1 border-y border-[#d4d4d8] py-2 text-sm">
-          {sale.lines.map((line) => (
-            <li key={`${line.product_id}-${line.sku}`}>
+          {sale.lines.map((line, index) => (
+            <li key={line.id ?? `${line.product_id}-${line.sku}-${index}`}>
               <div className="flex items-baseline justify-between gap-2">
                 <span className="min-w-0 truncate">
                   {line.quantity}× {line.name}
@@ -334,7 +336,8 @@ function SaleDetail({
                 <span className="shrink-0 tabular-nums">{formatMoney(line.line_total)}</span>
               </div>
               <p className="text-[11px] text-[#6b7280]">
-                {line.sku} · {formatMoney(line.unit_price)} each
+                {line.kind === "tee_player" ? `Green fee · tee time ${line.tee_date ?? ""}` : line.sku} ·{" "}
+                {formatMoney(line.unit_price)} each
                 {line.discount > 0 ? ` · −${formatMoney(line.discount)}` : ""}
               </p>
             </li>
@@ -353,6 +356,26 @@ function SaleDetail({
           </div>
         </dl>
 
+        {sale.payments && sale.payments.length > 0 ? (
+          <ul className="grid gap-1 text-sm">
+            {sale.payments.map((payment, index) => (
+              <li className="flex items-baseline justify-between gap-2" key={index}>
+                <span className="min-w-0">
+                  {PAYMENT_LABELS[payment.method]}
+                  {payment.auth_code ? (
+                    <span className="text-[11px] text-[#6b7280]">
+                      {" "}
+                      · Approval {payment.auth_code}
+                      {payment.card_last4 ? ` · ****${payment.card_last4}` : ""}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="shrink-0 tabular-nums">{formatMoney(payment.amount)}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+
         {sale.note ? <p className="text-xs text-[#6b7280]">{sale.note}</p> : null}
 
         {/* 다시 찍은 종이에는 REPRINT 가 찍힌다. 원본과 사본을 들고 두 번 환불받으러
@@ -365,6 +388,12 @@ function SaleDetail({
 
         {sale.refunded_at ? null : confirming ? (
           <div className="grid gap-2 border border-[#e2a5a5] p-2">
+            {sale.payments?.some((payment) => payment.method === "card" || payment.method === "debit") ? (
+              <p className="bg-[#fff8e1] px-2 py-2 text-xs text-[#5b4708]">
+                Refund the card or debit part on the Chase DX8000 first. This button only fixes the books: it puts
+                stock back and marks any green fees on this bill unpaid again.
+              </p>
+            ) : null}
             <Field hint="Required — it goes on the day's reconciliation" label="Refund reason">
               <TextArea
                 onChange={(event) => setReason(event.target.value)}
