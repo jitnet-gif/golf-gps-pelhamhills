@@ -94,7 +94,7 @@ as $$
                 case when p_minutes >= 12 * 60 then 'PM' else 'AM' end)
 $$;
 
--- 베이 줄의 이름. 영수증에 그대로 찍힌다: "Simulator Bay 2 — Hansoi Lee (3:00 PM, 1h)".
+-- 베이 줄의 이름. 영수증에 그대로 찍힌다: "Simulator Bay 2 — Golfer 1 (3:00 PM, 1h)".
 create or replace function public.pelham_pos_sim_line_name(r public.pelham_sim_reservations)
 returns text
 language sql
