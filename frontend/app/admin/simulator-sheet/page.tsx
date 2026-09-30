@@ -2,7 +2,9 @@
 
 // Indoor Golf Simulator — Bay Sheet (GolfOClock 방식 관리자 화면)
 // 가로축 = 베이, 세로축 = 15분 슬롯. 빈 칸 클릭 → 새 예약, 블록 드래그 → 베이/시간 이동.
-// FastAPI(/api/v1/simulator/*)가 꺼져 있으면 로컬 샘플 모드로 동작한다.
+// 2026-09-30: 꺼진 FastAPI 대신 Supabase 직원 함수(`lib/simulator/api.ts`, 마이그레이션 0007)를
+// 부른다. 손님이 `/book/indoor` 에서 잡은 예약도 같은 표라 여기 그대로 보인다.
+// 예전 "local sample mode"(가짜 예약)는 없앴다 — 직원이 가짜를 진짜로 읽으면 겹쳐 받는다.
 
 import {
   PointerEvent as ReactPointerEvent,
@@ -16,43 +18,21 @@ import Link from "next/link";
 
 import AdminShell from "@/components/admin/AdminShell";
 import { BOOK_INDOOR } from "@/lib/nav";
-
-type Bay = {
-  id: number;
-  bay_number: number;
-  bay_type: string;
-  hourly_rate: number;
-  is_active: boolean;
-};
-
-type ResStatus = "confirmed" | "checked_in" | "paid" | "no_show" | "cancelled";
-type ResSource = "online" | "phone" | "walk_in" | "voice_ai";
-
-type Reservation = {
-  id: number | string;
-  confirmation_code: string;
-  bay_id: number;
-  date: string; // YYYY-MM-DD
-  start_time: string; // HH:MM
-  duration_hours: number;
-  player_count: number;
-  customer_name: string;
-  customer_email: string;
-  phone: string;
-  notes: string;
-  status: ResStatus;
-  source: ResSource;
-};
-
-type BayState = "open" | "cleaning" | "maintenance";
+import { ApiError } from "@/lib/teeSheet/api";
+import {
+  describeSimError,
+  simApi,
+  type BayStatus,
+  type SimBay as Bay,
+  type SimReservation as Reservation,
+  type SimSource as ResSource,
+  type SimStatus as ResStatus,
+} from "@/lib/simulator/api";
 
 type Draft = Omit<Reservation, "id" | "confirmation_code"> & {
   id?: Reservation["id"];
   confirmation_code?: string;
 };
-
-const apiBaseUrl =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
 
 // backend/api/routes/simulator.py 와 동일한 운영 규칙
 const OPEN_HOUR = 14;
@@ -62,38 +42,6 @@ const CLOSED_WEEKDAYS = [1, 2]; // JS: 0=Sun, 1=Mon, 2=Tue
 const HST = 0.13;
 const ROW_H = 22; // px per 15-min slot
 const SLOTS = ((CLOSE_HOUR - OPEN_HOUR) * 60) / SLOT_MIN;
-
-const SAMPLE_BAYS: Bay[] = [
-  {
-    id: 1,
-    bay_number: 1,
-    bay_type: "right_handed",
-    hourly_rate: 20,
-    is_active: true,
-  },
-  {
-    id: 2,
-    bay_number: 2,
-    bay_type: "right_handed",
-    hourly_rate: 20,
-    is_active: true,
-  },
-  {
-    id: 3,
-    bay_number: 3,
-    bay_type: "right_handed",
-    hourly_rate: 20,
-    is_active: true,
-  },
-  {
-    id: 4,
-    bay_number: 4,
-    bay_type: "left_right",
-    hourly_rate: 20,
-    is_active: true,
-  },
-  { id: 5, bay_number: 5, bay_type: "vip", hourly_rate: 25, is_active: true },
-];
 
 const BAY_TYPE_LABEL: Record<string, string> = {
   right_handed: "Right-Handed",
@@ -167,53 +115,15 @@ function overlaps(
 ) {
   return a.start < b.end && b.start < a.end;
 }
-function code() {
-  return Math.random().toString(36).slice(2, 12).toUpperCase();
-}
-
-// 날짜별로 항상 같은 샘플 예약을 만든다 (API 오프라인일 때)
-function sampleReservations(date: string): Reservation[] {
-  if (isClosed(date)) return [];
-  const seed = parseIso(date).getDate();
-  const rows: [number, string, number, number, string, ResStatus, ResSource][] =
-    [
-      [1, "14:00", 1, 2, "Walton, Connor", "paid", "online"],
-      [2, "15:00", 2, 4, "Kim, Daniel", "checked_in", "voice_ai"],
-      [3, "16:30", 1, 3, "Patel, Sonia", "confirmed", "online"],
-      [4, "17:00", 2, 2, "Leblanc, Marc", "confirmed", "phone"],
-      [5, "18:00", 3, 6, "Okafor Birthday", "confirmed", "phone"],
-      [1, "19:00", 2, 4, "Nguyen, Tim", "confirmed", "online"],
-      [2, "20:00", 1, 1, "Walk-in", "confirmed", "walk_in"],
-      [3, "20:30", 1, 2, "Russo, Gina", "no_show", "online"],
-    ];
-  return rows
-    .filter((_, i) => (i + seed) % 5 !== 0)
-    .map(([bay, start, hours, players, name, status, source], i) => ({
-      id: `s-${date}-${i}`,
-      confirmation_code: `SIM${seed}${i}${bay}`.padEnd(10, "X"),
-      bay_id: bay,
-      date,
-      start_time: start,
-      duration_hours: hours,
-      player_count: Math.min(players, 6),
-      customer_name: name,
-      customer_email: "",
-      phone: "",
-      notes: "",
-      status,
-      source,
-    }));
-}
-
 // ---------- page ----------
 export default function SimulatorSheetPage() {
   const todayIso = useMemo(() => isoDate(new Date()), []);
   const [date, setDate] = useState(() => nextOpen(isoDate(new Date())));
-  const [bays, setBays] = useState<Bay[]>(SAMPLE_BAYS);
+  const [bays, setBays] = useState<Bay[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
-  const [bayState, setBayState] = useState<Record<number, BayState>>({});
-  const [apiOnline, setApiOnline] = useState(false);
-  const [message, setMessage] = useState("Local sample mode");
+  // false = 마지막 불러오기·저장이 실패했다(노란 배지).
+  const [ok, setOk] = useState(true);
+  const [message, setMessage] = useState("Loading…");
   const [draft, setDraft] = useState<Draft | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [showCancelled, setShowCancelled] = useState(false);
@@ -221,49 +131,70 @@ export default function SimulatorSheetPage() {
 
   const closed = isClosed(date);
 
-  const request = useCallback(
-    async <T,>(path: string, init?: RequestInit): Promise<T> => {
-      const res = await fetch(`${apiBaseUrl}${path}`, {
-        headers: { "Content-Type": "application/json", ...init?.headers },
-        ...init,
+  function fail(prefix: string, err: unknown) {
+    setOk(false);
+    setMessage(`${prefix}: ${describeSimError(err)}`.slice(0, 200));
+  }
+
+  // 베이와 그날의 예약. 날짜를 바꾸면 한 번, 그 뒤로는 1분마다 다시 읽는다 — 손님이 온라인으로
+  // 잡은 예약과 다른 기기에서 바꾼 베이 상태가 새로고침 없이 나타나야 겹쳐 받지 않는다.
+  // `reload()` 는 이 숫자를 올려 아래 effect 들을 다시 돌린다.
+  const [refresh, setRefresh] = useState(0);
+  const reload = useCallback(() => setRefresh((n) => n + 1), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    simApi
+      .bays()
+      .then((list) => {
+        if (!cancelled) setBays(list.filter((b) => b.is_active !== false));
+      })
+      .catch((err) => {
+        if (!cancelled) fail("Couldn't load bays", err);
       });
-      if (!res.ok) throw new Error(await res.text());
-      return res.json() as Promise<T>;
-    },
-    [],
+    return () => {
+      cancelled = true;
+    };
+  }, [refresh]);
+
+  // 베이 상태는 서버(0007 `pelham_sim_bays.status`)가 원본이다. 모든 직원 화면·온라인 예약이 같은 값을 본다.
+  const bayState = useMemo<Record<number, BayStatus>>(
+    () => Object.fromEntries(bays.map((b) => [b.id, b.status ?? "open"])),
+    [bays],
   );
 
-  // load bays once
   useEffect(() => {
-    request<{ bays: Bay[] } | Bay[]>("/simulator/bays")
-      .then((data) => {
-        const list = Array.isArray(data) ? data : data.bays;
-        if (list?.length) setBays(list.filter((b) => b.is_active !== false));
-        setApiOnline(true);
-        setMessage("Connected to FastAPI simulator service");
+    let cancelled = false; // 응답이 오는 사이 다른 날로 넘어갔으면 버린다.
+    simApi
+      .reservations(date)
+      .then((list) => {
+        if (cancelled) return;
+        setReservations(list);
+        setOk(true);
+        setMessage(
+          `Live · updated ${new Date().toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" })}`,
+        );
       })
-      .catch(() => {
-        setApiOnline(false);
-        setMessage("FastAPI offline: using local sample mode");
+      .catch((err) => {
+        if (!cancelled) fail("Couldn't load reservations", err);
       });
-  }, [request]);
+    return () => {
+      cancelled = true;
+    };
+  }, [date, refresh]);
 
-  // load reservations when date or api changes
   useEffect(() => {
+    const t = setInterval(reload, 60_000);
+    return () => clearInterval(t);
+  }, [reload]);
+
+  // 날짜를 옮기면 열린 편집과 이전 날의 예약을 먼저 비운다(새 날 응답이 오기 전에 옛 날이 보이지 않게).
+  function goTo(next: string) {
+    if (next === date) return;
     setDraft(null);
-    if (!apiOnline) {
-      setReservations(sampleReservations(date));
-      return;
-    }
-    request<{ reservations: Reservation[] }>(
-      `/simulator/admin/reservations?date=${date}`,
-    )
-      .then((data) => setReservations(data.reservations))
-      .catch(() => {
-        setReservations(sampleReservations(date));
-        setMessage("Admin API missing: showing sample reservations");
-      });
-  }, [date, apiOnline, request]);
+    setReservations([]);
+    setDate(next);
+  }
 
   // now-line
   useEffect(() => {
@@ -276,10 +207,11 @@ export default function SimulatorSheetPage() {
     return () => clearInterval(t);
   }, []);
 
-  const visible = reservations.filter(
-    (r) => showCancelled || r.status !== "cancelled",
-  );
-  const active = reservations.filter((r) => r.status !== "cancelled");
+  // 취소와 노쇼는 베이를 비운다(0007). 기록은 "Show cancelled & no-shows" 로 볼 수 있다.
+  const freesBay = (r: Reservation) =>
+    r.status === "cancelled" || r.status === "no_show";
+  const visible = reservations.filter((r) => showCancelled || !freesBay(r));
+  const active = reservations.filter((r) => !freesBay(r));
   const bookedHours = active.reduce((s, r) => s + r.duration_hours, 0);
   const capacityHours = closed ? 0 : bays.length * (CLOSE_HOUR - OPEN_HOUR);
   const utilization = capacityHours
@@ -289,9 +221,7 @@ export default function SimulatorSheetPage() {
     () => Object.fromEntries(bays.map((b) => [b.id, b])),
     [bays],
   );
-  const revenue = active
-    .filter((r) => r.status !== "no_show")
-    .reduce(
+  const revenue = active.reduce(
       (s, r) => s + (bayById[r.bay_id]?.hourly_rate ?? 20) * r.duration_hours,
       0,
     );
@@ -385,63 +315,25 @@ export default function SimulatorSheetPage() {
       return;
     }
 
-    if (apiOnline) {
-      try {
-        if (draft.id === undefined) {
-          const created = await request<Reservation>(
-            "/simulator/reservations",
-            {
-              method: "POST",
-              body: JSON.stringify({
-                ...draft,
-                customer_email: draft.customer_email || "walkin@pelhamhills.ca",
-                notes: `[src:${draft.source}] ${draft.notes}`.trim(),
-              }),
-            },
-          );
-          setReservations((cur) => [
-            ...cur,
-            { ...draft, ...created, id: created.id } as Reservation,
-          ]);
-        } else {
-          const updated = await request<Reservation>(
-            `/simulator/admin/reservations/${draft.id}`,
-            {
-              method: "PATCH",
-              body: JSON.stringify(draft),
-            },
-          );
-          setReservations((cur) =>
-            cur.map((r) => (r.id === draft.id ? { ...r, ...updated } : r)),
-          );
-        }
-        setMessage("Saved");
-        setDraft(null);
-        return;
-      } catch (err) {
-        setMessage(`Save failed: ${(err as Error).message.slice(0, 120)}`);
-        return;
+    const { id, ...rest } = draft;
+    delete rest.confirmation_code;
+    const fields = rest;
+    try {
+      if (id === undefined) {
+        const created = await simApi.create(fields);
+        setReservations((cur) => [...cur, created]);
+      } else {
+        const updated = await simApi.update(id, fields);
+        setReservations((cur) => cur.map((r) => (r.id === id ? updated : r)));
       }
+      setOk(true);
+      setMessage("Saved");
+      setDraft(null);
+    } catch (err) {
+      fail("Save failed", err);
+      // 409 = 그 사이 다른 사람(대개 온라인 손님)이 그 베이를 잡았다. 표를 새로 읽어 보여 준다.
+      if (err instanceof ApiError && err.status === 409) reload();
     }
-
-    if (draft.id === undefined) {
-      setReservations((cur) => [
-        ...cur,
-        {
-          ...draft,
-          id: `l-${Date.now()}`,
-          confirmation_code: code(),
-        } as Reservation,
-      ]);
-    } else {
-      setReservations((cur) =>
-        cur.map((r) =>
-          r.id === draft.id ? ({ ...r, ...draft } as Reservation) : r,
-        ),
-      );
-    }
-    setMessage("Saved locally (sample mode)");
-    setDraft(null);
   }
 
   async function patchReservation(
@@ -449,29 +341,33 @@ export default function SimulatorSheetPage() {
     patch: Partial<Reservation>,
     note: string,
   ) {
-    if (apiOnline && typeof id === "number") {
-      try {
-        const updated = await request<Reservation>(
-          `/simulator/admin/reservations/${id}`,
-          {
-            method: "PATCH",
-            body: JSON.stringify(patch),
-          },
-        );
-        setReservations((cur) =>
-          cur.map((r) => (r.id === id ? { ...r, ...updated } : r)),
-        );
-      } catch (err) {
-        setMessage(`Update failed: ${(err as Error).message.slice(0, 120)}`);
-        return;
-      }
-    } else {
-      setReservations((cur) =>
-        cur.map((r) => (r.id === id ? { ...r, ...patch } : r)),
-      );
+    try {
+      const updated = await simApi.update(id, patch);
+      setReservations((cur) => cur.map((r) => (r.id === id ? updated : r)));
+      setDraft((d) => (d && d.id === id ? { ...d, ...updated } : d));
+      setOk(true);
+      setMessage(note);
+    } catch (err) {
+      fail("Update failed", err);
+      if (err instanceof ApiError && err.status === 409) reload();
     }
-    setDraft((d) => (d && d.id === id ? { ...d, ...patch } : d));
-    setMessage(note);
+  }
+
+  async function changeBayStatus(bay: Bay, status: BayStatus) {
+    try {
+      const updated = await simApi.setBayStatus(bay.id, status);
+      setBays((cur) => cur.map((b) => (b.id === bay.id ? updated : b)));
+      setOk(true);
+      // 점검으로 돌리면 이미 잡힌 예약은 남는다 — 옮겨야 할 건수를 알려 준다.
+      const stuck = active.filter((r) => r.bay_id === bay.id).length;
+      setMessage(
+        status === "maintenance" && stuck
+          ? `Bay ${bay.bay_number} under maintenance — ${stuck} booking${stuck > 1 ? "s" : ""} on this day still need moving`
+          : `Bay ${bay.bay_number} set to ${status}`,
+      );
+    } catch (err) {
+      fail("Couldn't change bay status", err);
+    }
   }
 
   // ---------- drag to move ----------
@@ -633,7 +529,7 @@ export default function SimulatorSheetPage() {
               <span className="font-bold">{utilization}% utilization</span>
               <span>{money(revenue)} before tax</span>
               <span
-                className={`rounded px-2 py-1 ${apiOnline ? "bg-[#dbf5e3] text-[#126c31]" : "bg-[#fff3cd] text-[#8a5b00]"}`}
+                className={`rounded px-2 py-1 ${ok ?"bg-[#dbf5e3] text-[#126c31]" : "bg-[#fff3cd] text-[#8a5b00]"}`}
               >
                 {message}
               </span>
@@ -642,7 +538,7 @@ export default function SimulatorSheetPage() {
               <button
                 aria-label="Previous day"
                 className="border border-[#d7d7dc] px-2 py-1 text-xs font-bold"
-                onClick={() => setDate(addDays(date, -1))}
+                onClick={() => goTo(addDays(date, -1))}
               >
                 ‹
               </button>
@@ -653,7 +549,7 @@ export default function SimulatorSheetPage() {
               <button
                 aria-label="Next day"
                 className="border border-[#d7d7dc] px-2 py-1 text-xs font-bold"
-                onClick={() => setDate(addDays(date, 1))}
+                onClick={() => goTo(addDays(date, 1))}
               >
                 ›
               </button>
@@ -661,14 +557,14 @@ export default function SimulatorSheetPage() {
             <div className="flex items-center gap-2 text-xs">
               <button
                 className="border border-[#d7d7dc] px-3 py-1.5 font-bold"
-                onClick={() => setDate(nextOpen(todayIso))}
+                onClick={() => goTo(nextOpen(todayIso))}
               >
                 Today
               </button>
               <input
                 className="border border-[#d7d7dc] px-2 py-1"
                 id="sim-date"
-                onChange={(e) => e.target.value && setDate(e.target.value)}
+                onChange={(e) => e.target.value && goTo(e.target.value)}
                 type="date"
                 value={date}
               />
@@ -679,7 +575,7 @@ export default function SimulatorSheetPage() {
                   onChange={(e) => setShowCancelled(e.target.checked)}
                   type="checkbox"
                 />
-                Show cancelled
+                Show cancelled &amp; no-shows
               </label>
             </div>
           </div>
@@ -698,7 +594,7 @@ export default function SimulatorSheetPage() {
                 </p>
                 <button
                   className="bg-[#4533ff] px-4 py-2 text-xs font-bold text-white"
-                  onClick={() => setDate(nextOpen(date))}
+                  onClick={() => goTo(nextOpen(date))}
                 >
                   Go to next open day
                 </button>
@@ -741,10 +637,7 @@ export default function SimulatorSheetPage() {
                             }`}
                             id={`bay-state-${b.id}`}
                             onChange={(e) =>
-                              setBayState((cur) => ({
-                                ...cur,
-                                [b.id]: e.target.value as BayState,
-                              }))
+                              void changeBayStatus(b, e.target.value as BayStatus)
                             }
                             value={st}
                           >
@@ -1019,7 +912,8 @@ export default function SimulatorSheetPage() {
                       }
                       value={draft.player_count}
                     >
-                      {[1, 2, 3, 4, 5, 6].map((n) => (
+                      {/* 0003/0007 의 한도(1–4명)와 같다. */}
+                      {[1, 2, 3, 4].map((n) => (
                         <option key={n} value={n}>
                           {n}
                         </option>
