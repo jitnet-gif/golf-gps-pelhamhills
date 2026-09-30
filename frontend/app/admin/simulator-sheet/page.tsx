@@ -498,7 +498,9 @@ export default function SimulatorSheetPage() {
 
   function onBlockDown(e: ReactPointerEvent, r: Reservation) {
     if (r.status === "cancelled") return openExisting(r);
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    // 블록 자체(currentTarget)가 포인터를 잡아야 한다. 안쪽 글자(span)가 잡으면 그 글자가
+    // 다시 그려질 때 캡처가 풀려 드래그가 중간에 끊긴다.
+    e.currentTarget.setPointerCapture(e.pointerId);
     setDrag({
       id: r.id,
       startX: e.clientX,
@@ -842,6 +844,9 @@ export default function SimulatorSheetPage() {
                           onPointerDown={(e) => onBlockDown(e, r)}
                           onPointerMove={(e) => onBlockMove(e, r)}
                           onPointerUp={() => onBlockUp(r)}
+                          // 스크롤·알림 등으로 드래그가 취소되면 제자리로 돌린다.
+                          // 안 하면 블록이 옮기던 자리에 떠 있는 채로 남는다.
+                          onPointerCancel={() => setDrag(null)}
                           role="button"
                           style={{
                             top: top + 1,

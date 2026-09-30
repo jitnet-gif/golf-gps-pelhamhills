@@ -128,7 +128,8 @@ export const adminQuickNav: NavItem[] = adminNav.filter((item) =>
 export const ADMIN_RETAIL = "/admin/retail";
 
 /**
- * 사업부(division). 사이드바 맨 위 드롭다운이 이 셋 사이를 오가며 메뉴를 바꿔 끼운다.
+ * 사업부(division). 사이드바 맨 위 드롭다운이 이 셋 사이를 오가며 메뉴를 바꿔 끼우고,
+ * 그 사업부의 첫 화면(`home`)으로 바로 이동한다.
  *
  * 골프 메뉴는 `adminNav` 를 그대로 쓴다 — 복사하면 다시 두 벌이 된다. 다른 두 사업부는
  * 자기 화면 몇 개와, 사업부를 가리지 않는 공용 화면(Reports 등)을 골프 쪽과 **같은
@@ -137,6 +138,11 @@ export const ADMIN_RETAIL = "/admin/retail";
 export type AdminDivision = {
   key: "golf" | "snack-retail" | "simulator";
   label: string;
+  /**
+   * 드롭다운에서 이 사업부를 고르면 바로 가는 첫 화면. `links[0]` 으로 꺼내지 않고
+   * 따로 적는 이유는 `bookNav` 위 주석과 같다 — 배열 순서가 바뀌면 조용히 엉뚱한 곳으로 간다.
+   */
+  home: string;
   links: NavItem[];
 };
 
@@ -147,10 +153,11 @@ const pick = (label: string): NavItem => {
 };
 
 export const adminDivisions: AdminDivision[] = [
-  { key: "golf", label: "Golf", links: adminNav },
+  { key: "golf", label: "Golf", home: ADMIN_HOME, links: adminNav },
   {
     key: "snack-retail",
     label: "Snack Bar & Retail",
+    home: "/admin/snack-bar",
     links: [
       { label: "Snack Bar / Bev Cart", href: "/admin/snack-bar", glyph: "☕" },
       { label: "Pro Shop Retail", href: ADMIN_RETAIL, glyph: "🛒" },
@@ -161,6 +168,7 @@ export const adminDivisions: AdminDivision[] = [
   {
     key: "simulator",
     label: "Indoor Golf Simulator",
+    home: "/admin/simulator-sheet",
     links: [
       { label: "Bay Sheet", href: "/admin/simulator-sheet", glyph: "▦" },
       { label: "Online Booking", href: BOOK_INDOOR, glyph: "🏌" },

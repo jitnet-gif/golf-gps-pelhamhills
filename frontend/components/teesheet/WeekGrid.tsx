@@ -20,8 +20,8 @@
 //     한 행에 예약이 둘일 수 있다 — 백엔드가 합계 4명 이하면 같은 티타임 공유를
 //     허용한다. 세그먼트는 좌→우로 깔리고 남는 칸은 기존 `+` 생성 버튼이 채운다.
 
-import { Fragment, useMemo } from "react";
-import type { CSSProperties } from "react";
+import { Fragment, useCallback, useMemo, useState } from "react";
+import type { CSSProperties, DragEvent } from "react";
 
 import {
   columnLabel,
@@ -155,6 +155,22 @@ function daySeats(booking: TeeBooking): number {
   // 정원을 넘는 인원(백엔드상 불가능하지만 레거시 레코드는 있을 수 있다)도
   // 사라지면 안 되므로 4칸까지는 그린다.
   return Math.min(booking.players.length, DAY_SEATS);
+}
+
+/**
+ * 드래그로 옮길 때 도착 칸에 남은 자리를 셀 때 쓰는 좌석 수. `daySeats` 와 달리 4로 자르지
+ * 않는다 — 백엔드 `require_capacity` 가 보는 값 그대로여야 "놓았는데 서버가 거절" 이 없다.
+ */
+function heldSeats(booking: TeeBooking): number {
+  return booking.status === "cancelled" ? 0 : booking.players.length;
+}
+
+/** 드래그 중인 예약 id 를 싣는 dataTransfer 형식. 다른 앱에서 끌어온 글자와 구분한다. */
+const DRAG_MIME = "application/x-pelham-tee-booking";
+
+/** 드래그로 옮길 수 없는 예약. 취소·노쇼는 자리를 잡지 않으니 옮길 이유가 없다. */
+function isDraggable(booking: TeeBooking): boolean {
+  return !isDead(booking);
 }
 
 /**
@@ -385,6 +401,101 @@ export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
     return set;
   }, [buckets, rowIndex, colIndex, isDayView, columns.length]);
 
+  // ===== 드래그 앤 드롭으로 시간 옮기기 =====
+  // 예약 막대(주간)·세그먼트(일간)를 끌어 빈 칸에 놓으면 그 날짜·티 타임으로 옮긴다.
+  // 저장은 상세 패널의 날짜·티 타임 드롭다운과 같은 `controller.moveBooking` 이다.
+  //
+  // 네이티브 HTML5 드래그를 쓴다: 격자가 스크롤 컨테이너 안에 있어서, 브라우저가 가장자리
+  // 자동 스크롤을 해 주는 쪽이 포인터 좌표를 직접 칸으로 환산하는 것보다 훨씬 덜 깨진다.
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropKey, setDropKey] = useState<string | null>(null);
+  const { moveBooking, pushToast, select } = controller;
+
+  const draggedBooking = useMemo(
+    () => (dragId ? visibleBookings.find((booking) => booking.id === dragId) ?? null : null),
+    [dragId, visibleBookings],
+  );
+
+  /** 드래그한 예약을 뺀 나머지가 그 칸에서 잡고 있는 좌석 수. */
+  const seatsTakenAt = useCallback(
+    (date: string, time: string, exceptId: string) =>
+      (buckets.get(`${date}|${time}`) ?? [])
+        .filter((booking) => booking.id !== exceptId)
+        .reduce((sum, booking) => sum + heldSeats(booking), 0),
+    [buckets],
+  );
+
+  const canDropAt = useCallback(
+    (date: string, time: string) => {
+      if (!draggedBooking) return false;
+      if (draggedBooking.date === date && draggedBooking.time === time) return false;
+      return seatsTakenAt(date, time, draggedBooking.id) + heldSeats(draggedBooking) <= DAY_SEATS;
+    },
+    [draggedBooking, seatsTakenAt],
+  );
+
+  const endDrag = useCallback(() => {
+    setDragId(null);
+    setDropKey(null);
+  }, []);
+
+  const startDrag = useCallback((event: DragEvent, booking: TeeBooking) => {
+    event.dataTransfer.setData(DRAG_MIME, booking.id);
+    event.dataTransfer.effectAllowed = "move";
+    setDragId(booking.id);
+  }, []);
+
+  const dropBooking = useCallback(
+    (date: string, time: string) => {
+      const booking = draggedBooking;
+      endDrag();
+      if (!booking || (booking.date === date && booking.time === time)) return;
+      const free = DAY_SEATS - seatsTakenAt(date, time, booking.id);
+      if (heldSeats(booking) > free) {
+        pushToast(
+          "error",
+          `${time} on ${shortDate(date)} has ${Math.max(0, free)} open spot(s) — ${booking.title} has ${heldSeats(booking)} players.`,
+        );
+        return;
+      }
+      select(booking.id);
+      void moveBooking(booking.id, date, time);
+    },
+    [draggedBooking, endDrag, moveBooking, pushToast, seatsTakenAt, select],
+  );
+
+  /**
+   * 놓을 수 있는 칸에 붙이는 핸들러 묶음. `dragover` 에서 preventDefault 를 해야 그 칸이
+   * 드롭 대상이 된다 — 자리가 모자라는 칸은 하지 않아서 커서가 "금지" 로 바뀐다.
+   */
+  const dropTarget = (date: string, time: string) => {
+    const key = `${date}|${time}`;
+    return {
+      onDragOver: (event: DragEvent) => {
+        if (!dragId || !canDropAt(date, time)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        if (dropKey !== key) setDropKey(key);
+      },
+      onDragLeave: () => {
+        if (dropKey === key) setDropKey(null);
+      },
+      onDrop: (event: DragEvent) => {
+        event.preventDefault();
+        dropBooking(date, time);
+      },
+    };
+  };
+
+  const dropHighlight = (date: string, time: string) =>
+    dropKey === `${date}|${time}` ? "bg-[#dcd8ff] ring-2 ring-inset ring-[#4533ff]" : "";
+
+  const dragProps = (booking: TeeBooking) => ({
+    dragging: dragId === booking.id,
+    onDragStart: isDraggable(booking) ? (event: DragEvent) => startDrag(event, booking) : undefined,
+    onDragEnd: endDrag,
+  });
+
   // Time 열 폭 — Rate 열의 sticky left 오프셋 계산에 쓴다.
   const timeColWidth = isDayView ? DAY_TIME_COL_PX : 86;
 
@@ -531,8 +642,9 @@ export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
                     key={`empty-${iso}-${slot.time}`}
                     type="button"
                     onClick={() => onCreateAt(iso, slot.time)}
+                    {...dropTarget(iso, slot.time)}
                     aria-label={`Create reservation on ${shortDate(iso)} at ${slot.time}`}
-                    className={`group relative flex scroll-mt-10 items-center justify-center hover:bg-[#f0efff] ${FOCUS_RING}`}
+                    className={`group relative flex scroll-mt-10 items-center justify-center hover:bg-[#f0efff] ${dropHighlight(iso, slot.time)} ${FOCUS_RING}`}
                     style={{ gridColumn: dayColStart + colIdx, gridRow: rowIdx + 2 }}
                   >
                     <span
@@ -560,7 +672,9 @@ export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
                   key={`bucket-${key}`}
                   // scroll-mt: 고정된 헤더 행 뒤로 숨은 채 스크롤되지 않도록
                   // (키보드 포커스/프로그램 스크롤이 헤더 아래에 멈추게 한다).
-                  className="relative z-10 flex min-w-0 scroll-mt-10 items-center gap-[2px] px-[3px] py-[4px]"
+                  // 자리가 남은 칸이면 예약이 이미 있어도 여기로 끌어다 합칠 수 있다.
+                  {...dropTarget(date, time)}
+                  className={`relative z-10 flex min-w-0 scroll-mt-10 items-center gap-[2px] px-[3px] py-[4px] ${dropHighlight(date, time)}`}
                   style={{
                     gridColumn: `${dayColStart + colIdx} / span ${span}`,
                     gridRow: rowIdx + 2,
@@ -569,6 +683,7 @@ export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
                   {list.map((booking) => (
                     <BookingBar
                       key={booking.id}
+                      {...dragProps(booking)}
                       booking={booking}
                       selected={booking.id === selectedId}
                       onSelect={controller.select}
@@ -649,6 +764,7 @@ export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
                       {pack.segments.map(({ booking, start, width }) => (
                         <DaySegmentCard
                           key={booking.id}
+                          {...dragProps(booking)}
                           booking={booking}
                           selected={booking.id === selectedId}
                           onSelect={controller.select}
@@ -666,9 +782,10 @@ export default function WeekGrid({ controller, onCreateAt }: WeekGridProps) {
                           key={`day-empty-${slot.time}-${seat}`}
                           type="button"
                           onClick={() => onCreateAt(focusedDate, slot.time)}
+                          {...dropTarget(focusedDate, slot.time)}
                           aria-label={`Create reservation on ${shortDate(focusedDate)} at ${slot.time}`}
                           title={`Create reservation at ${slot.time}`}
-                          className={`group relative flex scroll-mt-10 items-center justify-center hover:bg-[#f0efff] ${rule} ${FOCUS_RING}`}
+                          className={`group relative flex scroll-mt-10 items-center justify-center hover:bg-[#f0efff] ${dropHighlight(focusedDate, slot.time)} ${rule} ${FOCUS_RING}`}
                           style={{ gridColumn: DAY_PLAYER_COL + seat, gridRow }}
                         >
                           <span
@@ -816,22 +933,32 @@ type BookingButtonProps = {
   booking: TeeBooking;
   selected: boolean;
   onSelect: (bookingId: string | null) => void;
+  /** 이 예약을 끌고 있는 중이면 true — 제자리 막대를 흐리게 그려 "옮기는 중" 을 보인다. */
+  dragging?: boolean;
+  /** 없으면 끌 수 없는 예약(취소·노쇼)이다. */
+  onDragStart?: (event: DragEvent) => void;
+  onDragEnd?: () => void;
 };
 
 /** 주간 뷰의 압축 막대. */
-function BookingBar({ booking, selected, onSelect }: BookingButtonProps) {
+function BookingBar({ booking, selected, onSelect, dragging, onDragStart, onDragEnd }: BookingButtonProps) {
   const blocked = booking.status === "blocked";
   const cancelled = isDead(booking);
   return (
     <button
       type="button"
+      draggable={Boolean(onDragStart)}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       onClick={() => onSelect(booking.id)}
       aria-pressed={selected}
       title={`${booking.title} · ${booking.time} · ${STATUS_LABEL[booking.status]}`}
       style={blocked ? HATCH_STYLE : undefined}
       className={`flex h-[19px] min-w-0 flex-1 items-center gap-1 overflow-hidden rounded-sm px-1.5 text-left text-[11px] leading-none font-bold shadow-sm ${FOCUS_RING} ${
         blocked ? "text-[#4e5560]" : COLOR_CLASS[booking.color]
-      } ${cancelled ? "line-through opacity-55" : ""} ${selected ? "ring-2 ring-[#111315]" : ""}`}
+      } ${cancelled ? "line-through opacity-55" : ""} ${selected ? "ring-2 ring-[#111315]" : ""} ${
+        onDragStart ? "cursor-grab active:cursor-grabbing" : ""
+      } ${dragging ? "opacity-40" : ""}`}
     >
       <span className="truncate">{blocked ? "Blocked" : booking.title}</span>
       {!blocked && (
@@ -858,6 +985,9 @@ function DaySegmentCard({
   onSelect,
   rule,
   style,
+  dragging,
+  onDragStart,
+  onDragEnd,
 }: BookingButtonProps & { rule: string; style: CSSProperties }) {
   const blocked = booking.status === "blocked";
   const cancelled = isDead(booking);
@@ -866,6 +996,9 @@ function DaySegmentCard({
   return (
     <button
       type="button"
+      draggable={Boolean(onDragStart)}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       onClick={() => onSelect(booking.id)}
       aria-pressed={selected}
       // 9홀 배지와 메모 아이콘은 시각 정보이므로 aria-hidden 이다 — 대신 그 내용을
@@ -889,7 +1022,9 @@ function DaySegmentCard({
       // 행의 같은 색 세그먼트가 한 덩어리로 뭉쳐 보인다.
       className={`z-10 flex min-w-0 scroll-mt-10 items-stretch overflow-hidden rounded-sm text-left text-[11px] leading-none ${rule} ${FOCUS_RING} ${daySurfaceClass(
         booking,
-      )} ${cancelled ? "opacity-60" : ""} ${selected ? "ring-2 ring-[#111315] ring-inset" : ""}`}
+      )} ${cancelled ? "opacity-60" : ""} ${selected ? "ring-2 ring-[#111315] ring-inset" : ""} ${
+        onDragStart ? "cursor-grab active:cursor-grabbing" : ""
+      } ${dragging ? "opacity-40" : ""}`}
     >
       {blocked && (
         <span className="flex min-w-0 flex-1 items-center justify-center text-[#6b7280]">

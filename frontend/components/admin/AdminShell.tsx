@@ -33,7 +33,7 @@
  */
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import {
@@ -87,16 +87,24 @@ function AdminFrame({
   onSignOut,
 }: Props & { email: string; onSignOut: () => void }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [drawerOpen, setDrawerOpen] = useState(false);
   // 데스크톱 사이드바 접기. 레퍼런스 상단바의 햄버거가 하는 일이 이것이다 —
   // 티 시트는 가로가 늘 모자란 화면이라 188px 을 회수할 수 있어야 한다.
   // 장식으로 두지 않는 이유: 눌러도 아무 일이 없는 버튼이 상단바 맨 왼쪽에 있으면
   // 사용자는 앱이 멈춘 줄 안다.
   const [railOpen, setRailOpen] = useState(true);
-  // 사이드바에 펼쳐 둘 사업부. 기본은 지금 화면이 속한 곳이고, 드롭다운으로 다른 사업부
-  // 메뉴를 **들여다보기만** 할 수 있다 — 고르는 것만으로 화면을 옮기지는 않는다.
-  // 화면을 옮기면 다시 그 화면의 사업부로 돌아온다.
+  // 사이드바에 펼쳐 둘 사업부. 기본은 지금 화면이 속한 곳이다. 드롭다운으로 사업부를
+  // 고르면 그 사업부의 첫 화면(Golf → 티 시트, Snack Bar → 스낵바 메뉴, Indoor → Bay Sheet)
+  // 으로 바로 간다 — 메뉴만 바뀌고 본문은 이전 사업부 화면으로 남아 있으면 헷갈린다.
   const [division, setDivision] = useState<AdminDivision>(() => divisionFor(pathname));
+  const changeDivision = useCallback(
+    (next: AdminDivision) => {
+      setDivision(next);
+      if (!isActive(pathname, next.home)) router.push(next.home);
+    },
+    [pathname, router],
+  );
 
   // 화면을 옮기면 서랍은 닫힌다. 닫지 않으면 새 화면 위에 이전 메뉴가 그대로
   // 덮여 있어서, 사용자가 방금 고른 화면을 볼 수 없다.
@@ -145,7 +153,7 @@ function AdminFrame({
         } ${fill ? "h-full" : "min-h-[100dvh]"}`}
       >
         {railOpen ? (
-          <DesktopSidebar division={division} onDivisionChange={setDivision} pathname={pathname} />
+          <DesktopSidebar division={division} onDivisionChange={changeDivision} pathname={pathname} />
         ) : null}
 
         <section
@@ -189,7 +197,7 @@ function AdminFrame({
       <MobileDrawer
         division={division}
         onClose={() => setDrawerOpen(false)}
-        onDivisionChange={setDivision}
+        onDivisionChange={changeDivision}
         open={drawerOpen}
         pathname={pathname}
       />
