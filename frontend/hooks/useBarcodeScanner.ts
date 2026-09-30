@@ -30,6 +30,11 @@ type Options = {
   minLength?: number;
   /** 키 사이가 이보다 길면 사람의 타이핑으로 보고 버퍼를 비운다(ms). */
   maxGapMs?: number;
+  /**
+   * 모든 입력칸에서도 스캔을 가로챈다. 상품 등록 창처럼 "어느 칸에 커서가 있든 스캔은 바코드"
+   * 인 화면용. 이미 칸에 찍힌 글자는 받는 쪽이 지운다.
+   */
+  everywhere?: boolean;
 };
 
 /** 스캐너는 수 ms 간격으로 친다. 50ms 면 사람의 연타와 겹치지 않을 만큼 넉넉하다. */
@@ -87,7 +92,12 @@ function isEditable(target: EventTarget | null): boolean {
 }
 
 export function useBarcodeScanner(onScan: (code: string) => void, options: Options = {}): void {
-  const { enabled = true, minLength = DEFAULT_MIN_LENGTH, maxGapMs = DEFAULT_MAX_GAP_MS } = options;
+  const {
+    enabled = true,
+    minLength = DEFAULT_MIN_LENGTH,
+    maxGapMs = DEFAULT_MAX_GAP_MS,
+    everywhere = false,
+  } = options;
 
   // 콜백은 렌더마다 바뀐다. 리스너를 다시 걸면 스캔 도중에 버퍼가 날아가므로 ref 로 든다.
   const onScanRef = useRef(onScan);
@@ -118,7 +128,7 @@ export function useBarcodeScanner(onScan: (code: string) => void, options: Optio
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.ctrlKey || event.altKey || event.metaKey) return;
-      if (isEditable(event.target)) {
+      if (!everywhere && isEditable(event.target)) {
         buffer = "";
         clearIdle();
         return;
@@ -152,5 +162,5 @@ export function useBarcodeScanner(onScan: (code: string) => void, options: Optio
       window.removeEventListener("keydown", onKeyDown, true);
       clearIdle();
     };
-  }, [enabled, maxGapMs, minLength]);
+  }, [enabled, everywhere, maxGapMs, minLength]);
 }

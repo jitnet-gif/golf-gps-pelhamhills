@@ -34,6 +34,8 @@ export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 export type Product = {
   id: number;
   sku: string;
+  /** 제조사 바코드(UPC/EAN 등). 스캐너가 읽는 값. 없으면 null(0006 이전 응답엔 키가 없다). */
+  barcode?: string | null;
   name: string;
   category: RetailCategory;
   /** 판매가(센트). */
@@ -53,6 +55,8 @@ export type Product = {
 /** 상품 생성 입력. `id`/타임스탬프는 서버가 붙인다. */
 export type ProductCreate = {
   sku: string;
+  /** 빈 문자열이나 null 이면 바코드 없음. */
+  barcode?: string | null;
   name: string;
   category: RetailCategory;
   price: Cents;

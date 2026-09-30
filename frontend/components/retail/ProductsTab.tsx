@@ -67,7 +67,9 @@ export default function ProductsTab({
       .filter((item) => (showInactive ? true : item.is_active))
       .filter((item) =>
         needle
-          ? item.name.toLowerCase().includes(needle) || item.sku.toLowerCase().includes(needle)
+          ? item.name.toLowerCase().includes(needle) ||
+            item.sku.toLowerCase().includes(needle) ||
+            (item.barcode ?? "").toLowerCase().includes(needle)
           : true,
       );
   }, [products, search, showInactive]);
@@ -152,7 +154,7 @@ export default function ProductsTab({
                   <div className="min-w-0">
                     <p className="text-sm leading-tight font-bold">{product.name}</p>
                     <p className="truncate text-xs text-[#6b7280]">
-                      {product.sku} · {product.category}
+                      {product.sku}{product.barcode ? ` · ${product.barcode}` : ""} · {product.category}
                     </p>
                   </div>
                   <p className="shrink-0 text-base font-bold tabular-nums">
@@ -211,7 +213,10 @@ export default function ProductsTab({
               <tbody>
                 {visible.map((product) => (
                   <tr className="border-b border-[#e4e4e8] last:border-b-0" key={product.id}>
-                    <Td className="font-mono text-xs">{product.sku}</Td>
+                    <Td className="font-mono text-xs">
+                      {product.sku}
+                      {product.barcode ? <span className="block text-[#6b7280]">{product.barcode}</span> : null}
+                    </Td>
                     <Td className="font-bold">{product.name}</Td>
                     <Td className="text-[#6b7280]">{product.category}</Td>
                     <Td align="right">{formatMoney(product.price)}</Td>
@@ -318,6 +323,7 @@ function Td({
 // ===== 추가/수정 다이얼로그 =============================================
 
 type FormState = {
+  barcode: string;
   sku: string;
   name: string;
   category: RetailCategory;
@@ -333,6 +339,7 @@ type FormState = {
 function toForm(product: Product | null, defaultCategory: RetailCategory): FormState {
   if (!product) {
     return {
+      barcode: "",
       sku: "",
       name: "",
       category: defaultCategory,
@@ -344,6 +351,7 @@ function toForm(product: Product | null, defaultCategory: RetailCategory): FormS
     };
   }
   return {
+    barcode: product.barcode ?? "",
     sku: product.sku,
     name: product.name,
     category: product.category,
@@ -374,16 +382,34 @@ function ProductDialog({
     setForm((current) => ({ ...current, [key]: value }));
   }
 
-  // 상품 바코드(UPC 등)를 쏘면 SKU 칸이 그 값이 된다. 칸에 포커스가 있든 없든 같다 —
-  // 입력기가 한글이면 칸에 자모가 찍히므로 칸의 글자가 아니라 스캐너가 보낸 키를 믿는다.
-  // 계산대는 이 SKU 로 정확 일치 검색을 한다.
-  useBarcodeScanner((code) => set("sku", code));
+  // 상품 바코드(UPC 등)를 쏘면 **어느 칸에 커서가 있든** 바코드 칸이 그 값이 된다
+  // (2026-09-30: 원가 칸에 커서가 있어서 바코드가 원가로 들어갔다). 스캐너가 그 칸에 이미
+  // 찍어 놓은 글자는 지운다. 입력기가 한글이면 칸에 자모가 찍히므로 칸의 글자가 아니라
+  // 스캐너가 보낸 키를 믿는다. 계산대는 바코드 → SKU 순으로 정확 일치 검색을 한다.
+  useBarcodeScanner(
+    (code) =>
+      setForm((current) => {
+        const strip = (value: string) => (value.endsWith(code) ? value.slice(0, -code.length) : value);
+        return {
+          ...current,
+          barcode: code,
+          name: strip(current.name),
+          sku: strip(current.sku),
+          price: strip(current.price),
+          cost: strip(current.cost),
+          stock: strip(current.stock),
+          reorderPoint: strip(current.reorderPoint),
+        };
+      }),
+    { everywhere: true },
+  );
 
   // `parseMoney` 는 쓰레기 입력을 조용히 0 으로 떨어뜨린다. 그러면 "$0.00 짜리
   // Pro V1" 이 만들어지고 아무도 모른다 — 저장 버튼을 켜기 전에 직접 본다.
   const priceCents = parseMoney(form.price);
-  const valid =
-    form.sku.trim().length > 0 && form.name.trim().length > 0 && priceCents > 0;
+  // SKU 를 비워 두면 바코드를 SKU 로도 쓴다(바코드만 있는 공산품).
+  const sku = form.sku.trim() || form.barcode.trim();
+  const valid = sku.length > 0 && form.name.trim().length > 0 && priceCents > 0;
 
   async function save() {
     if (!valid) return;
@@ -391,7 +417,8 @@ function ProductDialog({
     setError("");
 
     const payload: ProductCreate = {
-      sku: form.sku.trim(),
+      sku,
+      barcode: form.barcode.trim() || null,
       name: form.name.trim(),
       category: form.category,
       price: priceCents,
@@ -416,12 +443,23 @@ function ProductDialog({
   return (
     <Modal onClose={onClose} title={product ? "Edit product" : "Add product"}>
       <div className="grid gap-3">
-        <Field label="SKU (scan the barcode)">
+        <Field hint="Scan the product's barcode — works wherever the cursor is" label="Barcode">
           <TextInput
             autoComplete="off"
+            className="font-mono"
             data-scan-target=""
+            inputMode="numeric"
+            onChange={(event) => set("barcode", event.target.value)}
+            placeholder="Scan now, e.g. 055577420249"
+            value={form.barcode}
+          />
+        </Field>
+
+        <Field hint="Club code. Leave blank to use the barcode." label="SKU">
+          <TextInput
+            autoComplete="off"
             onChange={(event) => set("sku", event.target.value)}
-            placeholder="PH-BALL-PV1"
+            placeholder="GTR-591"
             value={form.sku}
           />
         </Field>
@@ -498,7 +536,7 @@ function ProductDialog({
 
         {error ? <ErrorNote>{error}</ErrorNote> : null}
         {!valid ? (
-          <p className="text-xs text-[#6b7280]">SKU, name and a price above $0.00 are required.</p>
+          <p className="text-xs text-[#6b7280]">A barcode or SKU, a name and a price above $0.00 are required.</p>
         ) : null}
 
         <div className="flex gap-2">

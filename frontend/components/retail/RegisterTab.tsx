@@ -60,6 +60,8 @@ export default function RegisterTab({
   // 스캔 실패 문구는 검색칸 바로 밑에 띄운다. 계산서 안의 오류 자리는 휴대폰에서
   // 접힌 시트 속이라, 스캐너를 쏜 직원 눈에 안 보인다.
   const [scanNote, setScanNote] = useState("");
+  // 스캔으로 담으면 결제 칸을 바로 띄운다. 값이 바뀔 때마다 BillPanel 이 결제 칸으로 스크롤한다.
+  const [revealPayments, setRevealPayments] = useState(0);
 
   // 판매 화면에는 **활성 상품만** 올린다. 비활성 상품이 격자에 섞이면 이미
   // 안 파는 물건을 눌러 찍게 된다.
@@ -70,20 +72,36 @@ export default function RegisterTab({
       .filter((item) => (category === "All" ? true : item.category === category))
       .filter((item) =>
         needle
-          ? item.name.toLowerCase().includes(needle) || item.sku.toLowerCase().includes(needle)
+          ? item.name.toLowerCase().includes(needle) ||
+            item.sku.toLowerCase().includes(needle) ||
+            (item.barcode ?? "").toLowerCase().includes(needle)
           : true,
       );
   }, [category, products, search]);
 
   const lineCount = bill?.lines.length ?? 0;
 
-  function addToBill(product: Product) {
+  function addToBill(product: Product): Promise<unknown> {
     if (demo) {
       setScanNote("예시 데이터입니다. 서버에 연결되기 전까지는 계산서에 담을 수 없습니다.");
-      return;
+      return Promise.resolve(null);
     }
     setScanNote("");
-    void billActions.addProduct(product.id, station);
+    return billActions.addProduct(product.id, station);
+  }
+
+  /**
+   * 스캔(또는 SKU + Enter)으로 담으면 곧장 결제로 간다. 휴대폰은 계산서 시트를 열고,
+   * 데스크톱은 오른쪽 계산서를 결제 칸까지 내린다. 카드를 눌러 담을 때는 열지 않는다 —
+   * 여러 개를 연달아 누르는 중에 시트가 손가락을 가린다.
+   * 결제 칸에 포커스는 주지 않는다. 입력칸에 커서가 있으면 다음 스캔이 그 칸에 글자로 들어간다.
+   */
+  function addAndOpenPayment(product: Product) {
+    void addToBill(product).then((bill) => {
+      if (!bill) return;
+      if (!window.matchMedia("(min-width: 1024px)").matches) setSheetOpen(true);
+      setRevealPayments((n) => n + 1);
+    });
   }
 
   /**
@@ -93,13 +111,13 @@ export default function RegisterTab({
    */
   function findBySku(raw: string): Product | null {
     const wanted = raw.trim().toLowerCase();
+    const sellable = (item: Product) =>
+      item.is_active && (lockedCategory ? item.category === lockedCategory : true);
+    // 제조사 바코드를 먼저, 없으면 클럽 SKU. 둘 다 정확 일치다.
     return (
-      products.find(
-        (item) =>
-          item.is_active &&
-          item.sku.trim().toLowerCase() === wanted &&
-          (lockedCategory ? item.category === lockedCategory : true),
-      ) ?? null
+      products.find((item) => sellable(item) && (item.barcode ?? "").trim().toLowerCase() === wanted) ??
+      products.find((item) => sellable(item) && item.sku.trim().toLowerCase() === wanted) ??
+      null
     );
   }
 
@@ -108,13 +126,13 @@ export default function RegisterTab({
     setSearch("");
     const product = findBySku(code);
     if (product) {
-      addToBill(product);
+      addAndOpenPayment(product);
       return;
     }
     setScanNote(
       RECEIPT_NO.test(code)
         ? `"${code}" is a receipt, not a product. Look it up on the Sales tab.`
-        : `No product with barcode "${code}". Add it on the Products tab (scan into the SKU field).`,
+        : `No product with barcode "${code}". Add it on the Products tab — scan it into the Barcode field.`,
     );
   }
 
@@ -127,11 +145,13 @@ export default function RegisterTab({
     if (product) {
       event.preventDefault();
       setSearch("");
-      addToBill(product);
+      addAndOpenPayment(product);
     }
   }
 
-  const billBody = <BillPanel demo={demo} onPaid={onSold} station={station} />;
+  const billBody = (
+    <BillPanel demo={demo} onPaid={onSold} revealPayments={revealPayments} station={station} />
+  );
 
   return (
     <>
@@ -210,7 +230,13 @@ export default function RegisterTab({
       ) : null}
 
       {sheetOpen ? (
-        <CartSheet onClose={() => setSheetOpen(false)} title="Bill">
+        <CartSheet
+          onClose={() => {
+            setSheetOpen(false);
+            setRevealPayments(0);
+          }}
+          title="Bill"
+        >
           {billBody}
         </CartSheet>
       ) : null}

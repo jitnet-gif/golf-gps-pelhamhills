@@ -78,9 +78,11 @@ type Props = {
   demo?: boolean;
   /** 결제가 끝났을 때(재고를 다시 읽는 등). */
   onPaid?: (bill: Bill) => void;
+  /** 값이 (0 이 아닌 값으로) 바뀌면 결제 칸으로 스크롤한다. 계산대에서 스캔으로 담았을 때. */
+  revealPayments?: number;
 };
 
-export default function BillPanel({ station, demo = false, onPaid }: Props) {
+export default function BillPanel({ station, demo = false, onPaid, revealPayments = 0 }: Props) {
   const current = useCurrentBill();
   const { bill, openBills, busy, error, missing } = current;
   const autoPrint = useSyncExternalStore(subscribeAutoPrint, readAutoPrint, () => false);
@@ -104,6 +106,13 @@ export default function BillPanel({ station, demo = false, onPaid }: Props) {
     setPaymentsFor(billId);
     setPayments([]);
   }
+
+  const paymentsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!revealPayments) return;
+    // 숨겨진 쪽(데스크톱의 모바일 시트, 휴대폰의 옆 계산서)은 크기가 없어 아무 일도 안 한다.
+    paymentsRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [revealPayments]);
 
   const total = bill?.total ?? 0;
   const paidSoFar = payments.reduce((sum, payment) => sum + payment.amount, 0);
@@ -171,11 +180,13 @@ export default function BillPanel({ station, demo = false, onPaid }: Props) {
             </div>
           </dl>
 
-          <PaymentsEditor
-            payments={payments}
-            remaining={remaining}
-            setPayments={setPayments}
-          />
+          <div ref={paymentsRef}>
+            <PaymentsEditor
+              payments={payments}
+              remaining={remaining}
+              setPayments={setPayments}
+            />
+          </div>
 
           <TextField
             key={`cashier-${bill.id}`}
