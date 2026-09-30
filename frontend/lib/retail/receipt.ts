@@ -37,12 +37,12 @@ export const PAYMENT_LABELS: Record<PaymentMethod, string> = {
   gift_card: "Gift card",
 };
 
-/** 계산서를 연 자리(`pelham_bills.station`) 표시 이름. 매출 화면·Reports 가 같이 쓴다. */
+/** 계산서를 연 계산대(`pelham_bills.station`) 표시 이름. 사업부가 아니다 — 사업부는 `divisions.ts`. */
 export const STATION_LABELS: Record<string, string> = {
   pro_shop: "Pro Shop",
   snack_bar: "Snack Bar",
-  tee_sheet: "Tee Sheet (green fees)",
-  simulator: "Indoor Simulator",
+  tee_sheet: "Tee Sheet",
+  simulator: "Bay Sheet",
 };
 
 export function stationLabel(station: string | null | undefined): string {

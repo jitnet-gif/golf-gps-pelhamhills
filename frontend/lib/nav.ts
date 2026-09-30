@@ -83,6 +83,9 @@ export const ADMIN_HOME = "/admin";
  * `adminNav` 보다 위에 있어야 한다: 배열이 모듈을 읽는 순간 평가되므로 아래에
  * 두면 `const` 를 선언 전에 읽어 ReferenceError 가 난다.
  */
+/** 클럽 종합 매출 보고서. 리테일 작업 화면의 "Sales report" 링크도 여기를 가리킨다. */
+export const ADMIN_REPORTS = "/admin/reports";
+
 export const GOLF_GPS_MAP_EDITOR = "https://golf-gps-pelhamhills-seven.vercel.app/admin/map";
 
 /**
@@ -100,7 +103,7 @@ export const adminNav: NavItem[] = [
   { label: "Tour Operators", href: "/admin/tour-operators", glyph: "✈" },
   { label: "Promotions", href: "/admin/promotions", glyph: "▶" },
   { label: "Calls & SMS", href: "/admin/calls", glyph: "☏" },
-  { label: "Reports", href: "/admin/reports", glyph: "▥" },
+  { label: "Reports", href: ADMIN_REPORTS, glyph: "▥" },
   { label: "Business Intelligence", href: "/admin/business-intelligence", glyph: "◧" },
   { label: "Radar", href: "/admin/radar", glyph: "◎" },
   { label: "Course Map", href: GOLF_GPS_MAP_EDITOR, glyph: "⌖" },

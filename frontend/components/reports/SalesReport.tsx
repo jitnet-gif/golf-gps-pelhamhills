@@ -1,7 +1,11 @@
 "use client";
 
 /**
- * 매출 내역과 마감. 하루가 끝나면 여기 숫자와 서랍 안의 현금이 맞아야 한다.
+ * 클럽 종합 매출 — 티 시트·실내 베이·스낵바·프로 샵 리테일을 한 장부에서 하루 단위로.
+ * Reports(`/admin/reports`) 한 곳에서만 띄운다. 예전에는 리테일 작업 화면에 Sales 탭이 따로
+ * 있었지만 같은 장부를 두 곳에서 보여 줄 이유가 없어 여기로 모았다(2026-09-30).
+ *
+ * 하루가 끝나면 여기 숫자와 서랍 안의 현금이 맞아야 한다.
  *
  * 환불된 매출을 **목록에서 지우지 않는** 것이 이 화면의 핵심이다. 지우면 그 날
  * 합계가 갑자기 줄어들어서 대사(reconciliation)가 맞지 않고, 무엇이 사라졌는지
@@ -13,6 +17,7 @@ import { useEffect, useMemo, useState } from "react";
 import retailApi, { localBusinessDate, toRetailError } from "@/lib/retail/api";
 import { printReceipt } from "@/lib/retail/printReceipt";
 import { PAYMENT_LABELS, stationLabel } from "@/lib/retail/receipt";
+import { divisionTotals } from "@/lib/retail/divisions";
 import { formatMoney, type RetailDailyReport, type Sale } from "@/lib/retail/types";
 
 import {
@@ -27,31 +32,17 @@ import {
   StatCard,
   TextArea,
   TextInput,
-} from "./ui";
+} from "@/components/retail/ui";
 
-type Props = {
-  demo: boolean;
-  /** 데모일 때 보여 줄 예시. 서버가 붙으면 무시된다. */
-  demoSales?: Sale[];
-  demoReport?: RetailDailyReport;
-  demoDate?: string;
-  /** 서버가 아예 없을 때(설정/네트워크). 요청을 시도하지 않는다. */
-  offline: boolean;
-};
-
-export default function SalesTab({ demo, demoSales = [], demoReport, demoDate = "", offline }: Props) {
-  const [date, setDate] = useState(() => (demo ? demoDate : localBusinessDate()));
+export default function SalesReport() {
+  const [date, setDate] = useState(localBusinessDate);
   const [sales, setSales] = useState<Sale[]>([]);
   const [report, setReport] = useState<RetailDailyReport | null>(null);
-  const [loading, setLoading] = useState(!offline);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<Sale | null>(null);
 
   useEffect(() => {
-    if (offline) {
-      setLoading(false);
-      return;
-    }
     let cancelled = false;
     setLoading(true);
     setError("");
@@ -72,22 +63,19 @@ export default function SalesTab({ demo, demoSales = [], demoReport, demoDate = 
     return () => {
       cancelled = true;
     };
-  }, [date, offline]);
+  }, [date]);
 
-  const shownSales = demo ? demoSales : sales;
-  const shownReport = demo ? (demoReport ?? null) : report;
+  const divisions = useMemo(() => (report ? divisionTotals(report) : []), [report]);
 
   function applyRefund(updated: Sale) {
     setSales((current) => current.map((sale) => (sale.id === updated.id ? updated : sale)));
     setSelected(updated);
     // 리포트의 환불 건수·금액이 바뀌므로 다시 읽는다. 화면에서 손으로 더하면
     // 서버의 마감 숫자와 어긋난 값을 직원이 믿게 된다.
-    if (!offline) {
-      retailApi
-        .getDailyReport(date)
-        .then(setReport)
-        .catch(() => setReport(null));
-    }
+    retailApi
+      .getDailyReport(date)
+      .then(setReport)
+      .catch(() => setReport(null));
   }
 
   return (
@@ -95,23 +83,22 @@ export default function SalesTab({ demo, demoSales = [], demoReport, demoDate = 
       <div className="grid gap-2 sm:max-w-xs">
         <Field label="Business date">
           <TextInput
-            disabled={demo}
             onChange={(event) => setDate(event.target.value)}
             type="date"
-            value={demo ? demoDate : date}
+            value={date}
           />
         </Field>
       </div>
 
       {error ? <ErrorNote>{error}</ErrorNote> : null}
 
-      {loading && !demo ? (
+      {loading ? (
         <div className="grid grid-cols-2 gap-2 lg:grid-cols-3 xl:grid-cols-6">
           {Array.from({ length: 6 }, (_, index) => (
             <SkeletonBar className="h-16 min-w-0" key={index} />
           ))}
         </div>
-      ) : shownReport ? (
+      ) : report ? (
         <>
           {/* 각 칸의 의미는 계약(`types.ts` 의 리포트 주석)이 정해 둔 그대로 쓴다.
               여기서 다시 더하거나 빼지 않는다 — 특히 환불 건은 `gross`/`net` 에서
@@ -121,40 +108,71 @@ export default function SalesTab({ demo, demoSales = [], demoReport, demoDate = 
             <StatCard
               hint="refunds excluded"
               label="Sales"
-              value={String(shownReport.sale_count)}
+              value={String(report.sale_count)}
             />
             <StatCard
               hint="before order discounts & tax"
               label="Gross"
-              value={formatMoney(shownReport.gross)}
+              value={formatMoney(report.gross)}
             />
             <StatCard
               hint="order-level only"
               label="Discounts"
-              value={formatMoney(shownReport.discount)}
+              value={formatMoney(report.discount)}
             />
-            <StatCard label="Tax (HST)" value={formatMoney(shownReport.tax)} />
+            <StatCard label="Tax (HST)" value={formatMoney(report.tax)} />
             <StatCard
               hint="gross − discounts + tax"
               label="Net"
-              value={formatMoney(shownReport.net)}
+              value={formatMoney(report.net)}
             />
             <StatCard
-              hint={`${shownReport.refunded_count} sale(s) · tax incl.`}
+              hint={`${report.refunded_count} sale(s) · tax incl.`}
               label="Refunded"
-              value={formatMoney(shownReport.refunded_total)}
+              value={formatMoney(report.refunded_total)}
             />
           </div>
 
-          <div className="grid min-w-0 gap-3 lg:grid-cols-2 xl:grid-cols-4">
-            {/* 프로 샵·스낵바·티 시트·실내 베이 계산서가 한 장부라서, 어디서 팔렸는지는
-                계산서를 연 자리(station)로만 나뉜다. 합이 위 Net 과 같다. */}
-            <Panel title="By station">
-              {!shownReport.by_station || shownReport.by_station.length === 0 ? (
+          {/* 사업부 네 칸. 팔린 것(분류)으로 나눈다 — 나누는 규칙과 이유는 `lib/retail/divisions.ts`.
+              합이 위 Gross 와 같다. 할인·세금은 계산서 단위라 여기 들어가지 않는다. */}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            {divisions.map((division) => (
+              <section className="min-w-0 border border-[#d4d4d8] bg-white p-3" key={division.key}>
+                <div className="flex items-baseline justify-between gap-2">
+                  <h2 className="text-sm font-bold">{division.label}</h2>
+                  <span className="text-xs text-[#6b7280]">
+                    {report.gross > 0 ? `${Math.round((division.total / report.gross) * 100)}%` : "—"}
+                  </span>
+                </div>
+                <p className="mt-1 text-2xl font-semibold tabular-nums">{formatMoney(division.total)}</p>
+                <p className="text-[11px] text-[#6b7280]">before order discounts &amp; tax</p>
+                {division.categories.length === 0 ? (
+                  <p className="mt-2 text-xs text-[#6b7280]">No sales.</p>
+                ) : (
+                  <ul className="mt-2 grid gap-0.5 border-t border-[#ececf0] pt-2 text-xs">
+                    {division.categories.map((row) => (
+                      <li className="flex items-baseline justify-between gap-2" key={row.category}>
+                        <span className="min-w-0 truncate">
+                          {row.category} <span className="text-[#6b7280]">×{row.quantity}</span>
+                        </span>
+                        <span className="shrink-0 tabular-nums">{formatMoney(row.total)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            ))}
+          </div>
+
+          <div className="grid min-w-0 gap-3 lg:grid-cols-3">
+            {/* 계산서를 연 계산대별. 서랍·단말기 대사용이지 사업부 매출이 아니다 —
+                티 시트 계산대에서 모자를 팔 수 있다. 합이 위 Net 과 같다. */}
+            <Panel title="By register (tax incl.)">
+              {!report.by_station || report.by_station.length === 0 ? (
                 <EmptyNote>Nothing rung in yet.</EmptyNote>
               ) : (
                 <ul className="grid gap-1 text-sm">
-                  {shownReport.by_station.map((row) => (
+                  {report.by_station.map((row) => (
                     <li className="flex items-baseline justify-between gap-2" key={row.station}>
                       <span className="min-w-0 truncate">
                         {stationLabel(row.station)}{" "}
@@ -168,11 +186,11 @@ export default function SalesTab({ demo, demoSales = [], demoReport, demoDate = 
             </Panel>
 
             <Panel title="By payment">
-              {shownReport.by_payment.length === 0 ? (
+              {report.by_payment.length === 0 ? (
                 <EmptyNote>Nothing rung in yet.</EmptyNote>
               ) : (
                 <ul className="grid gap-1 text-sm">
-                  {shownReport.by_payment.map((row) => (
+                  {report.by_payment.map((row) => (
                     <li className="flex items-baseline justify-between gap-2" key={row.method}>
                       <span className="min-w-0 truncate">
                         {PAYMENT_LABELS[row.method]}{" "}
@@ -185,30 +203,12 @@ export default function SalesTab({ demo, demoSales = [], demoReport, demoDate = 
               )}
             </Panel>
 
-            <Panel title="By category">
-              {shownReport.by_category.length === 0 ? (
-                <EmptyNote>Nothing rung in yet.</EmptyNote>
-              ) : (
-                <ul className="grid gap-1 text-sm">
-                  {shownReport.by_category.map((row) => (
-                    <li className="flex items-baseline justify-between gap-2" key={row.category}>
-                      <span className="min-w-0 truncate">
-                        {row.category}{" "}
-                        <span className="text-xs text-[#6b7280]">×{row.quantity}</span>
-                      </span>
-                      <span className="shrink-0 tabular-nums">{formatMoney(row.total)}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Panel>
-
             <Panel title="Top products">
-              {shownReport.top_products.length === 0 ? (
+              {report.top_products.length === 0 ? (
                 <EmptyNote>Nothing rung in yet.</EmptyNote>
               ) : (
                 <ul className="grid gap-1 text-sm">
-                  {shownReport.top_products.map((row) => (
+                  {report.top_products.map((row) => (
                     <li className="flex items-baseline justify-between gap-2" key={row.product_id}>
                       <span className="min-w-0 truncate">
                         {row.name} <span className="text-xs text-[#6b7280]">×{row.quantity}</span>
@@ -223,14 +223,14 @@ export default function SalesTab({ demo, demoSales = [], demoReport, demoDate = 
         </>
       ) : null}
 
-      <Panel title={`Sales — ${demo ? demoDate : date}`}>
-        {loading && !demo ? (
+      <Panel title={`Receipts — ${date}`}>
+        {loading ? (
           <SkeletonRows count={5} />
-        ) : shownSales.length === 0 ? (
+        ) : sales.length === 0 ? (
           <EmptyNote>No sales recorded for this date.</EmptyNote>
         ) : (
           <ul className="grid gap-2">
-            {shownSales.map((sale) => (
+            {sales.map((sale) => (
               <li key={sale.id}>
                 <button
                   className="flex min-h-14 w-full items-center justify-between gap-3 border border-[#e4e4e8] px-3 py-2 text-left hover:border-[#4533ff]"
@@ -274,7 +274,6 @@ export default function SalesTab({ demo, demoSales = [], demoReport, demoDate = 
 
       {selected ? (
         <SaleDetail
-          demo={demo}
           onClose={() => setSelected(null)}
           onRefunded={applyRefund}
           sale={selected}
@@ -288,12 +287,10 @@ export default function SalesTab({ demo, demoSales = [], demoReport, demoDate = 
 
 function SaleDetail({
   sale,
-  demo,
   onClose,
   onRefunded,
 }: {
   sale: Sale;
-  demo: boolean;
   onClose: () => void;
   onRefunded: (updated: Sale) => void;
 }) {
@@ -309,7 +306,7 @@ function SaleDetail({
   }, [sale.created_at]);
 
   async function refund() {
-    if (demo || !reason.trim()) return;
+    if (!reason.trim()) return;
     setBusy(true);
     setError("");
     try {
@@ -404,8 +401,8 @@ function SaleDetail({
         {sale.note ? <p className="text-xs text-[#6b7280]">{sale.note}</p> : null}
 
         {/* 다시 찍은 종이에는 REPRINT 가 찍힌다. 원본과 사본을 들고 두 번 환불받으러
-            오는 것을 창구에서 가려낼 수 있어야 한다. 데모 매출은 예시라 찍지 않는다. */}
-        <Button disabled={demo} full onClick={() => printReceipt(sale, { reprint: true })}>
+            오는 것을 창구에서 가려낼 수 있어야 한다. */}
+        <Button full onClick={() => printReceipt(sale, { reprint: true })}>
           Reprint receipt
         </Button>
 
@@ -429,7 +426,7 @@ function SaleDetail({
             <div className="flex gap-2">
               <Button
                 className="flex-1"
-                disabled={demo || busy || !reason.trim()}
+                disabled={busy || !reason.trim()}
                 onClick={refund}
                 tone="danger"
               >
@@ -441,16 +438,11 @@ function SaleDetail({
             </div>
           </div>
         ) : (
-          <Button disabled={demo} full onClick={() => setConfirming(true)} tone="danger">
+          <Button full onClick={() => setConfirming(true)} tone="danger">
             Refund this sale
           </Button>
         )}
 
-        {demo ? (
-          <p className="bg-[#fff8e1] px-2 py-2 text-xs text-[#5b4708]">
-            예시 데이터입니다. 서버에 연결되기 전까지는 환불을 기록할 수 없습니다.
-          </p>
-        ) : null}
       </div>
     </Modal>
   );

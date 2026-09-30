@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * 프로 샵 리테일(POS). 계산 / 상품·재고 / 매출·마감 세 가지를 **한 페이지 안의
- * 상태**로 전환한다.
+ * 프로 샵 리테일(POS). 계산 / 상품·재고 두 가지를 **한 페이지 안의 상태**로 전환한다.
+ * 매출·마감은 여기 없다 — 클럽 종합 보고서(Reports)로 가는 링크만 둔다(2026-09-30 일원화).
  *
  * 왜 라우트를 쪼개지 않는가: 정적 export 라 탭마다 페이지를 만들면 이동할 때마다
  * 컴포넌트가 새로 마운트되어 **담아 둔 장바구니가 날아간다.** 계산 중에 재고를
@@ -10,37 +10,31 @@
  *
  * 같은 이유로 탭 전환도 `{tab === "register" ? <RegisterTab/> : null}` 로 하면 안 된다.
  * 조건부 렌더는 **언마운트**라서 라우트를 쪼갠 것과 똑같이 장바구니가 사라진다.
- * 그래서 셋 다 켜 두고 `hidden` 으로 **보이기만** 끈다.
+ * 그래서 둘 다 켜 두고 `hidden` 으로 **보이기만** 끈다.
  *
  * 데이터는 여기서 한 번만 읽어서 탭에 내려 준다. 탭마다 각자 읽으면 계산대에서
  * 팔린 재고가 상품 목록에는 반영되지 않은, 서로 다른 두 진실이 생긴다.
  *
  * 프로 샵(`/admin/retail`)과 스낵바(`/admin/snack-bar`)가 이 한 벌을 같이 쓴다. 스낵바는
  * `category` 로 `Food & Beverage` 만 보는 계산대다 — 계산대를 두 개 만들면 결제·영수증·
- * 스캐너 규칙이 따로 늙는다. 매출(Sales) 탭은 클럽 전체 장부를 보여 주고, 어디서 팔렸는지는 "By station" 칸이 나눈다.
+ * 스캐너 규칙이 따로 늙는다.
  */
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import AdminShell from "@/components/admin/AdminShell";
 import ProductsTab from "@/components/retail/ProductsTab";
 import RegisterTab from "@/components/retail/RegisterTab";
-import SalesTab from "@/components/retail/SalesTab";
-import {
-  demoBusinessDate,
-  demoLowStock,
-  demoProducts,
-  demoReport,
-  demoSales,
-} from "@/components/retail/demoData";
+import { demoLowStock, demoProducts } from "@/components/retail/demoData";
 import { Chip, ErrorNote, OfflineBanner } from "@/components/retail/ui";
+import { ADMIN_REPORTS } from "@/lib/nav";
 import retailApi, { toRetailError } from "@/lib/retail/api";
 import type { LowStockItem, Product, RetailCategory } from "@/lib/retail/types";
 
 const TABS = [
   { id: "register", label: "Register" },
   { id: "products", label: "Products" },
-  { id: "sales", label: "Sales" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -120,14 +114,6 @@ export default function RetailWorkspace({ title, category }: Props) {
     void load({ background: true });
   }, [load]);
 
-  // 매출 탭은 **처음 열었을 때** 마운트한다. 처음부터 켜 두면 계산대만 쓸
-  // 사람에게도 매출·리포트 두 요청이 나간다. 한 번 열린 뒤에는 계속 켜 두어
-  // 고른 날짜와 스크롤 위치가 유지된다.
-  const [salesOpened, setSalesOpened] = useState(false);
-  useEffect(() => {
-    if (tab === "sales") setSalesOpened(true);
-  }, [tab]);
-
   // 데모 = 서버 없이 예시를 보고 있는 상태. 저장 계열 버튼을 전부 잠근다.
   // 저장된 줄 알았는데 아무 데도 안 남는 것이 빈 화면보다 나쁘다.
   const demo = offline;
@@ -152,6 +138,12 @@ export default function RetailWorkspace({ title, category }: Props) {
               {item.label}
             </Chip>
           ))}
+          <Link
+            className="inline-flex min-h-11 shrink-0 items-center border border-[#d4d4d8] bg-white px-3 text-sm font-bold whitespace-nowrap text-[#3f434a] hover:bg-[#f2f2f4]"
+            href={ADMIN_REPORTS}
+          >
+            Sales report →
+          </Link>
         </div>
       }
       title={title}
@@ -186,18 +178,6 @@ export default function RetailWorkspace({ title, category }: Props) {
             products={shownProducts}
           />
         </div>
-
-        {salesOpened ? (
-          <div className={tab === "sales" ? "min-w-0" : "hidden"}>
-            <SalesTab
-              demo={demo}
-              demoDate={demoBusinessDate}
-              demoReport={demoReport}
-              demoSales={demoSales}
-              offline={offline}
-            />
-          </div>
-        ) : null}
       </div>
     </AdminShell>
   );
