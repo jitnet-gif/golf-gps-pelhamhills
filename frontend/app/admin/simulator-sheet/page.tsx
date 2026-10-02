@@ -48,7 +48,7 @@ const SLOTS = ((CLOSE_HOUR - OPEN_HOUR) * 60) / SLOT_MIN;
 
 const BAY_TYPE_LABEL: Record<string, string> = {
   right_handed: "Right-Handed",
-  left_right: "Left & Right",
+  left_right: "Right & Left Handed",
   vip: "VIP Lounge",
 };
 
@@ -288,6 +288,8 @@ export default function SimulatorSheetPage() {
       return;
     }
     setConfirmCancel(false);
+    // 1분 주기를 기다리지 않고 그날 예약을 다시 읽는다 — 방금 들어온 온라인 예약도 막히게.
+    reload();
     setDraft({
       bay_id,
       date,
@@ -507,11 +509,32 @@ export default function SimulatorSheetPage() {
   const subtotal =
     draft && draftBay ? draftBay.hourly_rate * draft.duration_hours : 0;
   const draftMaxHours = draft
-    ? Math.max(
-        maxHoursFrom(draft.bay_id, draft.start_time, draft.id),
-        draft.duration_hours,
-      )
+    ? maxHoursFrom(draft.bay_id, draft.start_time, draft.id)
     : 1;
+  // 편집 패널의 Bay·Start 도 그날의 기존 예약을 본다 — 이미 찬 베이·시각은 고를 수 없다.
+  // 자기 자신(draft.id)은 빼고 본다. 옮기는 중인 예약이 제 자리를 막지 않게.
+  function bayBlocked(bay_id: number) {
+    if (!draft) return false;
+    if (bayState[bay_id] && bayState[bay_id] !== "open") return true;
+    return maxHoursFrom(bay_id, draft.start_time, draft.id) < 1;
+  }
+  function startBlocked(start: string) {
+    if (!draft) return false;
+    return maxHoursFrom(draft.bay_id, start, draft.id) < 1;
+  }
+  // 베이나 시작 시각을 바꾸면 그 자리에서 가능한 만큼으로 시간을 줄인다.
+  function moveDraft(next: { bay_id?: number; start_time?: string }) {
+    if (!draft) return;
+    const bay_id = next.bay_id ?? draft.bay_id;
+    const start_time = next.start_time ?? draft.start_time;
+    const max = maxHoursFrom(bay_id, start_time, draft.id);
+    setDraft({
+      ...draft,
+      bay_id,
+      start_time,
+      duration_hours: Math.max(1, Math.min(draft.duration_hours, max)),
+    });
+  }
   const startOptions = Array.from({ length: SLOTS }, (_, i) =>
     fromMin(OPEN_HOUR * 60 + i * SLOT_MIN),
   );
@@ -975,16 +998,23 @@ export default function SimulatorSheetPage() {
                     <select
                       className="border border-[#c7c7cc] bg-white px-1 py-1"
                       id="sim-bay"
-                      onChange={(e) =>
-                        setDraft({ ...draft, bay_id: Number(e.target.value) })
-                      }
+                      onChange={(e) => moveDraft({ bay_id: Number(e.target.value) })}
                       value={draft.bay_id}
                     >
-                      {bays.map((b) => (
-                        <option key={b.id} value={b.id}>
-                          Bay {b.bay_number}
-                        </option>
-                      ))}
+                      {bays.map((b) => {
+                        const st = bayState[b.id] ?? "open";
+                        const blocked = bayBlocked(b.id);
+                        return (
+                          <option
+                            disabled={blocked && b.id !== draft.bay_id}
+                            key={b.id}
+                            value={b.id}
+                          >
+                            Bay {b.bay_number}
+                            {blocked ? (st !== "open" ? ` · ${st}` : " · booked") : ""}
+                          </option>
+                        );
+                      })}
                     </select>
                   </label>
                   <label className="grid gap-1">
@@ -992,16 +1022,22 @@ export default function SimulatorSheetPage() {
                     <select
                       className="border border-[#c7c7cc] bg-white px-1 py-1"
                       id="sim-start"
-                      onChange={(e) =>
-                        setDraft({ ...draft, start_time: e.target.value })
-                      }
+                      onChange={(e) => moveDraft({ start_time: e.target.value })}
                       value={draft.start_time}
                     >
-                      {startOptions.map((t) => (
-                        <option key={t} value={t}>
-                          {fmt12(t)}
-                        </option>
-                      ))}
+                      {startOptions.map((t) => {
+                        const blocked = startBlocked(t);
+                        return (
+                          <option
+                            disabled={blocked && t !== draft.start_time}
+                            key={t}
+                            value={t}
+                          >
+                            {fmt12(t)}
+                            {blocked ? " · booked" : ""}
+                          </option>
+                        );
+                      })}
                     </select>
                   </label>
                   <label className="grid gap-1">
@@ -1018,7 +1054,11 @@ export default function SimulatorSheetPage() {
                       value={draft.duration_hours}
                     >
                       {[1, 2, 3, 4].map((n) => (
-                        <option disabled={n > draftMaxHours} key={n} value={n}>
+                        <option
+                          disabled={n > draftMaxHours && n !== draft.duration_hours}
+                          key={n}
+                          value={n}
+                        >
                           {n}h
                         </option>
                       ))}

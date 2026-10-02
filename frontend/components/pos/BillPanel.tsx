@@ -17,7 +17,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import { newCheckoutId, TERMINAL_METHODS, type Bill, type BillStation, type PaymentInput } from "@/lib/pos/api";
-import { billActions, useCurrentBill } from "@/lib/pos/currentBill";
+import { billActions, recentCashiers, rememberCashier, rememberedCashier, useCurrentBill } from "@/lib/pos/currentBill";
 import { printReceipt } from "@/lib/retail/printReceipt";
 import { PAYMENT_LABELS } from "@/lib/retail/receipt";
 import { PAYMENT_METHODS, formatMoney, parseMoney, type PaymentMethod, type Sale } from "@/lib/retail/types";
@@ -107,6 +107,28 @@ export default function BillPanel({ station, demo = false, onPaid, revealPayment
     setPayments([]);
   }
 
+  // 담당자 이름. 담당자별 마감과 팁 나누기가 이 이름으로 묶인다(0010). 계산서에 없으면 이 기기가
+  // 마지막으로 쓴 이름을 미리 넣는다 — 서버에는 칸을 떠날 때나 Charge 직전에 보낸다.
+  const [cashier, setCashier] = useState("");
+  const [cashierFor, setCashierFor] = useState<number | null>(null);
+  const [cashierError, setCashierError] = useState("");
+  if (cashierFor !== billId) {
+    setCashierFor(billId);
+    setCashier(bill?.cashier ?? (billId ? rememberedCashier() : ""));
+    setCashierError("");
+  }
+
+  async function commitCashier(): Promise<boolean> {
+    const name = cashier.trim().replace(/\s+/g, " ");
+    if (!name) return false;
+    rememberCashier(name);
+    if (bill && name !== (bill.cashier ?? "")) {
+      const updated = await billActions.update({ cashier: name }, station);
+      if (!updated) return false;
+    }
+    return true;
+  }
+
   const paymentsRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!revealPayments) return;
@@ -125,7 +147,15 @@ export default function BillPanel({ station, demo = false, onPaid, revealPayment
 
   async function charge() {
     if (!bill || !canCharge || charging) return;
+    if (!cashier.trim()) {
+      setCashierError("Enter who is ringing this in. Close-outs and tips go by this name.");
+      return;
+    }
     setCharging(true);
+    if (!(await commitCashier())) {
+      setCharging(false);
+      return;
+    }
     if (!checkoutRef.current) checkoutRef.current = newCheckoutId();
     const paid = await billActions.pay(checkoutRef.current, payments.map(toPaymentInput));
     setCharging(false);
@@ -190,13 +220,25 @@ export default function BillPanel({ station, demo = false, onPaid, revealPayment
             />
           </div>
 
-          <TextField
-            key={`cashier-${bill.id}`}
-            initial={bill.cashier ?? ""}
-            label="Cashier"
-            onCommit={(value) => billActions.update({ cashier: value }, station)}
-            placeholder="Who rang this in"
-          />
+          <Field hint="Your name — close-outs and tips go by it" label="Cashier">
+            <TextInput
+              autoComplete="off"
+              list="pelham-cashiers"
+              onBlur={() => void commitCashier()}
+              onChange={(event) => {
+                setCashier(event.target.value);
+                setCashierError("");
+              }}
+              placeholder="Who is ringing this in"
+              value={cashier}
+            />
+          </Field>
+          <datalist id="pelham-cashiers">
+            {recentCashiers().map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
+          {cashierError ? <ErrorNote>{cashierError}</ErrorNote> : null}
         </>
       ) : null}
 
@@ -380,14 +422,20 @@ function PaymentsEditor({
   const [amountInput, setAmountInput] = useState("");
   const [authCode, setAuthCode] = useState("");
   const [last4, setLast4] = useState("");
+  const [tipInput, setTipInput] = useState("");
   const [formError, setFormError] = useState("");
   const [preparing, setPreparing] = useState(false);
   const keyRef = useRef(1);
 
   const needsTerminal = TERMINAL_METHODS.includes(method);
-  const typed = amountInput.trim() ? parseMoney(amountInput) : remaining;
-
-  const change = method === "cash" && typed > remaining ? typed - remaining : 0;
+  // 팁은 계산서 합계 밖이다(매출이 아니라 직원 몫 — 마감에서 근무시간으로 나눈다).
+  // 카드·체크카드는 DX8000 전표의 팁을, 현금은 손님이 "잔돈은 두세요" 한 만큼을 적는다.
+  const tip = tipInput.trim() ? parseMoney(tipInput) : 0;
+  const isCash = method === "cash";
+  const typed = amountInput.trim() ? parseMoney(amountInput) : remaining + (isCash ? tip : 0);
+  // 현금: 받은 돈에서 팁을 먼저 떼고 계산서에 넣는다. 남으면 거스름돈.
+  const cashForBill = isCash ? Math.min(typed - tip, remaining) : typed;
+  const change = isCash && typed - tip > remaining ? typed - tip - remaining : 0;
 
   async function add() {
     setFormError("");
@@ -411,12 +459,20 @@ function PaymentsEditor({
         return;
       }
     }
+    if (tip < 0) {
+      setFormError("Tip cannot be negative.");
+      return;
+    }
     if (typed <= 0) {
       setFormError("Enter an amount above $0.00.");
       return;
     }
+    if (isCash && cashForBill <= 0) {
+      setFormError("The cash received does not cover the tip.");
+      return;
+    }
     // 현금은 받은 돈이 남은 금액보다 많아도 된다(거스름돈). 계산서에는 남은 금액만큼만 들어간다.
-    const applied = method === "cash" ? Math.min(typed, remaining) : typed;
+    const applied = cashForBill;
     if (applied > remaining) {
       setFormError(`Only ${formatMoney(remaining)} is left on the bill.`);
       return;
@@ -428,6 +484,7 @@ function PaymentsEditor({
         key,
         method,
         amount: applied,
+        ...(tip > 0 ? { tip } : {}),
         ...(method === "cash" ? { cashReceived: typed } : {}),
         ...(needsTerminal ? { auth_code: authCode.trim(), ...(last4 ? { card_last4: last4 } : {}) } : {}),
       },
@@ -435,6 +492,7 @@ function PaymentsEditor({
     setAmountInput("");
     setAuthCode("");
     setLast4("");
+    setTipInput("");
   }
 
   return (
@@ -452,9 +510,12 @@ function PaymentsEditor({
                     {payment.card_last4 ? ` · ****${payment.card_last4}` : ""}
                   </span>
                 ) : null}
-                {payment.cashReceived && payment.cashReceived > payment.amount ? (
+                {payment.tip ? (
+                  <span className="block text-[11px] text-[#6b7280]">+ tip {formatMoney(payment.tip)}</span>
+                ) : null}
+                {payment.cashReceived && payment.cashReceived > payment.amount + (payment.tip ?? 0) ? (
                   <span className="block text-[11px] font-bold text-[#1f6b3a]">
-                    Change {formatMoney(payment.cashReceived - payment.amount)}
+                    Change {formatMoney(payment.cashReceived - payment.amount - (payment.tip ?? 0))}
                   </span>
                 ) : null}
               </span>
@@ -491,7 +552,7 @@ function PaymentsEditor({
               <TextInput
                 inputMode="decimal"
                 onChange={(event) => setAmountInput(event.target.value)}
-                placeholder={(remaining / 100).toFixed(2)}
+                placeholder={((remaining + (isCash ? tip : 0)) / 100).toFixed(2)}
                 value={amountInput}
               />
             </Field>
@@ -524,6 +585,17 @@ function PaymentsEditor({
               </div>
             </>
           ) : null}
+          <Field
+            hint={needsTerminal ? "From the DX8000 slip" : isCash ? "Only if they leave it as a tip" : undefined}
+            label="Tip (optional)"
+          >
+            <TextInput
+              inputMode="decimal"
+              onChange={(event) => setTipInput(event.target.value)}
+              placeholder="0.00"
+              value={tipInput}
+            />
+          </Field>
           {change > 0 ? (
             <p className="text-sm font-bold text-[#1f6b3a]">Change due: {formatMoney(change)}</p>
           ) : null}
@@ -579,33 +651,6 @@ function MoneyField({
     );
   }
   return <Field label={label}>{input}</Field>;
-}
-
-function TextField({
-  initial,
-  label,
-  placeholder,
-  onCommit,
-}: {
-  initial: string;
-  label: string;
-  placeholder?: string;
-  onCommit: (value: string) => void;
-}) {
-  const [value, setValue] = useState(initial);
-  return (
-    <Field label={label}>
-      <TextInput
-        autoComplete="off"
-        onBlur={() => {
-          if (value.trim() !== initial.trim()) onCommit(value);
-        }}
-        onChange={(event) => setValue(event.target.value)}
-        placeholder={placeholder}
-        value={value}
-      />
-    </Field>
-  );
 }
 
 function Row({ label, value }: { label: string; value: string }) {

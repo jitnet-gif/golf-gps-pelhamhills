@@ -24,7 +24,7 @@ import { useBarcodeScanner } from "@/hooks/useBarcodeScanner";
 import type { BillStation } from "@/lib/pos/api";
 import { findProductByCode } from "@/lib/retail/findProduct";
 import { billActions, useCurrentBill } from "@/lib/pos/currentBill";
-import { RETAIL_CATEGORIES, formatMoney, type Product, type RetailCategory } from "@/lib/retail/types";
+import { LOW_STOCK_RED_BELOW, RETAIL_CATEGORIES, formatMoney, type Product, type RetailCategory } from "@/lib/retail/types";
 
 import { Chip, EmptyNote, ErrorNote, SkeletonCards, TextInput, useOverlayDismiss } from "./ui";
 
@@ -351,6 +351,7 @@ function ProductButton({ product, onAdd }: { product: Product; onAdd: () => void
   // 재고 개념이 없는 렌탈은 `stock: null` 이다. 0 과 구분하지 않으면 "품절" 로
   // 보여서 팔 수 있는 것을 못 팔게 된다.
   const out = product.stock !== null && product.stock <= 0;
+  const red = product.stock !== null && product.stock < LOW_STOCK_RED_BELOW;
   return (
     <button
       className={`flex min-h-[104px] min-w-0 flex-col justify-between gap-1 border p-2.5 text-left ${
@@ -366,7 +367,9 @@ function ProductButton({ product, onAdd }: { product: Product; onAdd: () => void
         <span className="block truncate text-[11px] text-[#6b7280]">{product.sku}</span>
         <span className="flex items-baseline justify-between gap-2">
           <span className="text-base font-bold tabular-nums">{formatMoney(product.price)}</span>
-          <span className={`text-[11px] ${out ? "font-bold text-[#8a1f1f]" : "text-[#6b7280]"}`}>
+          <span
+            className={`text-[11px] ${out ? "font-bold text-[#8a1f1f]" : red ? "text-[#8a1f1f]" : "text-[#6b7280]"}`}
+          >
             {product.stock === null ? "—" : out ? "Out" : `${product.stock} left`}
           </span>
         </span>

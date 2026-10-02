@@ -13,6 +13,9 @@
  * 같은 물건 두 개는 하나 찍고, 치웠다가, 다시 비추면 된다.
  *
  * 카메라는 HTTPS(또는 localhost)에서만 켜진다. 배포 주소는 HTTPS 다.
+ *
+ * 전면/후면은 헤더의 ⇄ 버튼으로 바꾼다. 거치대에 세운 아이패드는 화면이 손님 쪽을 보므로
+ * 전면 카메라에 물건을 대는 편이 편하다. 고른 쪽은 기기에 기억해 두고 다음에도 그쪽으로 연다.
  */
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -39,24 +42,50 @@ type Props = {
 const SAME_CODE_GAP_MS = 1200;
 
 /** 매장에서 붙는 1D 바코드 + 영수증의 Code 128 + QR. 형식을 좁히면 읽는 속도가 빨라진다. */
-const FORMAT_NAMES = [
-  "EAN_13",
-  "EAN_8",
-  "UPC_A",
-  "UPC_E",
-  "CODE_128",
-  "CODE_39",
-  "ITF",
-  "QR_CODE",
-] as const;
+const FORMAT_NAMES = ["EAN_13", "EAN_8", "UPC_A", "UPC_E", "CODE_128", "CODE_39", "ITF", "QR_CODE"] as const;
 
 type Flash = { ok: boolean; message: string; at: number };
+
+/** environment = 후면, user = 전면(셀카). */
+type Facing = "environment" | "user";
+
+const FACING_KEY = "pelham.cameraScan.facing";
+
+function readFacing(): Facing {
+  try {
+    return window.localStorage.getItem(FACING_KEY) === "user" ? "user" : "environment";
+  } catch {
+    return "environment";
+  }
+}
+
+function currentDeviceId(video: HTMLVideoElement): string {
+  const stream = video.srcObject instanceof MediaStream ? video.srcObject : null;
+  return stream?.getVideoTracks()[0]?.getSettings().deviceId ?? "";
+}
 
 export default function CameraScanner({ onCode, onDone, onClose, summary, canPay }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [status, setStatus] = useState<"starting" | "live" | "error">("starting");
   const [problem, setProblem] = useState("");
   const [flash, setFlash] = useState<Flash | null>(null);
+  const [facing, setFacing] = useState<Facing>(readFacing);
+  /** 카메라가 둘 이상일 때만 전환 버튼을 보인다. 권한을 받기 전에는 개수를 알 수 없다. */
+  const [cameraCount, setCameraCount] = useState(0);
+  /** 지금 켜진 카메라. 전환했는데 같은 것이 다시 열렸는지 알아보는 데 쓴다. */
+  const deviceIdRef = useRef("");
+
+  function switchCamera() {
+    const next: Facing = facing === "user" ? "environment" : "user";
+    try {
+      window.localStorage.setItem(FACING_KEY, next);
+    } catch {
+      // 기억 못 해도 지금 전환은 된다.
+    }
+    setStatus("starting");
+    setFlash(null);
+    setFacing(next);
+  }
 
   // 콜백은 매 렌더 바뀐다. 카메라를 다시 켜지 않도록 ref 로 최신 것만 들고 있는다.
   const onCodeRef = useRef(onCode);
@@ -100,8 +129,17 @@ export default function CameraScanner({ onCode, onDone, onClose, summary, canPay
     navigator.vibrate?.(ok ? 40 : [80, 60, 80]);
   }
 
+  // 소리는 카메라를 바꿔도 이어 쓴다. 화면이 닫힐 때만 놓는다.
   useEffect(() => {
     unlockAudio();
+    return () => {
+      void audioRef.current?.close().catch(() => undefined);
+      audioRef.current = null;
+    };
+    // 한 번만.
+  }, []);
+
+  useEffect(() => {
     let stopped = false;
     let controls: { stop: () => void } | null = null;
     let lastCode = "";
@@ -135,43 +173,85 @@ export default function CameraScanner({ onCode, onDone, onClose, summary, canPay
         video.muted = true;
         video.setAttribute("playsinline", "true");
 
-        const started = await reader.decodeFromConstraints(
-          {
-            audio: false,
-            video: {
-              facingMode: { ideal: "environment" },
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-            },
+        const constraints = (mode: "exact" | "ideal"): MediaStreamConstraints => ({
+          audio: false,
+          video: {
+            facingMode: { [mode]: facing },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
           },
-          video,
-          (result) => {
-            if (!result) return;
-            const code = result.getText().trim();
-            const now = Date.now();
-            const repeat = code === lastCode && now - lastSeen < SAME_CODE_GAP_MS;
-            lastSeen = now;
-            if (repeat || busy || !code) return;
-            lastCode = code;
-            busy = true;
-            void onCodeRef
-              .current(code)
-              .then((outcome) => {
-                beep(outcome.ok);
-                setFlash({ ...outcome, at: now });
-              })
-              .finally(() => {
-                busy = false;
-                // 담는 동안(서버 왕복) 계속 비추고 있었다면 그 시간도 "보이는 중" 으로 친다.
-                lastSeen = Date.now();
-              });
-          },
-        );
+        });
+        const onResult: Parameters<typeof reader.decodeFromConstraints>[2] = (result) => {
+          if (!result) return;
+          const code = result.getText().trim();
+          const now = Date.now();
+          const repeat = code === lastCode && now - lastSeen < SAME_CODE_GAP_MS;
+          lastSeen = now;
+          if (repeat || busy || !code) return;
+          lastCode = code;
+          busy = true;
+          void onCodeRef
+            .current(code)
+            .then((outcome) => {
+              beep(outcome.ok);
+              setFlash({ ...outcome, at: now });
+            })
+            .finally(() => {
+              busy = false;
+              // 담는 동안(서버 왕복) 계속 비추고 있었다면 그 시간도 "보이는 중" 으로 친다.
+              lastSeen = Date.now();
+            });
+        };
+        // `exact` 로 먼저 청한다. `ideal` 만 주면 일부 기기는 전면을 골라도 후면을 준다.
+        // 그 방향 카메라가 아예 없는 기기(카메라 하나짜리 노트북 등)면 있는 것으로 연다.
+        let started;
+        try {
+          started = await reader.decodeFromConstraints(constraints("exact"), video, onResult);
+        } catch (cause) {
+          const name = (cause as { name?: string })?.name ?? "";
+          if (name !== "OverconstrainedError" && name !== "NotFoundError") throw cause;
+          if (stopped) return;
+          started = await reader.decodeFromConstraints(constraints("ideal"), video, onResult);
+        }
         if (stopped) {
           started.stop();
           return;
         }
         controls = started;
+
+        // 권한을 받은 뒤라야 장치 목록이 나온다.
+        let cameras: MediaDeviceInfo[] = [];
+        try {
+          cameras = (await navigator.mediaDevices.enumerateDevices()).filter(
+            (device) => device.kind === "videoinput",
+          );
+        } catch {
+          // 목록을 못 읽으면 버튼을 숨긴 채로 둔다.
+        }
+        if (stopped) return;
+        setCameraCount(cameras.length);
+
+        // 전환했는데 같은 카메라가 다시 열렸다 — 방향 정보가 없는 카메라(노트북의 외장 웹캠 등)다.
+        // 그때는 방향 대신 장치를 직접 골라 다른 카메라로 연다.
+        const previous = deviceIdRef.current;
+        const other = cameras.find((camera) => camera.deviceId && camera.deviceId !== previous);
+        if (previous && currentDeviceId(video) === previous && other) {
+          started.stop();
+          started = await reader.decodeFromConstraints(
+            {
+              audio: false,
+              video: { deviceId: { exact: other.deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } },
+            },
+            video,
+            onResult,
+          );
+          if (stopped) {
+            started.stop();
+            return;
+          }
+          controls = started;
+        }
+        deviceIdRef.current = currentDeviceId(video);
         setStatus("live");
       } catch (cause) {
         if (stopped) return;
@@ -191,11 +271,9 @@ export default function CameraScanner({ onCode, onDone, onClose, summary, canPay
     return () => {
       stopped = true;
       controls?.stop();
-      void audioRef.current?.close().catch(() => undefined);
-      audioRef.current = null;
     };
-    // 한 번만 켠다. 콜백은 ref 로 최신을 쓴다.
-  }, []);
+    // 방향이 바뀔 때만 다시 켠다. 콜백은 ref 로 최신을 쓴다.
+  }, [facing]);
 
   // 결과 문구는 잠깐만 보인다.
   useEffect(() => {
@@ -228,18 +306,35 @@ export default function CameraScanner({ onCode, onDone, onClose, summary, canPay
     >
       <header className="flex items-center justify-between gap-2 px-3 pt-[max(env(safe-area-inset-top),0.5rem)] pb-2">
         <h2 className="text-sm font-bold">Camera scan</h2>
-        <button
-          aria-label="Close camera"
-          className="flex min-h-11 min-w-11 items-center justify-center text-2xl leading-none"
-          onClick={onClose}
-          type="button"
-        >
-          <span aria-hidden>×</span>
-        </button>
+        <div className="flex items-center gap-1">
+          {cameraCount > 1 ? (
+            <button
+              aria-label={facing === "user" ? "Switch to back camera" : "Switch to front camera"}
+              className="inline-flex min-h-11 items-center gap-1.5 border border-white/40 px-3 text-xs font-bold"
+              onClick={switchCamera}
+              type="button"
+            >
+              <span aria-hidden>⇄</span>
+              {facing === "user" ? "Front" : "Back"}
+            </button>
+          ) : null}
+          <button
+            aria-label="Close camera"
+            className="flex min-h-11 min-w-11 items-center justify-center text-2xl leading-none"
+            onClick={onClose}
+            type="button"
+          >
+            <span aria-hidden>×</span>
+          </button>
+        </div>
       </header>
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
-        <video className="absolute inset-0 h-full w-full object-cover" ref={videoRef} />
+        {/* 전면은 거울처럼 보여야 물건을 어느 쪽으로 옮길지 헷갈리지 않는다. 읽기는 원본 프레임으로 한다. */}
+        <video
+          className={`absolute inset-0 h-full w-full object-cover ${facing === "user" ? "-scale-x-100" : ""}`}
+          ref={videoRef}
+        />
 
         {/* 조준 틀. 바코드를 이 안에 넣으라는 표시일 뿐, 읽기는 화면 전체에서 한다. */}
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">

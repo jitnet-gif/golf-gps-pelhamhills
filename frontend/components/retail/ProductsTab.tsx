@@ -15,6 +15,7 @@ import { useBarcodeScanner } from "@/hooks/useBarcodeScanner";
 
 import retailApi, { toRetailError } from "@/lib/retail/api";
 import {
+  LOW_STOCK_RED_BELOW,
   RETAIL_CATEGORIES,
   formatMoney,
   parseMoney,
@@ -282,9 +283,11 @@ export default function ProductsTab({
 /** 렌탈은 `stock: null` — 재고 개념이 없다. 0 과 같이 보이면 품절로 오해한다. */
 function StockText({ product }: { product: Product }) {
   if (product.stock === null) return <span className="text-[#6b7280]">Not tracked</span>;
+  // 20개 미만이면 빨간 글씨, 재주문점 이하이면 굵게까지.
   const low = product.stock <= product.reorder_point;
+  const red = low || product.stock < LOW_STOCK_RED_BELOW;
   return (
-    <span className={low ? "font-bold text-[#8a1f1f]" : undefined}>
+    <span className={red ? `text-[#8a1f1f]${low ? " font-bold" : ""}` : undefined}>
       {product.stock} in stock
     </span>
   );

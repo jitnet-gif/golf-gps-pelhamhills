@@ -343,7 +343,7 @@ function SidebarNote() {
       <div className="bg-[#fffbd5] p-3 text-[11px] leading-5 text-[#2f2f21]" role="tabpanel">
         {tab === "note" ? (
           <>
-            <p>John&apos;s Mobile #: 905-512-8755</p>
+            <p>Francis&apos; Mobile #: 1-416-822-7609</p>
             <p>Course: Pelham Hills</p>
           </>
         ) : (

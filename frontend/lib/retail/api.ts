@@ -22,6 +22,8 @@ import { MISSING_MIGRATION_MESSAGE, isMissingMigration } from "@/lib/pos/api";
 import {
   computeTax,
   type Cents,
+  type CloseoutReport,
+  type CloseoutSave,
   type LowStockItem,
   type Product,
   type ProductCreate,
@@ -80,6 +82,19 @@ async function call<T>(fn: string, args: Record<string, unknown> = {}): Promise<
   }
 }
 
+/** 0010 이 아직 안 돌았을 때. 0005 문구로 내려가면 엉뚱한 파일을 다시 돌리게 된다. */
+export const CLOSEOUT_MISSING_MESSAGE =
+  "담당자별 마감이 아직 켜지지 않았습니다. Supabase SQL Editor 에서 0010_staff_closeout.sql 을 실행해 주세요.";
+
+async function closeoutCall<T>(fn: string, args: Record<string, unknown>): Promise<T> {
+  try {
+    return await staffRpc<T>(fn, args);
+  } catch (cause) {
+    if (isMissingMigration(cause)) throw new RetailApiError("http", 404, CLOSEOUT_MISSING_MESSAGE);
+    throw toRetailError(cause);
+  }
+}
+
 /** 매장 현지 날짜 `YYYY-MM-DD`. `toISOString()` 은 UTC 라 저녁에 하루가 밀린다. */
 export function localBusinessDate(date: Date = new Date()): string {
   const pad = (value: number) => String(value).padStart(2, "0");
@@ -130,6 +145,17 @@ export const retailApi = {
     call<RetailDailyReport>("pelham_staff_pos_report_daily", { p_date: businessDate }),
 
   listLowStock: () => call<LowStockItem[]>("pelham_staff_pos_low_stock"),
+
+  // ===== 담당자별 마감 + 팁 나누기 (0010) =====
+  getCloseouts: (businessDate: string) =>
+    closeoutCall<CloseoutReport>("pelham_staff_closeout_report", { p_date: businessDate }),
+
+  /** 마감(같은 사람을 다시 마감하면 덮어쓴다). 리포트 전체를 돌려준다. */
+  saveCloseout: (businessDate: string, body: CloseoutSave) =>
+    closeoutCall<CloseoutReport>("pelham_staff_closeout_save", { p_date: businessDate, p: body }),
+
+  reopenCloseout: (businessDate: string, staffKey: string) =>
+    closeoutCall<CloseoutReport>("pelham_staff_closeout_reopen", { p_date: businessDate, p_staff_key: staffKey }),
 };
 
 export default retailApi;

@@ -71,7 +71,7 @@ function networkMessage(err: unknown, action: string): string {
 export default function IndoorGolfBooking() {
   const [step, setStep] = useState(1);
   const [selectedDate, setSelectedDate] = useState("");
-  const [selectedBayType, setSelectedBayType] = useState("right_handed");
+  const [selectedBayType, setSelectedBayType] = useState("left_right");
   const [playerCount, setPlayerCount] = useState(1);
   const [duration, setDuration] = useState(1);
   const [selectedTime, setSelectedTime] = useState("");
@@ -182,18 +182,15 @@ export default function IndoorGolfBooking() {
    *  UTC-5 에서 하루 전으로 찍힌다. */
   const formatDate = (dateStr: string) => (dateStr ? formatLongDate(dateStr) : "");
 
+  // 베이는 3개, 모두 오른손·왼손 겸용이다(0009). 고를 종류가 하나뿐이다.
   const bayTypeDisplay = {
-    right_handed: "Right-Handed Bays",
-    left_right: "Left & Right Handed Bay",
-    vip: "VIP Bay",
+    left_right: "Right & Left Handed Bay",
   };
 
   // 서버(`backend/services/simulator_store.py`)의 시간당 요금과 같은 값.
   // 확정 화면의 예상 금액용이고, 청구되는 금액은 서버가 돌려주는 total_price 다.
   const bayHourlyRate: Record<keyof typeof bayTypeDisplay, number> = {
-    right_handed: 20,
     left_right: 20,
-    vip: 25,
   };
 
   const selectedBayLabel =
@@ -303,10 +300,8 @@ export default function IndoorGolfBooking() {
           </div>
 
           <div className="mb-8">
-            <p className="mb-3 block text-sm font-semibold">Choose an option</p>
-            {/* 390px 에서는 3열에 긴 라벨이 뭉개진다. 모바일은 세로로 쌓고
-                데스크톱에서만 3열로 편다. */}
-            <div className="grid grid-cols-[minmax(0,1fr)] gap-2 sm:grid-cols-3 sm:gap-4">
+            <p className="mb-3 block text-sm font-semibold">Bay</p>
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-2">
               {(
                 Object.entries(bayTypeDisplay) as [
                   keyof typeof bayTypeDisplay,

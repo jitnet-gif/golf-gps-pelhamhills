@@ -59,8 +59,8 @@ export const BOOK_INDOOR = "/book/indoor";
 export const BOOK_LOOKUP = "/book/lookup";
 
 export const bookNav: NavItem[] = [
-  { label: "Tee Times", href: BOOK_TEE_TIME, glyph: "⛳" },
-  { label: "Indoor Golf", href: BOOK_INDOOR, glyph: "🏌" },
+  { label: "Tee Time(Field)", href: BOOK_TEE_TIME, glyph: "⛳" },
+  { label: "Simulator(Indoor)", href: BOOK_INDOOR, glyph: "🏌" },
   { label: "My Booking", href: BOOK_LOOKUP, glyph: "🔎" },
 ];
 

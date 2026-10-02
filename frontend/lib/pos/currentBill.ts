@@ -20,6 +20,42 @@ import { useSyncExternalStore } from "react";
 import { describePosError, isMissingMigration, posApi, type Bill, type BillStation, type PaymentInput } from "./api";
 
 const STORAGE_KEY = "pelham.pos.currentBill";
+const CASHIER_KEY = "pelham.pos.cashier";
+const RECENT_CASHIERS_KEY = "pelham.pos.recentCashiers";
+
+// ===== 담당자(이 기기) ==================================================
+// 직원 로그인은 공용이라 "누가 받았나" 는 계산서의 Cashier 이름뿐이다. 담당자별 마감(0010)과
+// 팁 나누기가 이 이름으로 묶이므로, 기기마다 마지막 이름을 기억해 새 계산서에 미리 넣는다.
+// 최근 이름 목록은 자동 완성용 — 오타 하나로 한 사람이 두 마감으로 갈라지지 않게.
+
+export function rememberedCashier(): string {
+  try {
+    return window.localStorage.getItem(CASHIER_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function recentCashiers(): string[] {
+  try {
+    const list = JSON.parse(window.localStorage.getItem(RECENT_CASHIERS_KEY) ?? "[]");
+    return Array.isArray(list) ? list.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export function rememberCashier(name: string): void {
+  const trimmed = name.trim().replace(/\s+/g, " ");
+  if (!trimmed) return;
+  try {
+    window.localStorage.setItem(CASHIER_KEY, trimmed);
+    const rest = recentCashiers().filter((item) => item.toLowerCase() !== trimmed.toLowerCase());
+    window.localStorage.setItem(RECENT_CASHIERS_KEY, JSON.stringify([trimmed, ...rest].slice(0, 12)));
+  } catch {
+    // 저장소가 막힌 브라우저. 다음 계산서에서 다시 적으면 된다.
+  }
+}
 
 export type CurrentBillState = {
   billId: number | null;
@@ -113,7 +149,8 @@ export function refreshBills(): Promise<void> {
 
 async function ensureBill(station: BillStation): Promise<number> {
   if (state.billId) return state.billId;
-  const bill = await posApi.open({ station });
+  const cashier = rememberedCashier();
+  const bill = await posApi.open({ station, ...(cashier ? { cashier } : {}) });
   setCurrent(bill);
   return bill.id;
 }

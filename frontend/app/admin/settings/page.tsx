@@ -18,7 +18,7 @@ export default function SettingsPage() {
   const [smsAlerts, setSmsAlerts] = useState(true);
   const [cancelAlerts, setCancelAlerts] = useState(true);
   const [roles, setRoles] = useState([
-    { name: "John Navjev", email: "john@pelhamhills.com", role: "Owner" as StaffRole, active: true },
+    { name: "Francis", email: "info@pelhamhills.ca", role: "Owner" as StaffRole, active: true },
     { name: "Front Desk", email: "shop@pelhamhills.com", role: "Pro Shop" as StaffRole, active: true },
     { name: "Reports User", email: "reports@pelhamhills.com", role: "Read Only" as StaffRole, active: false },
   ]);

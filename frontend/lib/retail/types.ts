@@ -176,6 +176,83 @@ export type RetailDailyReport = {
   top_products: Array<{ product_id: number; name: string; quantity: number; total: Cents }>;
 };
 
+// ===== 담당자별 마감 (0010) ==============================================
+
+/** 한 사람(또는 이름 없는 계산서)의 그날 숫자. 환불된 계산서는 뺀 값이다. */
+export type CloseoutFigures = {
+  sale_count: number;
+  net: Cents;
+  /** 그 사람이 받은 팁 합. 통에 들어간다 — 받은 사람이 가져가는 돈이 아니다. */
+  tips_taken: Cents;
+  /** 서랍에 있어야 할 현금 = 현금 결제 줄의 (계산서 몫 + 팁). 시작 잔돈은 빠진다. */
+  expected_cash: Cents;
+  by_payment: Array<{ method: PaymentMethod; count: number; total: Cents; tip: Cents }>;
+  /** 아직 결제 안 된 계산서 수(오늘을 볼 때만 센다). */
+  open_bills: number;
+};
+
+export type StaffCloseout = CloseoutFigures & {
+  /** lower(btrim(이름)). 마감 취소에 쓴다. */
+  staff_key: string;
+  name: string;
+  /** 근무시간 비율로 나눈 팁 몫. 근무시간을 적고 마감해야 생긴다. */
+  tip_share: Cents | null;
+  closeout: {
+    minutes_worked: number;
+    counted_cash: Cents | null;
+    /** 마감 순간의 값. */
+    expected_cash: Cents;
+    sale_count: number;
+    net: Cents;
+    tips_taken: Cents;
+    note: string | null;
+    closed_at: string;
+    /** 닫은 뒤 그 이름으로 결제·환불이 있었다 — 다시 마감해야 한다. */
+    stale: boolean;
+  } | null;
+};
+
+export type CloseoutReport = {
+  business_date: string;
+  /** 그날 결제된 계산서의 팁 전부. */
+  tip_pool: Cents;
+  /** 마감한 사람들의 근무시간 합(분). */
+  total_minutes: number;
+  /** 매출이 있는데 아직 마감하지 않은 사람이 있다 — 팁 몫이 바뀔 수 있다. */
+  provisional: boolean;
+  staff: StaffCloseout[];
+  /** 담당자 이름 없이 결제된 계산서. 없으면 null. */
+  unassigned: CloseoutFigures | null;
+};
+
+export type CloseoutSave = {
+  name: string;
+  minutes_worked: number;
+  counted_cash: Cents | null;
+  note?: string | null;
+};
+
+/** "7.5", "7:30", "7h30", "7h" → 분. 읽을 수 없으면 null. */
+export function parseHours(input: string): number | null {
+  const text = input.trim().toLowerCase();
+  if (!text) return null;
+  const clock = /^(\d{1,2})\s*[:h]\s*(\d{1,2})?\s*m?$/.exec(text);
+  if (clock) {
+    const minutes = Number(clock[1]) * 60 + Number(clock[2] ?? 0);
+    return Number(clock[2] ?? 0) < 60 && minutes <= 1440 ? minutes : null;
+  }
+  const hours = Number(text);
+  if (!Number.isFinite(hours) || hours < 0 || hours > 24) return null;
+  return Math.round(hours * 60);
+}
+
+/** 분 → "7h 30m". */
+export function formatMinutes(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
 export type LowStockItem = {
   product_id: number;
   sku: string;
@@ -201,6 +278,9 @@ export const RETAIL_ROUTES = {
 } as const;
 
 // ===== 표시 헬퍼 ========================================================
+
+/** 재고가 이 수보다 적으면 화면에서 빨간 글씨로 보인다. 재주문점과는 별개다. */
+export const LOW_STOCK_RED_BELOW = 20;
 
 /** 센트 정수를 화면용 문자열로. 계산에는 절대 쓰지 않는다. */
 export function formatMoney(cents: Cents): string {

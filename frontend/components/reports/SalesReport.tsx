@@ -20,6 +20,8 @@ import { PAYMENT_LABELS, stationLabel } from "@/lib/retail/receipt";
 import { divisionTotals } from "@/lib/retail/divisions";
 import { formatMoney, type RetailDailyReport, type Sale } from "@/lib/retail/types";
 
+import StaffCloseout from "@/components/reports/StaffCloseout";
+
 import {
   Button,
   EmptyNote,
@@ -41,6 +43,8 @@ export default function SalesReport() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<Sale | null>(null);
+  // 환불하면 담당자별 마감 숫자도 바뀐다. 마감 패널에 다시 읽으라고 알린다.
+  const [closeoutKey, setCloseoutKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -76,6 +80,7 @@ export default function SalesReport() {
       .getDailyReport(date)
       .then(setReport)
       .catch(() => setReport(null));
+    setCloseoutKey((key) => key + 1);
   }
 
   return (
@@ -222,6 +227,8 @@ export default function SalesReport() {
           </div>
         </>
       ) : null}
+
+      <StaffCloseout date={date} refreshKey={closeoutKey} />
 
       <Panel title={`Receipts — ${date}`}>
         {loading ? (
