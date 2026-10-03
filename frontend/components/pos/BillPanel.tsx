@@ -12,14 +12,25 @@
  *
  * 현금은 받은 돈을 적으면 거스름돈을 보여 주고, 서버에는 **계산서에 들어간 몫**만 보낸다
  * (서버는 결제 합이 합계와 정확히 같아야 받는다).
+ *
+ * 레인체크(0011)는 전표 바코드를 쏘거나 코드를 쳐서 찾는다. 크레딧과 남은 금액 중 작은 쪽이
+ * 들어가고, 쓰고 남는 크레딧은 사라진다(화면이 미리 알린다). 만료·사용 여부는 서버가 결제할 때 다시 본다.
  */
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import { newCheckoutId, TERMINAL_METHODS, type Bill, type BillStation, type PaymentInput } from "@/lib/pos/api";
 import { billActions, recentCashiers, rememberCashier, rememberedCashier, useCurrentBill } from "@/lib/pos/currentBill";
+import {
+  describeRainCheckError,
+  isRainCheckCode,
+  rainCheckApi,
+  subscribeRainCheckCode,
+  takeRainCheckCode,
+  type RainCheck,
+} from "@/lib/pos/rainCheck";
 import { printReceipt } from "@/lib/retail/printReceipt";
-import { PAYMENT_LABELS } from "@/lib/retail/receipt";
+import { PAYMENT_LABELS, usDate } from "@/lib/retail/receipt";
 import { PAYMENT_METHODS, formatMoney, parseMoney, type PaymentMethod, type Sale } from "@/lib/retail/types";
 
 import { Button, EmptyNote, ErrorNote, Field, Select, TextInput } from "@/components/retail/ui";
@@ -69,6 +80,7 @@ function toPaymentInput(payment: PendingPayment): PaymentInput {
     ...(payment.tip ? { tip: payment.tip } : {}),
     ...(payment.auth_code ? { auth_code: payment.auth_code } : {}),
     ...(payment.card_last4 ? { card_last4: payment.card_last4 } : {}),
+    ...(payment.rain_check_code ? { rain_check_code: payment.rain_check_code } : {}),
   };
 }
 
@@ -426,6 +438,58 @@ function PaymentsEditor({
   const [formError, setFormError] = useState("");
   const [preparing, setPreparing] = useState(false);
   const keyRef = useRef(1);
+  // 레인체크: 친 코드와 서버에서 찾은 전표.
+  const [rcCode, setRcCode] = useState("");
+  const [rcFound, setRcFound] = useState<RainCheck | null>(null);
+  const [rcLooking, setRcLooking] = useState(false);
+
+  const isRainCheck = method === "rain_check";
+
+  const lookUpRainCheck = useCallback(async (raw: string) => {
+    const code = raw.trim().toUpperCase();
+    setRcCode(code);
+    setRcFound(null);
+    setFormError("");
+    if (!code) return;
+    if (!isRainCheckCode(code)) {
+      setFormError(`"${code}" is not a rain check code. It looks like RC-1A2B3C4D5E.`);
+      return;
+    }
+    setRcLooking(true);
+    try {
+      setRcFound(await rainCheckApi.byCode(code));
+    } catch (error) {
+      setFormError(describeRainCheckError(error));
+    } finally {
+      setRcLooking(false);
+    }
+  }, []);
+
+  // 계산대·티 시트에서 쏜 레인체크 전표. 수단을 레인체크로 바꾸고 바로 찾는다.
+  useEffect(() => {
+    const use = (code: string) => {
+      setMethod("rain_check");
+      setAmountInput("");
+      setTipInput("");
+      void lookUpRainCheck(code);
+    };
+    const waiting = takeRainCheckCode();
+    if (waiting) use(waiting);
+    return subscribeRainCheckCode(use);
+  }, [lookUpRainCheck]);
+
+  const rcUsable = rcFound !== null && rcFound.status === "issued" && !rcFound.expired;
+  const rcProblem = !rcFound
+    ? ""
+    : rcFound.status === "redeemed"
+      ? `Already used${rcFound.redeemed_receipt ? ` on bill ${rcFound.redeemed_receipt}` : ""}.`
+      : rcFound.status === "void"
+        ? `Voided${rcFound.void_reason ? ` — ${rcFound.void_reason}` : ""}.`
+        : rcFound.expired
+          ? `Expired on ${usDate(rcFound.expires_on)}.`
+          : "";
+  const rcApplied = rcFound && rcUsable ? Math.min(rcFound.amount, remaining) : 0;
+  const rcLeftOver = rcFound && rcUsable ? rcFound.amount - rcApplied : 0;
 
   const needsTerminal = TERMINAL_METHODS.includes(method);
   // 팁은 계산서 합계 밖이다(매출이 아니라 직원 몫 — 마감에서 근무시간으로 나눈다).
@@ -439,6 +503,35 @@ function PaymentsEditor({
 
   async function add() {
     setFormError("");
+    if (isRainCheck) {
+      if (!rcFound || !rcUsable) {
+        setFormError(rcProblem || "Scan the rain check, or type its code and press Enter.");
+        return;
+      }
+      if (payments.some((payment) => payment.rain_check_code === rcFound.code)) {
+        setFormError(`Rain check ${rcFound.code} is already on this bill.`);
+        return;
+      }
+      // 화면의 합계가 낡았을 수 있다(다른 기기가 줄을 더했다). 들어갈 금액은 서버 합계로 다시 잡는다.
+      setPreparing(true);
+      const fresh = await billActions.reload();
+      setPreparing(false);
+      if (!fresh) return;
+      const freshRemaining = Math.max(fresh.total - payments.reduce((sum, p) => sum + p.amount, 0), 0);
+      const applied = Math.min(rcFound.amount, freshRemaining);
+      if (applied <= 0) {
+        setFormError("Nothing is left to pay on this bill.");
+        return;
+      }
+      const key = keyRef.current++;
+      setPayments((current) => [
+        ...current,
+        { key, method: "rain_check", amount: applied, rain_check_code: rcFound.code },
+      ]);
+      setRcCode("");
+      setRcFound(null);
+      return;
+    }
     if (needsTerminal) {
       // 단말기에 칠 금액은 서버의 합계다. 더하기 직전에 다시 읽는다.
       setPreparing(true);
@@ -504,6 +597,9 @@ function PaymentsEditor({
             <li className="flex items-baseline justify-between gap-2" key={payment.key}>
               <span className="min-w-0">
                 {PAYMENT_LABELS[payment.method]}
+                {payment.rain_check_code ? (
+                  <span className="block text-[11px] text-[#6b7280]">{payment.rain_check_code}</span>
+                ) : null}
                 {payment.auth_code ? (
                   <span className="block text-[11px] text-[#6b7280]">
                     Approval {payment.auth_code}
@@ -540,7 +636,13 @@ function PaymentsEditor({
           <p className="text-sm font-bold">Left to pay: {formatMoney(remaining)}</p>
           <div className="grid grid-cols-2 gap-2">
             <Field label="Method">
-              <Select onChange={(event) => setMethod(event.target.value as PaymentMethod)} value={method}>
+              <Select
+                onChange={(event) => {
+                  setMethod(event.target.value as PaymentMethod);
+                  setFormError("");
+                }}
+                value={method}
+              >
                 {PAYMENT_METHODS.map((item) => (
                   <option key={item} value={item}>
                     {PAYMENT_LABELS[item]}
@@ -548,15 +650,61 @@ function PaymentsEditor({
                 ))}
               </Select>
             </Field>
-            <Field label={method === "cash" ? "Cash received" : "Amount"}>
-              <TextInput
-                inputMode="decimal"
-                onChange={(event) => setAmountInput(event.target.value)}
-                placeholder={((remaining + (isCash ? tip : 0)) / 100).toFixed(2)}
-                value={amountInput}
-              />
-            </Field>
+            {isRainCheck ? (
+              <Field label="Rain check code">
+                <TextInput
+                  autoComplete="off"
+                  onBlur={(event) => {
+                    const typed = event.target.value.trim().toUpperCase();
+                    if (typed && typed !== (rcFound?.code ?? "")) void lookUpRainCheck(typed);
+                  }}
+                  onChange={(event) => {
+                    setRcCode(event.target.value);
+                    setRcFound(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void lookUpRainCheck(event.currentTarget.value);
+                    }
+                  }}
+                  placeholder="Scan the slip"
+                  value={rcCode}
+                />
+              </Field>
+            ) : (
+              <Field label={method === "cash" ? "Cash received" : "Amount"}>
+                <TextInput
+                  inputMode="decimal"
+                  onChange={(event) => setAmountInput(event.target.value)}
+                  placeholder={((remaining + (isCash ? tip : 0)) / 100).toFixed(2)}
+                  value={amountInput}
+                />
+              </Field>
+            )}
           </div>
+          {isRainCheck && rcLooking ? <p className="text-xs text-[#6b7280]">Looking up the rain check…</p> : null}
+          {isRainCheck && rcFound ? (
+            <div
+              className={`grid gap-0.5 border p-2 text-xs ${
+                rcUsable ? "border-[#1f6b3a] bg-white" : "border-[#8a1f1f] bg-[#fff1ee] text-[#8a1f1f]"
+              }`}
+            >
+              <p className="font-bold">
+                {rcFound.code} · {rcFound.player_name}
+              </p>
+              <p>
+                Credit {formatMoney(rcFound.amount)} · valid through {usDate(rcFound.expires_on)}
+              </p>
+              {rcProblem ? <p className="font-bold">{rcProblem}</p> : null}
+              {rcUsable && rcLeftOver > 0 ? (
+                <p className="font-bold text-[#5b4708]">
+                  This bill uses {formatMoney(rcApplied)}. The other {formatMoney(rcLeftOver)} of credit is lost — a
+                  rain check is one use. Add more to the bill first if the guest wants to use it all.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           {needsTerminal ? (
             <>
               <p className="text-xs text-[#5b4708]">
@@ -585,23 +733,29 @@ function PaymentsEditor({
               </div>
             </>
           ) : null}
-          <Field
-            hint={needsTerminal ? "From the DX8000 slip" : isCash ? "Only if they leave it as a tip" : undefined}
-            label="Tip (optional)"
-          >
-            <TextInput
-              inputMode="decimal"
-              onChange={(event) => setTipInput(event.target.value)}
-              placeholder="0.00"
-              value={tipInput}
-            />
-          </Field>
+          {isRainCheck ? null : (
+            <Field
+              hint={needsTerminal ? "From the DX8000 slip" : isCash ? "Only if they leave it as a tip" : undefined}
+              label="Tip (optional)"
+            >
+              <TextInput
+                inputMode="decimal"
+                onChange={(event) => setTipInput(event.target.value)}
+                placeholder="0.00"
+                value={tipInput}
+              />
+            </Field>
+          )}
           {change > 0 ? (
             <p className="text-sm font-bold text-[#1f6b3a]">Change due: {formatMoney(change)}</p>
           ) : null}
           {formError ? <ErrorNote>{formError}</ErrorNote> : null}
-          <Button disabled={preparing} full onClick={() => void add()}>
-            {preparing ? "Checking total…" : `Add ${PAYMENT_LABELS[method]} payment`}
+          <Button disabled={preparing || (isRainCheck && (rcLooking || !rcUsable))} full onClick={() => void add()}>
+            {preparing
+              ? "Checking total…"
+              : isRainCheck && rcUsable
+                ? `Add rain check ${formatMoney(rcApplied)}`
+                : `Add ${PAYMENT_LABELS[method]} payment`}
           </Button>
         </div>
       ) : null}
@@ -672,6 +826,9 @@ function PaidReceipt({ sale, onDone }: { sale: Sale; onDone: () => void }) {
           <span>
             {PAYMENT_LABELS[payment.method]}
             {payment.auth_code ? <span className="text-[11px] text-[#6b7280]"> · {payment.auth_code}</span> : null}
+            {payment.rain_check_code ? (
+              <span className="text-[11px] text-[#6b7280]"> · {payment.rain_check_code}</span>
+            ) : null}
           </span>
           <span className="tabular-nums">{formatMoney(payment.amount)}</span>
         </li>

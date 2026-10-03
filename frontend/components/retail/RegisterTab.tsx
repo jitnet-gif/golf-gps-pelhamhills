@@ -24,6 +24,7 @@ import { useBarcodeScanner } from "@/hooks/useBarcodeScanner";
 import type { BillStation } from "@/lib/pos/api";
 import { findProductByCode } from "@/lib/retail/findProduct";
 import { billActions, useCurrentBill } from "@/lib/pos/currentBill";
+import { isRainCheckCode, offerRainCheckCode } from "@/lib/pos/rainCheck";
 import { LOW_STOCK_RED_BELOW, RETAIL_CATEGORIES, formatMoney, type Product, type RetailCategory } from "@/lib/retail/types";
 
 import { Chip, EmptyNote, ErrorNote, SkeletonCards, TextInput, useOverlayDismiss } from "./ui";
@@ -125,6 +126,18 @@ export default function RegisterTab({
   function handleScan(code: string) {
     // 검색칸에서 쏜 스캔이면 칸에 글자(IME 가 한글이면 자모)가 남아 있다. 비운다.
     setSearch("");
+    // 레인체크 전표: 계산서 결제 칸으로 넘긴다(그쪽이 찾고 금액을 잡는다).
+    if (isRainCheckCode(code)) {
+      if (!bill || bill.lines.length === 0) {
+        setScanNote("That is a rain check. Ring in what it pays for first, then scan the rain check again.");
+        return;
+      }
+      setScanNote("");
+      offerRainCheckCode(code);
+      if (!window.matchMedia("(min-width: 1024px)").matches) setSheetOpen(true);
+      setRevealPayments((n) => n + 1);
+      return;
+    }
     const product = findBySku(code);
     if (product) {
       addAndOpenPayment(product);
@@ -145,6 +158,15 @@ export default function RegisterTab({
    */
   async function handleCameraCode(code: string): Promise<ScanOutcome> {
     if (loading) return { ok: false, message: "Products are still loading — try again in a moment." };
+    // 레인체크 전표: 카메라를 닫고 계산서 결제 칸에서 크레딧을 잡는다.
+    if (isRainCheckCode(code)) {
+      if (!bill || bill.lines.length === 0) {
+        return { ok: false, message: "That is a rain check. Scan what it pays for first, then the rain check." };
+      }
+      offerRainCheckCode(code);
+      payFromCamera();
+      return { ok: true, message: `Rain check ${code.trim().toUpperCase()}` };
+    }
     const product = findBySku(code);
     if (!product) {
       return {

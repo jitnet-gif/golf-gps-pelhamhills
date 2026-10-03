@@ -17,7 +17,8 @@ import ReservationDetail from "../../components/teesheet/ReservationDetail";
 import WeekGrid from "../../components/teesheet/WeekGrid";
 import { useBarcodeScanner } from "../../hooks/useBarcodeScanner";
 import { useTeeSheet } from "../../hooks/useTeeSheet";
-import { billActions, useCurrentBill } from "@/lib/pos/currentBill";
+import { billActions, getBillState, useCurrentBill } from "@/lib/pos/currentBill";
+import { isRainCheckCode, offerRainCheckCode } from "@/lib/pos/rainCheck";
 import { retailApi, toRetailError } from "@/lib/retail/api";
 import { findProductByCode } from "@/lib/retail/findProduct";
 import { formatMoney } from "@/lib/retail/types";
@@ -172,6 +173,18 @@ export default function TeeSheetPage() {
 
   const onScan = useCallback(
     (raw: string) => {
+      // 레인체크 전표: 계산서 서랍의 결제 칸으로 넘긴다. 쓸 곳(계산서 줄)이 먼저 있어야 한다.
+      if (isRainCheckCode(raw)) {
+        const current = getBillState().bill;
+        if (!current || current.lines.length === 0) {
+          pushToast("error", "That is a rain check. Add the green fee to the bill first, then scan the rain check again.");
+          return;
+        }
+        offerRainCheckCode(raw);
+        setBillOpen(true);
+        setRevealPayments((n) => n + 1);
+        return;
+      }
       const match = TEE_TICKET.exec(raw.trim().toUpperCase());
       if (!match) {
         void sellScannedProduct(raw);

@@ -26,7 +26,8 @@ export const RETAIL_CATEGORIES = [
 export type RetailCategory = (typeof RETAIL_CATEGORIES)[number];
 
 // `debit` = Interac 체크카드. 카드처럼 Chase 단말기 승인번호가 있어야 기록된다.
-export const PAYMENT_METHODS = ["cash", "card", "debit", "member_account", "gift_card"] as const;
+// `rain_check` = 레인체크 전표(0011). 전표 코드가 있어야 하고 서버가 만료일·금액을 확인한다.
+export const PAYMENT_METHODS = ["cash", "card", "debit", "member_account", "gift_card", "rain_check"] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 // ===== 상품 =============================================================
@@ -139,6 +140,8 @@ export type SalePayment = {
   auth_code: string | null;
   card_last4: string | null;
   terminal: string | null;
+  /** 레인체크로 낸 줄만: 전표 코드(0011). 0011 이전 응답에는 키가 없다. */
+  rain_check_code?: string | null;
 };
 
 /** 계산 입력. 금액 계산과 재고 차감은 전부 서버가 한다. */

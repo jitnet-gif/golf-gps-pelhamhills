@@ -1144,7 +1144,7 @@ export default function SimulatorSheetPage() {
                       onClick={() => void payReservation(draft.id!)}
                       title={
                         draft.status === "paid"
-                          ? "Paid on a bill. Refund that bill in Retail → Sales to undo."
+                          ? "Paid on a bill. Refund that bill in Reports → Daily close to undo."
                           : "Put this booking on the bill and take payment"
                       }
                     >

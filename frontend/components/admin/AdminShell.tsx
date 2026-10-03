@@ -61,6 +61,11 @@ type Props = {
    * 티 시트처럼 내부에서만 스크롤하는 화면 전용. 위의 "두 가지 높이 모드" 참고.
    */
   fill?: boolean;
+  /**
+   * "pos" 면 관리자 메뉴 없이 계산대 머리 한 줄만 그린다. 설치형 계산대 앱(`/pos`) 전용 —
+   * 그 앱의 범위(scope)는 `/pos` 라서, 어드민 메뉴로 나가면 앱 창에 주소 표시줄이 뜬다.
+   */
+  variant?: "admin" | "pos";
   children: ReactNode;
 };
 
@@ -75,7 +80,70 @@ export default function AdminShell(props: Props) {
   if (gate.state === "checking") return <GateSplash />;
   if (gate.state === "out") return <SignInScreen onSignedIn={gate.recheck} />;
   if (gate.state === "denied") return <NotStaffScreen email={gate.email} onSignOut={gate.signOut} />;
+  if (props.variant === "pos") return <PosFrame {...props} email={gate.email} onSignOut={gate.signOut} />;
   return <AdminFrame {...props} email={gate.email} onSignOut={gate.signOut} />;
+}
+
+/** 계산대 앱에서 오갈 수 있는 곳. 이 둘 말고는 링크를 두지 않는다. */
+const POS_STATIONS = [
+  { href: "/pos/snack-bar", label: "Snack Bar" },
+  { href: "/pos/pro-shop", label: "Pro Shop" },
+] as const;
+
+/**
+ * 설치형 계산대 앱의 껍데기. 사이드바·하단 탭이 없다 — 카운터 태블릿에서 한 화면만
+ * 띄워 두는 앱이라, 다른 화면으로 가는 길은 계산대 전환 두 개뿐이다.
+ */
+function PosFrame({
+  title,
+  actions,
+  children,
+  email,
+  onSignOut,
+}: Props & { email: string; onSignOut: () => void }) {
+  const pathname = usePathname();
+  return (
+    <div className="min-h-[100dvh] bg-[#f2f2f4] text-[#1f2328]">
+      <header className="pt-safe border-b border-[#d4d4d8] bg-[#111315] text-white">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2">
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-bold tracking-wide text-white/50 uppercase">{CLUB.shortName} POS</p>
+            <h1 className="truncate text-sm font-bold">{title}</h1>
+          </div>
+          <nav aria-label="Register" className="flex shrink-0 gap-1">
+            {POS_STATIONS.map((station) => {
+              const active = isActive(pathname, station.href);
+              return (
+                <Link
+                  aria-current={active ? "page" : undefined}
+                  className={`inline-flex min-h-11 items-center px-3 text-sm font-bold ${
+                    active ? "bg-[#4533ff] text-white" : "text-white/75 hover:bg-white/10"
+                  }`}
+                  href={station.href}
+                  key={station.href}
+                >
+                  {station.label}
+                </Link>
+              );
+            })}
+          </nav>
+          <span className="hidden max-w-[180px] shrink-0 truncate text-[11px] text-white/60 md:inline" title={email}>
+            {email}
+          </span>
+          <SignOutButton
+            className="flex min-h-11 shrink-0 items-center px-2 text-[11px] font-bold text-white/80"
+            onSignOut={onSignOut}
+          />
+        </div>
+        {actions ? (
+          <div className="flex flex-wrap items-center gap-2 border-t border-white/10 bg-white px-3 py-2 text-[#1f2328]">
+            {actions}
+          </div>
+        ) : null}
+      </header>
+      <div className="min-w-0">{children}</div>
+    </div>
+  );
 }
 
 function AdminFrame({

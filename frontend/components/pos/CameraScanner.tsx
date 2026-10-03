@@ -304,31 +304,6 @@ export default function CameraScanner({ onCode, onDone, onClose, summary, canPay
       role="dialog"
       aria-label="Camera barcode scanner"
     >
-      <header className="flex items-center justify-between gap-2 px-3 pt-[max(env(safe-area-inset-top),0.5rem)] pb-2">
-        <h2 className="text-sm font-bold">Camera scan</h2>
-        <div className="flex items-center gap-1">
-          {cameraCount > 1 ? (
-            <button
-              aria-label={facing === "user" ? "Switch to back camera" : "Switch to front camera"}
-              className="inline-flex min-h-11 items-center gap-1.5 border border-white/40 px-3 text-xs font-bold"
-              onClick={switchCamera}
-              type="button"
-            >
-              <span aria-hidden>⇄</span>
-              {facing === "user" ? "Front" : "Back"}
-            </button>
-          ) : null}
-          <button
-            aria-label="Close camera"
-            className="flex min-h-11 min-w-11 items-center justify-center text-2xl leading-none"
-            onClick={onClose}
-            type="button"
-          >
-            <span aria-hidden>×</span>
-          </button>
-        </div>
-      </header>
-
       <div className="relative min-h-0 flex-1 overflow-hidden">
         {/* 전면은 거울처럼 보여야 물건을 어느 쪽으로 옮길지 헷갈리지 않는다. 읽기는 원본 프레임으로 한다. */}
         <video
@@ -336,14 +311,46 @@ export default function CameraScanner({ onCode, onDone, onClose, summary, canPay
           ref={videoRef}
         />
 
-        {/* 조준 틀. 바코드를 이 안에 넣으라는 표시일 뿐, 읽기는 화면 전체에서 한다. */}
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <div
-            className={`h-[28%] w-[80%] max-w-md border-2 transition-colors ${
-              flash ? (flash.ok ? "border-[#3ddc84]" : "border-[#ff5a5a]") : "border-white/80"
-            }`}
-          />
+        {/* 조준 틀. 휴대폰이든 아이패드든 **화면 거의 전체**를 덮는다 — 작은 틀은 바코드를
+            그 안에 맞추느라 시간이 걸리고, 읽기는 어차피 화면 전체에서 한다.
+            네 모서리만 그려서 가운데 물건을 가리지 않는다. 가운데 가로줄은 1D 바코드를 눕힐 방향. */}
+        <div
+          className={`pointer-events-none absolute inset-x-[4%] top-[calc(max(env(safe-area-inset-top),0.5rem)+3.25rem)] bottom-[4%] transition-colors ${
+            flash ? (flash.ok ? "text-[#3ddc84]" : "text-[#ff5a5a]") : "text-white/90"
+          }`}
+        >
+          <span className="absolute top-0 left-0 h-[18%] max-h-24 w-[18%] max-w-24 border-t-4 border-l-4 border-current" />
+          <span className="absolute top-0 right-0 h-[18%] max-h-24 w-[18%] max-w-24 border-t-4 border-r-4 border-current" />
+          <span className="absolute bottom-0 left-0 h-[18%] max-h-24 w-[18%] max-w-24 border-b-4 border-l-4 border-current" />
+          <span className="absolute right-0 bottom-0 h-[18%] max-h-24 w-[18%] max-w-24 border-r-4 border-b-4 border-current" />
+          <span className="absolute inset-x-[6%] top-1/2 h-0.5 -translate-y-1/2 bg-current opacity-70" />
         </div>
+
+        {/* 머리줄은 영상 위에 겹친다. 따로 한 줄을 차지하면 그만큼 영상과 틀이 줄어든다. */}
+        <header className="absolute inset-x-0 top-0 flex items-center justify-between gap-2 bg-gradient-to-b from-black/70 to-transparent px-3 pt-[max(env(safe-area-inset-top),0.5rem)] pb-3">
+          <h2 className="text-sm font-bold">Camera scan</h2>
+          <div className="flex items-center gap-1">
+            {cameraCount > 1 ? (
+              <button
+                aria-label={facing === "user" ? "Switch to back camera" : "Switch to front camera"}
+                className="inline-flex min-h-11 items-center gap-1.5 border border-white/40 bg-black/30 px-3 text-xs font-bold"
+                onClick={switchCamera}
+                type="button"
+              >
+                <span aria-hidden>⇄</span>
+                {facing === "user" ? "Front" : "Back"}
+              </button>
+            ) : null}
+            <button
+              aria-label="Close camera"
+              className="flex min-h-11 min-w-11 items-center justify-center text-2xl leading-none"
+              onClick={onClose}
+              type="button"
+            >
+              <span aria-hidden>×</span>
+            </button>
+          </div>
+        </header>
 
         {status === "starting" ? (
           <p className="absolute inset-x-0 top-1/2 text-center text-sm">Starting camera…</p>
@@ -355,15 +362,15 @@ export default function CameraScanner({ onCode, onDone, onClose, summary, canPay
           </div>
         ) : null}
         {status === "live" && !flash ? (
-          <p className="absolute inset-x-0 bottom-3 text-center text-sm text-white/85">
-            Hold a barcode inside the box. Same item again? Move it away, then back.
+          <p className="absolute inset-x-[8%] bottom-[calc(4%+0.75rem)] bg-black/45 px-3 py-1.5 text-center text-sm text-white/90">
+            Fill the screen with the barcode. Same item again? Move it away, then back.
           </p>
         ) : null}
 
         {flash ? (
           <div
             aria-live="assertive"
-            className={`absolute inset-x-3 bottom-3 px-3 py-2.5 text-sm font-bold ${
+            className={`absolute inset-x-[6%] bottom-[calc(4%+0.75rem)] px-3 py-2.5 text-sm font-bold ${
               flash.ok ? "bg-[#12713a]" : "bg-[#8a1f1f]"
             }`}
             key={flash.at}

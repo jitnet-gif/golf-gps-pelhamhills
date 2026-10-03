@@ -35,6 +35,7 @@ export const PAYMENT_LABELS: Record<PaymentMethod, string> = {
   debit: "Debit (Interac)",
   member_account: "Member account",
   gift_card: "Gift card",
+  rain_check: "Rain check",
 };
 
 /** 계산서를 연 계산대(`pelham_bills.station`) 표시 이름. 사업부가 아니다 — 사업부는 `divisions.ts`. */
@@ -123,6 +124,7 @@ export type ReceiptPayment = {
 };
 
 function paymentDetail(payment: NonNullable<Sale["payments"]>[number]): string | null {
+  if (payment.rain_check_code) return payment.rain_check_code;
   if (!payment.auth_code) return null;
   const parts = [`Approval ${payment.auth_code}`];
   if (payment.card_last4) parts.push(`****${payment.card_last4}`);
@@ -338,10 +340,19 @@ function escapeHtml(text: string): string {
  * 클럽 현지 시각으로. 시각이 없거나 읽을 수 없으면 날짜만 찍는다.
  */
 function receiptDateTime(doc: ReceiptDoc): string {
-  const [year, month, day] = doc.date.split("-");
-  const date = year && month && day ? `${month}/${day}/${year}` : doc.date;
-  const time = doc.time ? localTime(doc.time) : "";
-  return time ? `${date} ${time}` : date;
+  return clubDateTime(doc.date, doc.time);
+}
+
+/** `YYYY-MM-DD` + ISO 시각 → `09/15/2026 2:07 pm`. 영수증과 레인체크 전표가 같은 표기를 쓴다. */
+export function clubDateTime(date: string, time: string | null): string {
+  const time12 = time ? localTime(time) : "";
+  return time12 ? `${usDate(date)} ${time12}` : usDate(date);
+}
+
+/** `YYYY-MM-DD` → `MM/DD/YYYY`. 읽을 수 없으면 그대로. */
+export function usDate(iso: string): string {
+  const [year, month, day] = iso.split("-");
+  return year && month && day ? `${month}/${day}/${year}` : iso;
 }
 
 function localTime(iso: string): string {

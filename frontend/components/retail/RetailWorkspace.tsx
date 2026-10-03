@@ -45,9 +45,11 @@ type Props = {
   category?: RetailCategory;
   /** 계산대를 카메라 스캔이 켜진 채로 연다(`/admin/scan` 바로가기). */
   startWithCamera?: boolean;
+  /** 설치형 계산대 앱(`/pos`)에서 열렸다. 관리자 메뉴와 Reports 링크를 감춘다. */
+  posApp?: boolean;
 };
 
-export default function RetailWorkspace({ title, category, startWithCamera }: Props) {
+export default function RetailWorkspace({ title, category, startWithCamera, posApp = false }: Props) {
   const [tab, setTab] = useState<TabId>("register");
   const [products, setProducts] = useState<Product[]>([]);
   const [lowStock, setLowStock] = useState<LowStockItem[]>([]);
@@ -140,15 +142,18 @@ export default function RetailWorkspace({ title, category, startWithCamera }: Pr
               {item.label}
             </Chip>
           ))}
-          <Link
-            className="inline-flex min-h-11 shrink-0 items-center border border-[#d4d4d8] bg-white px-3 text-sm font-bold whitespace-nowrap text-[#3f434a] hover:bg-[#f2f2f4]"
-            href={ADMIN_REPORTS}
-          >
-            Sales report →
-          </Link>
+          {posApp ? null : (
+            <Link
+              className="inline-flex min-h-11 shrink-0 items-center border border-[#d4d4d8] bg-white px-3 text-sm font-bold whitespace-nowrap text-[#3f434a] hover:bg-[#f2f2f4]"
+              href={ADMIN_REPORTS}
+            >
+              Sales report →
+            </Link>
+          )}
         </div>
       }
       title={title}
+      variant={posApp ? "pos" : "admin"}
     >
       {/* 문서형 화면이라 `fill` 을 쓰지 않는다. pb-safe 로 홈 인디케이터를 피한다. */}
       <div className="grid min-w-0 gap-3 p-3 pb-safe">

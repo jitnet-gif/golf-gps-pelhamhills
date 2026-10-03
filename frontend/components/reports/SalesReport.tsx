@@ -37,7 +37,11 @@ import {
 } from "@/components/retail/ui";
 
 export default function SalesReport() {
-  const [date, setDate] = useState(localBusinessDate);
+  // 티 시트의 "Refund" 바로가기는 `?date=YYYY-MM-DD`(결제한 날)로 온다. 그 날 목록을 연다.
+  const [date, setDate] = useState(() => {
+    const wanted = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("date");
+    return wanted && /^\d{4}-\d{2}-\d{2}$/.test(wanted) ? wanted : localBusinessDate();
+  });
   const [sales, setSales] = useState<Sale[]>([]);
   const [report, setReport] = useState<RetailDailyReport | null>(null);
   const [loading, setLoading] = useState(true);

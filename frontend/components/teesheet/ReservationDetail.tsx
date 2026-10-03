@@ -17,7 +17,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import Link from "next/link";
+
 import { billActions, getBillState, useCurrentBill } from "@/lib/pos/currentBill";
+import { localBusinessDate } from "@/lib/retail/api";
 import { printReceiptDoc, receiptSheetHtml } from "@/lib/retail/printReceipt";
 import { computeTax, formatMoney } from "@/lib/retail/types";
 import { longDate, money } from "@/lib/teeSheet/dates";
@@ -31,6 +34,8 @@ import type {
   TeeBooking,
   TeeSheetController,
 } from "@/lib/teeSheet/types";
+
+import RainCheckDialog, { activeRainCheck, useRainChecks } from "./RainCheckDialog";
 
 export type ReservationDetailProps = { controller: TeeSheetController };
 
@@ -179,6 +184,10 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
   const billState = useCurrentBill();
   const booking = controller.selected;
   const bookingId = booking?.id ?? null;
+  // 레인체크(0011). 0011 이 아직 안 돌았으면 missing — 버튼을 숨긴다.
+  const rainChecks = useRainChecks(bookingId);
+  // 레인체크 창에 띄울 사람들. 열 때 한 번 찍어 둔다(5초 새로고침마다 창이 다시 묻지 않게).
+  const [rainCheckFor, setRainCheckFor] = useState<Player[] | null>(null);
 
   const [bookingDraft, setBookingDraft] = useState<BookingDraft | null>(null);
   const [playerDrafts, setPlayerDrafts] = useState<Record<string, PlayerDraft>>({});
@@ -237,6 +246,7 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
     setFeeDrafts({});
     setReceiptNote(null);
     setPreview(null);
+    setRainCheckFor(null);
     setSaveState({ kind: "idle", nonce: 0 });
   }, [bookingId, clearTimers]);
 
@@ -512,6 +522,11 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
   };
   const unbilledUnpaid = unpaidPlayers.filter((player) => !billOf(player.id));
 
+  // 레인체크는 결제한 사람에게만 나간다(낸 돈이 크레딧이다).
+  const useRainCheck = !rainChecks.missing;
+  const paidPlayers = players.filter((player) => player.paid && !player.cancelled);
+  const withoutRainCheck = paidPlayers.filter((player) => !activeRainCheck(rainChecks.checks, player.id));
+
   /** 재인쇄: 서버 상태는 건드리지 않는다. */
   const reprintReceipt = (people: Player[]) => {
     setPreview(null);
@@ -671,6 +686,19 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
           </button>
         )}
 
+        {/* 비로 라운드가 끊긴 일행. 아직 레인체크가 없는 결제자 전부에게 한 장씩. */}
+        {useRainCheck && paidPlayers.length > 0 ? (
+          <button
+            className="border border-[#2f6f8f] bg-white px-3 py-1.5 font-bold text-[#2f6f8f] hover:bg-[#eef6fa] disabled:cursor-not-allowed disabled:border-[#c7c7cc] disabled:text-[#b6b6c0]"
+            disabled={busy}
+            onClick={() => setRainCheckFor(withoutRainCheck.length > 0 ? withoutRainCheck : paidPlayers)}
+            title="Give each paid player a rain check slip with a barcode and an expiry date"
+            type="button"
+          >
+            {withoutRainCheck.length > 0 ? `Rain checks (${withoutRainCheck.length})` : "Rain checks ✓"}
+          </button>
+        ) : null}
+
         <span
           aria-live="polite"
           className={`ml-auto min-w-[64px] text-right ${
@@ -819,8 +847,19 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
                   </span>
                   <span className="truncate font-bold">{player.type}</span>
                   {player.paid ? (
+                    // 계산서로 결제된 선수는 Mark unpaid 가 서버에서 막힌다(0005) — 환불은 계산서
+                    // 단위로 Reports 에서 한다. 결제한 날(영업일) 목록을 바로 연다.
+                    <Link
+                      className="ml-auto whitespace-nowrap px-1 text-[10px] font-bold text-[#8a3f26] underline decoration-dotted"
+                      href={`/admin/reports?date=${localBusinessDate(player.paidAt ? new Date(player.paidAt) : new Date())}`}
+                      title="Refund the bill this player was paid on — Reports → Daily close. Refund card or debit on the DX8000 first."
+                    >
+                      Refund
+                    </Link>
+                  ) : null}
+                  {player.paid ? (
                     <button
-                      className="ml-auto whitespace-nowrap px-1 text-[10px] text-[#4e5560] underline decoration-dotted hover:text-[#8a3f26] disabled:opacity-30"
+                      className="whitespace-nowrap px-1 text-[10px] text-[#4e5560] underline decoration-dotted hover:text-[#8a3f26] disabled:opacity-30"
                       disabled={busy}
                       onClick={() => void controller.patchPlayer(booking.id, player.id, { paid: false })}
                       title="Clear the payment on this card — only to fix a mistake"
@@ -1090,6 +1129,34 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
                     <Glyph className="h-3 w-3" name="card" />
                   </button>
                 </div>
+                {useRainCheck && player.paid && !player.cancelled
+                  ? (() => {
+                      const check = activeRainCheck(rainChecks.checks, player.id);
+                      return (
+                        <button
+                          className={`mt-1 border px-1 py-1 font-bold disabled:opacity-40 ${
+                            check
+                              ? "border-[#2f6f8f] bg-[#eef6fa] text-[#2f6f8f]"
+                              : "border-dashed border-[#2f6f8f] text-[#2f6f8f]"
+                          }`}
+                          disabled={busy}
+                          onClick={() => setRainCheckFor([player])}
+                          title={
+                            check
+                              ? `Rain check ${check.code} — reprint or void`
+                              : "Give this player a rain check slip (barcode + expiry date)"
+                          }
+                          type="button"
+                        >
+                          {check
+                            ? `Rain check ${formatMoney(check.amount)}${
+                                check.status === "redeemed" ? " · used" : check.expired ? " · expired" : ""
+                              }`
+                            : "Rain check"}
+                        </button>
+                      );
+                    })()
+                  : null}
                 {receiptNote?.playerId === player.id ? (
                   <span className="mt-1 block text-[10px] text-[#8a3f26]">{receiptNote.text}</span>
                 ) : null}
@@ -1201,6 +1268,16 @@ export default function ReservationDetail({ controller }: ReservationDetailProps
             </div>
           </div>
         </div>
+      ) : null}
+
+      {rainCheckFor ? (
+        <RainCheckDialog
+          booking={booking}
+          existing={rainChecks.checks}
+          onChanged={rainChecks.reload}
+          onClose={() => setRainCheckFor(null)}
+          players={rainCheckFor}
+        />
       ) : null}
 
       {/* ===== 노란 메모 줄 ===== */}
