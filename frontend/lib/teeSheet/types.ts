@@ -51,6 +51,8 @@ export type AuditEntry = {
 
 export type TeeBooking = {
   id: string;
+  /** 손님용 확인 코드(`T` + 16진수 9자, 0012). 0012 이전에 읽은 doc 에는 없을 수 있다. */
+  confirmationCode?: string;
   /** ISO date, e.g. "2026-09-11" */
   date: string;
   /** Slot label, e.g. "6:58 AM" — always one of the slots returned by /tee-sheet/slots */

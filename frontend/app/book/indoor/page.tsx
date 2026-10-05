@@ -709,7 +709,7 @@ export default function IndoorGolfBooking() {
           {/* 확정 메일은 지금 나가지 않는다 — 메일 발송은 멈춘 FastAPI 서버(SMTP)에 있었다.
               보내지 않은 메일을 보냈다고 쓰지 않는다. */}
           <p className="mb-4 break-words text-sm text-[#5c6459]">
-            Save or screenshot this code. You can look up your booking with it any time.
+            Save or screenshot this code. With it and your email you can change or cancel online up to 24 hours before your start time.
           </p>
 
           <p className="mb-6 text-sm text-[#5c6459]">
@@ -722,7 +722,7 @@ export default function IndoorGolfBooking() {
             className="tap-target flex items-center justify-center rounded-sm bg-[#214d2f] px-6 text-base font-bold text-white transition hover:bg-[#163820]"
             href={lookupHref(reservation.confirmation_code)}
           >
-            View this booking
+            View or change this booking
           </a>
         </div>
       )}

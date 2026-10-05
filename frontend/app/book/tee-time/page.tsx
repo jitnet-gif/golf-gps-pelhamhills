@@ -691,6 +691,7 @@ function Confirmation({
   onBookAnother: () => void;
 }) {
   const players = booking.players.length;
+  const code = booking.confirmationCode ?? booking.id;
   return (
     <div className="min-w-0">
       <div className="rounded-sm border border-[#d8d1c3] bg-white p-6 text-center">
@@ -715,22 +716,24 @@ function Confirmation({
           </p>
 
           <div className="mt-4 border-t border-[#d8d1c3] pt-4">
-            <p className="text-sm font-semibold text-[#8a6f30]">Reservation number</p>
-            {/* UUID 라 길다. 좁은 화면에서 페이지를 가로로 밀지 않도록 반드시 꺾는다. */}
-            <p className="break-all font-mono text-sm font-bold text-[#214d2f]">{booking.id}</p>
+            <p className="text-sm font-semibold text-[#8a6f30]">Confirmation code</p>
+            {/* 0012 이전 서버면 코드가 없어 UUID 를 보여 준다. 길어서 반드시 꺾는다. */}
+            <p className="break-all font-mono text-lg font-bold tracking-widest text-[#214d2f]">
+              {code}
+            </p>
           </div>
         </div>
 
         <p className="mt-4 text-sm text-[#5c6459]">
-          Save this number. The pro shop can find your booking with it, or with your name at{" "}
-          {CLUB.phone}.
+          Save this code. With it and your email you can change or cancel your tee time online
+          up to 24 hours before — or call the pro shop at {CLUB.phone}.
         </p>
       </div>
 
       <div className="mt-5 grid grid-cols-[minmax(0,1fr)] gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <Link
           className="tap-target flex items-center justify-center rounded-sm border border-[#d8d1c3] bg-white px-5 text-base font-bold text-[#214d2f] transition hover:bg-[#f7f4ed]"
-          href={lookupHref(booking.id)}
+          href={lookupHref(code)}
         >
           {bookNav[2].label}
         </Link>

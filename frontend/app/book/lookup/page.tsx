@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * 확인 코드로 예약 찾기.
+ * 확인 코드 + 이메일로 예약을 찾고, **직접 바꾸거나 취소한다**(실내 골프·티타임).
  *
  * ## 왜 페이지가 얇은 래퍼인가
  * `useSearchParams()` 를 쓰는 컴포넌트는 반드시 `<Suspense>` 안에 있어야 한다.
@@ -9,21 +9,21 @@
  * boundary" 로 **빌드 자체를 실패**시킨다(정적 export 라 더 그렇다). 그래서 실제
  * 내용은 `LookupPanel` 로 빼고 이 페이지는 경계만 친다.
  *
- * ## 조회할 수 있는 것과 없는 것
- * 실내 골프(시뮬레이터)는 Supabase 함수 `pelham_sim_lookup` 으로 찾는다(`lib/booking/rpc.ts`).
- * 코드가 맞는 예약 한 건만 돌아오고, 없으면 null 이다.
- * **티타임에는 조회 엔드포인트가 없다.** 예약 응답이 돌려주는 것은 UUID `id`
- * 뿐이고 확인 코드라는 개념 자체가 없다. 없는 기능을 있는 척 흉내내면 손님은
- * 코드를 계속 다시 쳐 보다가 포기한다. 그래서 UUID 모양이 들어오면 정직하게
- * "티타임 조회는 준비 중" 이라고 말하고 전화로 착지시킨다.
+ * ## 서버가 정한다
+ * 찾기·수정·취소는 전부 Supabase 함수다(`supabase/migrations/0012_guest_manage_booking.sql`).
+ * - 본인 확인은 코드 + 예약 때 쓴 이메일. 틀리면 어느 쪽이 틀렸는지 말하지 않는다.
+ * - 코드 모양으로 갈린다: 16진수 10자 = 실내 골프, `T` + 9자 = 티타임, UUID = 0012 이전 티타임 번호.
+ * - 바꿀 수 있는지(`editable`)와 못 바꾸는 이유(`reason`)는 서버가 돌려준다. 원래 시작 24시간
+ *   전이 마감인데, 손님 기기 시계가 아니라 서버(클럽 현지) 시계로 판정해야 하기 때문이다.
+ * - 시간 목록의 "꽉 참" 표시는 안내일 뿐이다. 마지막 판정은 저장할 때 서버가 한다.
  */
 
 // `useSearchParams` 는 아래 `LookupPanel` 에서만 쓴다 — 반드시 Suspense 경계 안쪽이다.
 import { useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useState, type ReactNode } from "react";
 
 import BookingShell from "@/components/booking/BookingShell";
-import { formatLongDate } from "@/components/booking/availability";
+import { formatLongDate, todayIso } from "@/components/booking/availability";
 import { NO_API_MESSAGE } from "@/lib/apiHost";
 import { bookingConfigured, bookingRpc } from "@/lib/booking/rpc";
 import { ApiError } from "@/lib/teeSheet/api";
@@ -32,7 +32,7 @@ import { CLUB } from "@/lib/nav";
 export default function LookupPage() {
   return (
     <BookingShell
-      subtitle="Enter the confirmation code you got when you booked."
+      subtitle="Find, change or cancel your booking with your confirmation code and email."
       title="My Booking"
     >
       <Suspense fallback={<PanelSkeleton />}>
@@ -51,26 +51,53 @@ function PanelSkeleton() {
   );
 }
 
-type SimulatorReservation = {
-  id: number;
+type SimBooking = {
   confirmation_code: string;
-  bay_type: string;
   bay_number: number | null;
+  bay_type: string;
+  hourly_rate: number;
   date: string;
+  /** "HH:MM" 24시간 */
   start_time: string;
   duration_hours: number;
   player_count: number;
   customer_name: string;
   customer_email: string;
+  phone: string;
   total_price: number | null;
   status: string;
-  created_at: string;
 };
 
-/** 시뮬레이터 확인 코드는 `secrets.token_hex(5).upper()` — 16진수 10자다. */
-const SIM_CODE = /^[0-9a-f]{10}$/i;
-/** 티타임 예약이 돌려주는 것은 UUID `id` 하나뿐이다(확인 코드가 없다). */
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+type TeeGuestBooking = {
+  confirmation_code: string;
+  date: string;
+  /** 티 시트 라벨, 예: "8:01 AM" */
+  time: string;
+  holes: 9 | 18;
+  players: number;
+  rate: number;
+  cart_count: number;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string;
+  status: string;
+};
+
+type Meta = {
+  editable: boolean;
+  reason: string | null;
+  /** 클럽 현지 "YYYY-MM-DDTHH:MM" — 이 시각까지 온라인으로 바꿀 수 있다. */
+  change_deadline: string;
+};
+
+type Found = (Meta & { kind: "sim"; booking: SimBooking }) | (Meta & { kind: "tee"; booking: TeeGuestBooking });
+
+type Credentials = { code: string; email: string };
+
+/** 실내 골프 16진수 10자, 티타임 `T` + 9자, 0012 이전 티타임 UUID. */
+const CODE_SHAPE =
+  /^([0-9a-f]{10}|T[0-9a-f]{9}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
 /** 서버 주소는 문구에 넣지 않는다. 방문자에게 우리 호스트를 알려 줄 이유가 없다. */
 function networkMessage(err: unknown, action: string): string {
@@ -80,81 +107,88 @@ function networkMessage(err: unknown, action: string): string {
   return err instanceof Error && err.message ? err.message : action;
 }
 
+/** "18:00" → "6:00 PM" */
+function fmt12(hhmm: string): string {
+  const [h, m] = hhmm.split(":").map(Number);
+  return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+}
+
+function toMin(hhmm: string): number {
+  const [h, m] = hhmm.split(":").map(Number);
+  return h * 60 + m;
+}
+
+function fromMin(min: number): string {
+  return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+}
+
+function formatDeadline(local: string): string {
+  const [date, time] = local.split("T");
+  return `${formatLongDate(date)}, ${fmt12(time)}`;
+}
+
+const inputClass = "w-full rounded-sm border border-[#d8d1c3] bg-white px-3 py-2 text-base";
+const labelClass = "mb-1 block text-sm font-semibold text-[#3d453d]";
+
 function LookupPanel() {
   const params = useSearchParams();
-  const prefill = params.get("code") ?? "";
 
-  const [code, setCode] = useState(prefill);
+  const [code, setCode] = useState(params.get("code") ?? "");
+  const [email, setEmail] = useState("");
   /** 온라인 조회를 열 수 있는가. `null` 은 "아직 모름"(마운트 전). */
   const [bookingReady, setBookingReady] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  /** 티타임처럼 **조회 자체가 없는** 경우. 오류가 아니라 안내다. */
-  const [teeTimeNotice, setTeeTimeNotice] = useState(false);
-  const [found, setFound] = useState<SimulatorReservation | null>(null);
+  const [found, setFound] = useState<Found | null>(null);
+  /** 찾을 때 쓴 코드·이메일. 수정·취소는 이것으로 다시 본인 확인을 한다. */
+  const [creds, setCreds] = useState<Credentials | null>(null);
+  const [mode, setMode] = useState<"view" | "edit" | "cancel">("view");
+  const [done, setDone] = useState("");
 
   useEffect(() => {
     setBookingReady(bookingConfigured());
   }, []);
 
-  const lookup = useCallback(
-    async (raw: string) => {
-      const wanted = raw.trim();
-      if (!wanted) return;
-
-      setFound(null);
-      setError("");
-      setTeeTimeNotice(false);
-
-      // 티타임 예약 번호(UUID)는 조회할 곳이 없다. 요청을 보내 봐야 404 이고,
-      // 그러면 손님은 "코드를 잘못 쳤나" 하고 계속 다시 친다.
-      if (UUID.test(wanted)) {
-        setTeeTimeNotice(true);
+  async function lookup() {
+    const wanted = { code: code.trim(), email: email.trim() };
+    if (!wanted.code || !wanted.email) return;
+    setFound(null);
+    setError("");
+    setDone("");
+    setMode("view");
+    if (!bookingReady) {
+      setError(NO_API_MESSAGE);
+      return;
+    }
+    setLoading(true);
+    try {
+      const result = await bookingRpc<Found | null>("pelham_booking_find", {
+        p_code: wanted.code,
+        p_email: wanted.email,
+      });
+      if (!result) {
+        setError(
+          "We could not find a booking with that confirmation code and email. Use the email you booked with, or call the pro shop.",
+        );
         return;
       }
+      setFound(result);
+      setCreds(wanted);
+    } catch (err) {
+      setError(networkMessage(err, "Your booking could not be loaded."));
+    } finally {
+      setLoading(false);
+    }
+  }
 
-      if (!bookingReady) {
-        setError(NO_API_MESSAGE);
-        return;
-      }
-
-      setLoading(true);
-      try {
-        const reservation = await bookingRpc<SimulatorReservation | null>("pelham_sim_lookup", {
-          p_code: wanted,
-        });
-        if (!reservation) {
-          setError(
-            "We could not find a booking with that code. Check the code shown when you booked, or call the pro shop.",
-          );
-          return;
-        }
-        setFound(reservation);
-      } catch (err) {
-        setError(networkMessage(err, "Your booking could not be loaded."));
-      } finally {
-        setLoading(false);
-      }
-    },
-    [bookingReady],
-  );
-
-  // `?code=` 로 들어온 링크는 손님이 다시 누를 필요 없이 바로 찾아 준다.
-  // 예약을 열 수 있는지 알게 된 뒤에 한 번만 돈다.
-  //
-  // `attempted` 가드가 없으면 같은 코드로 요청이 반복된다: `lookup` 은 진입하자마자
-  // setState 를 여러 번 하고, 그 렌더로 `lookup` 자체가 다시 만들어지면 이 이펙트가
-  // 또 돈다. 코드가 틀렸을 때(404) 특히 잘 드러난다 — 서버를 계속 두드린다.
-  const attempted = useRef<string | null>(null);
-  useEffect(() => {
-    if (bookingReady === null) return;
-    if (!prefill) return;
-    if (attempted.current === prefill) return;
-    attempted.current = prefill;
-    void lookup(prefill);
-  }, [bookingReady, prefill, lookup]);
+  function applied(next: Found, message: string) {
+    setFound(next);
+    setMode("view");
+    setDone(message);
+  }
 
   const offline = bookingReady === false;
+  const trimmed = code.trim();
 
   return (
     <div className="min-w-0">
@@ -162,10 +196,10 @@ function LookupPanel() {
         className="rounded-sm border border-[#d8d1c3] bg-white p-5"
         onSubmit={(event) => {
           event.preventDefault();
-          void lookup(code);
+          void lookup();
         }}
       >
-        <label className="mb-2 block text-sm font-semibold text-[#3d453d]" htmlFor="lookup-code">
+        <label className={labelClass} htmlFor="lookup-code">
           Confirmation code
         </label>
         <input
@@ -180,24 +214,39 @@ function LookupPanel() {
           value={code}
         />
         <p className="mt-2 text-xs text-[#5c6459]">
-          Indoor golf codes are 10 characters and are shown on screen when you book.
+          Shown on screen when you booked. Indoor golf codes are 10 letters and numbers; tee time
+          codes start with T.
         </p>
+
+        <label className={`${labelClass} mt-4`} htmlFor="lookup-email">
+          Email used for the booking
+        </label>
+        <input
+          autoComplete="email"
+          className="w-full rounded-sm border border-[#d8d1c3] px-4 py-3 text-base"
+          id="lookup-email"
+          inputMode="email"
+          onChange={(event) => setEmail(event.target.value)}
+          placeholder="you@example.com"
+          type="email"
+          value={email}
+        />
 
         <button
           className={`tap-target mt-4 w-full rounded-sm py-3 text-base font-bold text-white transition ${
-            code.trim() && !loading
+            trimmed && email.trim() && !loading
               ? "bg-[#214d2f] hover:bg-[#163820]"
               : "cursor-not-allowed bg-[#a9b0a6]"
           }`}
-          disabled={!code.trim() || loading}
+          disabled={!trimmed || !email.trim() || loading}
           type="submit"
         >
           {loading ? "Looking…" : "Find my booking"}
         </button>
 
-        {code.trim() && !SIM_CODE.test(code.trim()) && !UUID.test(code.trim()) ? (
+        {trimmed && !CODE_SHAPE.test(trimmed) ? (
           <p className="mt-3 text-sm text-[#8a6f30]">
-            That does not look like an indoor golf code — they are 10 letters and numbers.
+            That does not look like a confirmation code — check the code shown when you booked.
           </p>
         ) : null}
       </form>
@@ -205,16 +254,6 @@ function LookupPanel() {
       {offline ? (
         <Notice tone="warn" title="Booking lookup is offline">
           <p>{NO_API_MESSAGE}</p>
-        </Notice>
-      ) : null}
-
-      {teeTimeNotice ? (
-        <Notice tone="warn" title="Tee time lookup is not ready yet">
-          {/* 정직하게 착지시킨다. 티 시트에는 확인 코드도, 코드로 찾는 주소도 없다. */}
-          <p>
-            That looks like a tee time reservation number. Online tee time lookup is still being
-            built — the pro shop can pull up your booking in seconds by phone.
-          </p>
         </Notice>
       ) : null}
 
@@ -226,12 +265,93 @@ function LookupPanel() {
         </Notice>
       ) : null}
 
-      {found ? <ReservationCard reservation={found} /> : null}
+      {done ? (
+        <div
+          className="mt-5 rounded-sm border border-[#b9d3b9] bg-[#e4efe4] p-4 text-sm font-semibold text-[#214d2f]"
+          role="status"
+        >
+          {done}
+        </div>
+      ) : null}
+
+      {found && creds ? (
+        <>
+          {found.kind === "sim" ? (
+            <SimCard booking={found.booking} />
+          ) : (
+            <TeeCard booking={found.booking} />
+          )}
+
+          {found.editable ? (
+            mode === "edit" ? (
+              found.kind === "sim" ? (
+                <SimEditForm
+                  booking={found.booking}
+                  creds={creds}
+                  onCancel={() => setMode("view")}
+                  onSaved={(next) => applied(next, "Your booking has been updated.")}
+                />
+              ) : (
+                <TeeEditForm
+                  booking={found.booking}
+                  creds={creds}
+                  onCancel={() => setMode("view")}
+                  onSaved={(next) => applied(next, "Your tee time has been updated.")}
+                />
+              )
+            ) : mode === "cancel" ? (
+              <CancelConfirm
+                creds={creds}
+                kind={found.kind}
+                onBack={() => setMode("view")}
+                onCancelled={(next) => applied(next, "Your booking has been cancelled.")}
+              />
+            ) : (
+              <div className="mt-3 rounded-sm border border-[#d8d1c3] bg-white p-4">
+                <p className="text-sm text-[#5c6459]">
+                  You can change or cancel online until{" "}
+                  <span className="font-semibold text-[#182118]">
+                    {formatDeadline(found.change_deadline)}
+                  </span>{" "}
+                  (24 hours before the start).
+                </p>
+                <div className="mt-3 grid grid-cols-[minmax(0,1fr)] gap-2 sm:grid-cols-2">
+                  <button
+                    className="tap-target rounded-sm bg-[#214d2f] px-5 text-base font-bold text-white transition hover:bg-[#163820]"
+                    onClick={() => {
+                      setDone("");
+                      setMode("edit");
+                    }}
+                    type="button"
+                  >
+                    Change booking
+                  </button>
+                  <button
+                    className="tap-target rounded-sm border border-[#e0b3b3] bg-white px-5 text-base font-bold text-[#8a2f2f] transition hover:bg-[#fbeeee]"
+                    onClick={() => {
+                      setDone("");
+                      setMode("cancel");
+                    }}
+                    type="button"
+                  >
+                    Cancel booking
+                  </button>
+                </div>
+              </div>
+            )
+          ) : found.reason && found.booking.status !== "cancelled" ? (
+            <Notice tone="warn" title="This booking can't be changed online">
+              <p>{found.reason} Please call the pro shop and they will help.</p>
+            </Notice>
+          ) : null}
+        </>
+      ) : null}
 
       <div className="mt-5 rounded-sm border border-[#d8d1c3] bg-white p-4 text-sm text-[#5c6459]">
-        <p className="font-semibold text-[#182118]">Need to change or cancel?</p>
+        <p className="font-semibold text-[#182118]">Need help?</p>
         <p className="mt-1">
-          Changes and cancellations are handled by the pro shop. Call{" "}
+          Online changes and cancellations close 24 hours before your start time. After that, or if
+          your booking was paid at the club, call{" "}
           <a className="font-semibold text-[#214d2f] underline" href={CLUB.phoneHref}>
             {CLUB.phone}
           </a>{" "}
@@ -273,50 +393,625 @@ function Notice({
   );
 }
 
-function ReservationCard({ reservation }: { reservation: SimulatorReservation }) {
-  const cancelled = reservation.status !== "confirmed";
+function StatusBadge({ status, live }: { status: string; live: boolean }) {
+  return (
+    <span
+      className={`rounded-sm px-2 py-1 text-xs font-bold uppercase ${
+        live ? "bg-[#e4efe4] text-[#214d2f]" : "bg-[#efece3] text-[#8a2f2f]"
+      }`}
+    >
+      {status.replace("_", " ")}
+    </span>
+  );
+}
+
+function CardShell({
+  children,
+  code,
+  kicker,
+  status,
+  live,
+}: {
+  children: ReactNode;
+  code: string;
+  kicker: string;
+  status: string;
+  live: boolean;
+}) {
   return (
     <div className="mt-5 rounded-sm border border-[#d8d1c3] bg-white p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#8a6f30]">
-          Indoor Golf
-        </p>
-        <span
-          className={`rounded-sm px-2 py-1 text-xs font-bold uppercase ${
-            cancelled ? "bg-[#efece3] text-[#8a2f2f]" : "bg-[#e4efe4] text-[#214d2f]"
-          }`}
-        >
-          {reservation.status}
-        </span>
+        <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#8a6f30]">{kicker}</p>
+        <StatusBadge live={live} status={status} />
       </div>
+      {children}
+      <div className="mt-3 min-w-0">
+        <p className="text-sm font-semibold text-[#8a6f30]">Confirmation code</p>
+        <p className="break-all font-mono font-bold tracking-widest text-[#214d2f]">{code}</p>
+      </div>
+    </div>
+  );
+}
 
-      <p className="mt-2 text-sm text-[#5c6459]">{formatLongDate(reservation.date)}</p>
-      <p className="mt-1 text-3xl font-bold">{reservation.start_time}</p>
+function SimCard({ booking }: { booking: SimBooking }) {
+  return (
+    <CardShell
+      code={booking.confirmation_code}
+      kicker="Indoor Golf"
+      live={booking.status === "confirmed" || booking.status === "checked_in" || booking.status === "paid"}
+      status={booking.status}
+    >
+      <p className="mt-2 text-sm text-[#5c6459]">{formatLongDate(booking.date)}</p>
+      <p className="mt-1 text-3xl font-bold">{fmt12(booking.start_time)}</p>
       <p className="mt-1 text-sm text-[#3d453d]">
-        {reservation.duration_hours} hour{reservation.duration_hours > 1 ? "s" : ""} ·{" "}
-        {reservation.player_count} player{reservation.player_count > 1 ? "s" : ""} ·{" "}
-        {reservation.bay_type}
-        {reservation.bay_number ? ` #${reservation.bay_number}` : ""}
+        {booking.duration_hours} hour{booking.duration_hours > 1 ? "s" : ""} ·{" "}
+        {booking.player_count} player{booking.player_count > 1 ? "s" : ""}
+        {booking.bay_number ? ` · Bay ${booking.bay_number}` : ""}
       </p>
-
       <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-[#d8d1c3] pt-4 text-sm">
         <div className="min-w-0">
           <dt className="font-semibold text-[#8a6f30]">Name</dt>
-          <dd className="break-words">{reservation.customer_name}</dd>
+          <dd className="break-words">{booking.customer_name}</dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="font-semibold text-[#8a6f30]">Phone</dt>
+          <dd className="break-words">{booking.phone || "—"}</dd>
         </div>
         <div className="min-w-0">
           <dt className="font-semibold text-[#8a6f30]">Total</dt>
           <dd className="font-bold text-[#214d2f]">
-            {reservation.total_price === null ? "—" : `$${reservation.total_price.toFixed(2)}`}
-          </dd>
-        </div>
-        <div className="col-span-2 min-w-0">
-          <dt className="font-semibold text-[#8a6f30]">Confirmation code</dt>
-          <dd className="break-all font-mono font-bold tracking-widest text-[#214d2f]">
-            {reservation.confirmation_code}
+            {booking.total_price === null ? "—" : `$${Number(booking.total_price).toFixed(2)}`}
           </dd>
         </div>
       </dl>
+    </CardShell>
+  );
+}
+
+function TeeCard({ booking }: { booking: TeeGuestBooking }) {
+  const name = `${booking.first_name} ${booking.last_name}`.trim();
+  return (
+    <CardShell
+      code={booking.confirmation_code}
+      kicker="Tee Time"
+      live={booking.status !== "cancelled" && booking.status !== "no_show"}
+      status={booking.status}
+    >
+      <p className="mt-2 text-sm text-[#5c6459]">{formatLongDate(booking.date)}</p>
+      <p className="mt-1 text-3xl font-bold">{booking.time}</p>
+      <p className="mt-1 text-sm text-[#3d453d]">
+        {booking.players} player{booking.players === 1 ? "" : "s"} · {booking.holes} holes
+      </p>
+      <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-[#d8d1c3] pt-4 text-sm">
+        <div className="min-w-0">
+          <dt className="font-semibold text-[#8a6f30]">Name</dt>
+          <dd className="break-words">{name || "—"}</dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="font-semibold text-[#8a6f30]">Phone</dt>
+          <dd className="break-words">{booking.phone || "—"}</dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="font-semibold text-[#8a6f30]">Green fees</dt>
+          <dd className="font-bold text-[#214d2f]">
+            ${Number(booking.rate).toFixed(2)} × {booking.players} = $
+            {(Number(booking.rate) * booking.players).toFixed(2)}
+          </dd>
+        </div>
+      </dl>
+    </CardShell>
+  );
+}
+
+function FormShell({
+  children,
+  error,
+  onCancel,
+  saving,
+  title,
+}: {
+  children: ReactNode;
+  error: string;
+  onCancel: () => void;
+  saving: boolean;
+  title: string;
+}) {
+  return (
+    <div className="mt-3 rounded-sm border border-[#214d2f] bg-white p-5">
+      <p className="font-serif text-lg font-semibold text-[#214d2f]">{title}</p>
+      <div className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2">{children}</div>
+      {error ? (
+        <p className="mt-4 rounded-sm bg-[#fbeeee] p-3 text-sm text-[#8a2f2f]" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <div className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-2 sm:grid-cols-2">
+        <button
+          className={`tap-target rounded-sm px-5 text-base font-bold text-white transition ${
+            saving ? "cursor-not-allowed bg-[#a9b0a6]" : "bg-[#214d2f] hover:bg-[#163820]"
+          }`}
+          disabled={saving}
+          type="submit"
+        >
+          {saving ? "Saving…" : "Save changes"}
+        </button>
+        <button
+          className="tap-target rounded-sm border border-[#d8d1c3] bg-white px-5 text-base font-bold text-[#214d2f] transition hover:bg-[#f7f4ed]"
+          onClick={onCancel}
+          type="button"
+        >
+          Keep as is
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SimEditForm({
+  booking,
+  creds,
+  onCancel,
+  onSaved,
+}: {
+  booking: SimBooking;
+  creds: Credentials;
+  onCancel: () => void;
+  onSaved: (next: Found) => void;
+}) {
+  const [date, setDate] = useState(booking.date);
+  const [start, setStart] = useState(booking.start_time);
+  const [duration, setDuration] = useState(booking.duration_hours);
+  const [players, setPlayers] = useState(booking.player_count);
+  const [name, setName] = useState(booking.customer_name);
+  const [phone, setPhone] = useState(booking.phone);
+  /** 서버가 비어 있다고 한 시작 시각들. `null` 은 아직 모름. */
+  const [open, setOpen] = useState<Set<string> | null>(null);
+  const [closedReason, setClosedReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setOpen(null);
+    setClosedReason("");
+    bookingRpc<{ is_closed: boolean; reason?: string | null; available_slots: { time: string }[] }>(
+      "pelham_sim_availability",
+      { p_date: date, p_bay_type: "left_right", p_duration_hours: duration },
+    )
+      .then((res) => {
+        if (cancelled) return;
+        setOpen(new Set(res.available_slots.map((s) => s.time)));
+        setClosedReason(res.is_closed ? res.reason ?? "Closed on this date." : "");
+      })
+      .catch(() => {
+        // 안내가 없어도 저장할 때 서버가 다시 본다. 목록은 전부 고를 수 있게 둔다(null).
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [date, duration]);
+
+  // 가용 목록은 이 손님 자신의 예약도 "찬 자리" 로 센다. 같은 날 원래 시간과 겹치는 시각은
+  // 자기 자리라 비울 수 있으니 막지 않는다.
+  const ownStart = toMin(booking.start_time);
+  const ownEnd = ownStart + booking.duration_hours * 60;
+  const startOptions: { value: string; full: boolean }[] = [];
+  for (let m = 14 * 60; m + duration * 60 <= 22 * 60; m += 15) {
+    const value = fromMin(m);
+    const overlapsOwn = date === booking.date && m < ownEnd && m + duration * 60 > ownStart;
+    const full = open !== null && !open.has(value) && !overlapsOwn;
+    startOptions.push({ value, full });
+  }
+  const startStillValid = startOptions.some((o) => o.value === start);
+
+  async function save() {
+    setError("");
+    if (!name.trim()) {
+      setError("Please enter a name.");
+      return;
+    }
+    if (!startStillValid) {
+      setError("Please pick a start time.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const next = await bookingRpc<Found>("pelham_sim_guest_update", {
+        p_code: creds.code,
+        p_email: creds.email,
+        p: {
+          date,
+          start_time: start,
+          duration_hours: duration,
+          player_count: players,
+          customer_name: name.trim(),
+          phone: phone.trim(),
+        },
+      });
+      onSaved(next);
+    } catch (err) {
+      setError(networkMessage(err, "Your changes could not be saved."));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        void save();
+      }}
+    >
+      <FormShell error={error} onCancel={onCancel} saving={saving} title="Change your bay booking">
+        <div className="min-w-0">
+          <label className={labelClass} htmlFor="sim-date">
+            Date
+          </label>
+          <input
+            className={inputClass}
+            id="sim-date"
+            min={todayIso()}
+            onChange={(e) => e.target.value && setDate(e.target.value)}
+            type="date"
+            value={date}
+          />
+          {closedReason ? <p className="mt-1 text-xs text-[#8a2f2f]">{closedReason}</p> : null}
+        </div>
+        <div className="min-w-0">
+          <label className={labelClass} htmlFor="sim-duration">
+            Hours
+          </label>
+          <select
+            className={inputClass}
+            id="sim-duration"
+            onChange={(e) => setDuration(Number(e.target.value))}
+            value={duration}
+          >
+            {[1, 2, 3, 4, 5].map((h) => (
+              <option key={h} value={h}>
+                {h} hour{h > 1 ? "s" : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="min-w-0">
+          <label className={labelClass} htmlFor="sim-start">
+            Start time
+          </label>
+          <select
+            className={inputClass}
+            id="sim-start"
+            onChange={(e) => setStart(e.target.value)}
+            value={startStillValid ? start : ""}
+          >
+            {startStillValid ? null : (
+              <option disabled value="">
+                Pick a time
+              </option>
+            )}
+            {startOptions.map((o) => (
+              <option disabled={o.full} key={o.value} value={o.value}>
+                {fmt12(o.value)}
+                {o.full ? " · full" : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="min-w-0">
+          <label className={labelClass} htmlFor="sim-players">
+            Players
+          </label>
+          <select
+            className={inputClass}
+            id="sim-players"
+            onChange={(e) => setPlayers(Number(e.target.value))}
+            value={players}
+          >
+            {[1, 2, 3, 4].map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="min-w-0">
+          <label className={labelClass} htmlFor="sim-name">
+            Name
+          </label>
+          <input
+            autoComplete="name"
+            className={inputClass}
+            id="sim-name"
+            maxLength={120}
+            onChange={(e) => setName(e.target.value)}
+            value={name}
+          />
+        </div>
+        <div className="min-w-0">
+          <label className={labelClass} htmlFor="sim-phone">
+            Phone
+          </label>
+          <input
+            autoComplete="tel"
+            className={inputClass}
+            id="sim-phone"
+            maxLength={40}
+            onChange={(e) => setPhone(e.target.value)}
+            type="tel"
+            value={phone}
+          />
+        </div>
+        <p className="text-sm text-[#5c6459] sm:col-span-2">
+          New total: <span className="font-bold text-[#214d2f]">${(booking.hourly_rate * duration).toFixed(2)}</span>{" "}
+          (paid at the club).
+        </p>
+      </FormShell>
+    </form>
+  );
+}
+
+function TeeEditForm({
+  booking,
+  creds,
+  onCancel,
+  onSaved,
+}: {
+  booking: TeeGuestBooking;
+  creds: Credentials;
+  onCancel: () => void;
+  onSaved: (next: Found) => void;
+}) {
+  const [date, setDate] = useState(booking.date);
+  const [time, setTime] = useState(booking.time);
+  const [holes, setHoles] = useState<9 | 18>(booking.holes);
+  const [players, setPlayers] = useState(booking.players);
+  const [firstName, setFirstName] = useState(booking.first_name);
+  const [lastName, setLastName] = useState(booking.last_name);
+  const [phone, setPhone] = useState(booking.phone);
+  const [times, setTimes] = useState<{ time: string; remaining: number }[] | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setTimes(null);
+    bookingRpc<{ times: { time: string; remaining: number }[] }>("pelham_tee_availability", {
+      p_date: date,
+    })
+      .then((res) => {
+        if (!cancelled) setTimes(res.times);
+      })
+      .catch(() => {
+        if (!cancelled) setTimes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [date]);
+
+  // 남은 자리 수에는 이 예약 자신의 인원도 빠져 있다. 원래 티타임이면 그만큼 돌려받는다.
+  const options = (times ?? []).map((t) => {
+    const own = date === booking.date && t.time === booking.time ? booking.players : 0;
+    return { time: t.time, free: t.remaining + own, full: t.remaining + own < players };
+  });
+  const timeStillValid = options.some((o) => o.time === time);
+
+  async function save() {
+    setError("");
+    if (!firstName.trim() && !lastName.trim()) {
+      setError("Please enter a name.");
+      return;
+    }
+    if (!timeStillValid) {
+      setError("Please pick a tee time.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const next = await bookingRpc<Found>("pelham_tee_guest_update", {
+        p_code: creds.code,
+        p_email: creds.email,
+        p: {
+          date,
+          time,
+          holes,
+          players,
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          phone: phone.trim(),
+        },
+      });
+      onSaved(next);
+    } catch (err) {
+      setError(networkMessage(err, "Your changes could not be saved."));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        void save();
+      }}
+    >
+      <FormShell error={error} onCancel={onCancel} saving={saving} title="Change your tee time">
+        <div className="min-w-0">
+          <label className={labelClass} htmlFor="tee-date">
+            Date
+          </label>
+          <input
+            className={inputClass}
+            id="tee-date"
+            min={todayIso()}
+            onChange={(e) => e.target.value && setDate(e.target.value)}
+            type="date"
+            value={date}
+          />
+        </div>
+        <div className="min-w-0">
+          <label className={labelClass} htmlFor="tee-time">
+            Tee time
+          </label>
+          <select
+            className={inputClass}
+            disabled={times === null}
+            id="tee-time"
+            onChange={(e) => setTime(e.target.value)}
+            value={timeStillValid ? time : ""}
+          >
+            {timeStillValid ? null : (
+              <option disabled value="">
+                {times === null ? "Loading…" : times.length ? "Pick a time" : "No tee times this day"}
+              </option>
+            )}
+            {options.map((o) => (
+              <option disabled={o.full} key={o.time} value={o.time}>
+                {o.time}
+                {o.full ? " · full" : ` · ${o.free} open`}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="min-w-0">
+          <label className={labelClass} htmlFor="tee-players">
+            Players
+          </label>
+          <select
+            className={inputClass}
+            id="tee-players"
+            onChange={(e) => setPlayers(Number(e.target.value))}
+            value={players}
+          >
+            {[1, 2, 3, 4].map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="min-w-0">
+          <label className={labelClass} htmlFor="tee-holes">
+            Holes
+          </label>
+          <select
+            className={inputClass}
+            id="tee-holes"
+            onChange={(e) => setHoles(Number(e.target.value) === 9 ? 9 : 18)}
+            value={holes}
+          >
+            <option value={18}>18 holes</option>
+            <option value={9}>9 holes</option>
+          </select>
+        </div>
+        <div className="min-w-0">
+          <label className={labelClass} htmlFor="tee-first">
+            First name
+          </label>
+          <input
+            autoComplete="given-name"
+            className={inputClass}
+            id="tee-first"
+            maxLength={60}
+            onChange={(e) => setFirstName(e.target.value)}
+            value={firstName}
+          />
+        </div>
+        <div className="min-w-0">
+          <label className={labelClass} htmlFor="tee-last">
+            Last name
+          </label>
+          <input
+            autoComplete="family-name"
+            className={inputClass}
+            id="tee-last"
+            maxLength={60}
+            onChange={(e) => setLastName(e.target.value)}
+            value={lastName}
+          />
+        </div>
+        <div className="min-w-0 sm:col-span-2">
+          <label className={labelClass} htmlFor="tee-phone">
+            Phone
+          </label>
+          <input
+            autoComplete="tel"
+            className={inputClass}
+            id="tee-phone"
+            maxLength={40}
+            onChange={(e) => setPhone(e.target.value)}
+            type="tel"
+            value={phone}
+          />
+        </div>
+      </FormShell>
+    </form>
+  );
+}
+
+function CancelConfirm({
+  creds,
+  kind,
+  onBack,
+  onCancelled,
+}: {
+  creds: Credentials;
+  kind: Found["kind"];
+  onBack: () => void;
+  onCancelled: (next: Found) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function cancel() {
+    setBusy(true);
+    setError("");
+    try {
+      const next = await bookingRpc<Found>(
+        kind === "sim" ? "pelham_sim_guest_cancel" : "pelham_tee_guest_cancel",
+        { p_code: creds.code, p_email: creds.email },
+      );
+      onCancelled(next);
+    } catch (err) {
+      setError(networkMessage(err, "Your booking could not be cancelled."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 rounded-sm border border-[#e0b3b3] bg-[#fbeeee] p-5 text-[#8a2f2f]">
+      <p className="font-semibold">Cancel this booking?</p>
+      <p className="mt-1 text-sm">
+        The {kind === "sim" ? "bay" : "tee time"} will be released for other golfers. This can&apos;t be
+        undone online.
+      </p>
+      {error ? (
+        <p className="mt-3 text-sm font-semibold" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <div className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-2 sm:grid-cols-2">
+        <button
+          className={`tap-target rounded-sm px-5 text-base font-bold text-white transition ${
+            busy ? "cursor-not-allowed bg-[#a9b0a6]" : "bg-[#8a2f2f] hover:bg-[#6e2424]"
+          }`}
+          disabled={busy}
+          onClick={() => void cancel()}
+          type="button"
+        >
+          {busy ? "Cancelling…" : "Yes, cancel it"}
+        </button>
+        <button
+          className="tap-target rounded-sm border border-[#d8d1c3] bg-white px-5 text-base font-bold text-[#214d2f] transition hover:bg-[#f7f4ed]"
+          onClick={onBack}
+          type="button"
+        >
+          Keep my booking
+        </button>
+      </div>
     </div>
   );
 }
