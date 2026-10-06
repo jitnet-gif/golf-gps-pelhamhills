@@ -93,11 +93,15 @@ if not any(type(f).__name__ == _DropTableRequestLogs.__name__ for f in _httpx_lo
 
 
 class SupabaseStoreError(RuntimeError):
-    """Supabase 호출 실패. `.status` 는 HTTP 상태 (설정 누락·네트워크 오류면 None)."""
+    """Supabase 호출 실패. `.status` 는 HTTP 상태 (설정 누락·네트워크 오류면 None).
 
-    def __init__(self, message: str, *, status: int | None = None) -> None:
+    `.code` 는 PostgREST 오류 코드 (`PT409` = 0017 정원 트리거가 거절). 모르면 None.
+    """
+
+    def __init__(self, message: str, *, status: int | None = None, code: str | None = None) -> None:
         super().__init__(message)
         self.status = status
+        self.code = code
 
 
 # ===== 설정 ============================================================
@@ -186,10 +190,11 @@ def _request(client: httpx.Client, method: str, **kwargs: Any) -> httpx.Response
     # >= 400 만 보면 3xx 가 성공으로 통과한다. httpx 는 리다이렉트를 따라가지 않으므로
     # (예: http:// URL → https 로 301) 아무것도 쓰지 않고 "커밋 완료" 가 된다.
     if not response.is_success:
+        code = _error_code(response)
         raise SupabaseStoreError(
-            f"{method} {TABLE} failed: HTTP {response.status_code}"
-            f" (code {_error_code(response)})",
+            f"{method} {TABLE} failed: HTTP {response.status_code} (code {code})",
             status=response.status_code,
+            code=code,
         )
     return response
 

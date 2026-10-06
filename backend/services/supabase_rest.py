@@ -19,11 +19,25 @@ from backend.services.tee_sheet_supabase import _client, configured
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["configured", "select", "insert", "update", "SupabaseUnavailable"]
+__all__ = ["configured", "select", "insert", "update", "rpc", "SupabaseUnavailable", "RpcRefused"]
 
 
 class SupabaseUnavailable(RuntimeError):
     """Supabase 가 설정돼 있지 않거나 요청이 실패했다. 호출부가 통화를 살려야 한다."""
+
+
+class RpcRefused(RuntimeError):
+    """SQL 함수가 `pelham_fail` 로 거절했다 (SQLSTATE `PTxxx`).
+
+    `.status` 는 그 숫자(409 등), 문장은 손님에게 읽어도 되는 메시지다. 네트워크·설정
+    오류(`SupabaseUnavailable`)와 나누는 이유: 이쪽은 "그 시간은 찼다" 같은 **답**이고,
+    저쪽은 "지금은 확인할 수 없다" 다. 비서가 하는 말이 달라야 한다.
+    """
+
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+        self.message = message
 
 
 def _call(method: str, table: str, **kwargs: Any) -> list[dict[str, Any]]:
@@ -67,3 +81,27 @@ def update(table: str, params: dict[str, str], patch: dict[str, Any]) -> list[di
         "PATCH", table, params=params, json=patch,
         headers={"Prefer": "return=representation"},
     )
+
+
+def rpc(function: str, args: dict[str, Any]) -> Any:
+    """`pelham_*` SQL 함수 하나를 부르고 JSON 결과를 그대로 돌려준다."""
+    if not configured():
+        raise SupabaseUnavailable("Supabase is not configured")
+    try:
+        with _client() as client:
+            res = client.post(f"/rest/v1/rpc/{function}", json=args)
+    except Exception as exc:
+        logger.warning("rpc %s 실패: %s", function, type(exc).__name__)
+        raise SupabaseUnavailable(f"rpc {function} failed") from exc
+    if res.is_success:
+        return res.json() if res.content else None
+    try:
+        body = res.json()
+    except Exception:
+        body = {}
+    code = body.get("code") if isinstance(body, dict) else None
+    if isinstance(code, str) and code.startswith("PT") and code[2:].isdigit():
+        raise RpcRefused(int(code[2:]), str(body.get("message") or ""))
+    # 본문에는 손님 정보가 있을 수 있다. 상태와 코드만 남긴다.
+    logger.warning("rpc %s 실패: HTTP %s (code %s)", function, res.status_code, code)
+    raise SupabaseUnavailable(f"rpc {function} failed: HTTP {res.status_code}")

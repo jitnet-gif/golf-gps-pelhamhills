@@ -235,6 +235,49 @@ def test_confirm_turns_a_hold_into_a_real_reservation(client):
     assert stored["players"][1]["name"] == "Guest"
 
 
+def _confirm_with(client, party, **extra):
+    held = hold(client, time="8:01 AM", party=party).json()
+    return client.post(
+        f"{API}/voice/tools/confirm-booking",
+        json={"hold_id": held["hold_id"], "first_name": "Jin", "last_name": "Nakamura",
+              "phone": "905-892-1234", "conversation_id": "c-test", **extra},
+    )
+
+
+def test_confirm_puts_the_cart_on_the_riders_bill(client):
+    """2026-10-06: 전화 예약에는 카트가 적히지 않아 계산서에서 카트 요금이 빠졌다.
+    계산서는 사람마다 `cart`/`cartFee` 를 읽는다. 대수는 한 대에 두 명(올림)."""
+    done = _confirm_with(client, party=3, riders=2)
+    assert done.status_code == 200, done.text
+
+    stored = client.get(f"{API}/tee-sheet/bookings/{done.json()['booking']['booking_id']}").json()
+    assert [p["cart"] for p in stored["players"]] == [True, True, False]
+    assert [p["cartFee"] for p in stored["players"]] == [ts.CART_FEE, ts.CART_FEE, 0.0]
+    assert stored["cartCount"] == 1
+
+
+def test_confirm_without_riders_books_walkers(client):
+    done = _confirm_with(client, party=2)
+    stored = client.get(f"{API}/tee-sheet/bookings/{done.json()['booking']['booking_id']}").json()
+    assert not any(p["cart"] for p in stored["players"])
+    assert stored["cartCount"] == 0
+
+
+def test_confirm_refuses_more_riders_than_players(client):
+    refused = _confirm_with(client, party=2, riders=3)
+    assert refused.status_code == 422
+    assert "riders" in refused.json()["detail"]
+
+
+def test_a_caller_who_says_member_is_noted_not_repriced(client):
+    """전화로 "회원이에요" 는 확인된 사실이 아니다. 요금제는 그대로, 메모만 남긴다."""
+    done = _confirm_with(client, party=1, riders=1, member=True)
+    stored = client.get(f"{API}/tee-sheet/bookings/{done.json()['booking']['booking_id']}").json()
+    assert "says they are a member" in stored["notes"]
+    assert stored["players"][0]["ratePlan"] == "Public"
+    assert stored["players"][0]["cartFee"] == ts.CART_FEE
+
+
 def test_confirming_an_expired_hold_fails_and_cleans_up(client, monkeypatch):
     held = hold(client, time="8:01 AM", party=2).json()
     monkeypatch.setattr(ts, "HOLD_TTL_SECONDS", -1)
@@ -700,64 +743,7 @@ def test_waitlist_without_the_list_promises_nothing(client, monkeypatch):
     assert waitlist(client).status_code == 503
 
 
-# ===== 취소하면 대기자에게 알린다 =======================================
-
-def _entry(eid, earliest=None, latest=None, phone="+15550001111"):
-    return {"id": eid, "phone": phone, "earliest": earliest, "latest": latest}
-
-
-def _cancel_a_booking(client):
-    booking = book(client, time="8:01 AM", party=2, conversation="c-booked")
-    lookup_first(client, "c-cancel")
-    assert cancel(client, booking["booking_id"]).status_code == 200
-
-
-def test_cancelling_offers_the_seat_to_the_first_person_waiting(client, monkeypatch):
-    offered = []
-    monkeypatch.setattr(voice.tee_waitlist, "waiting_entries",
-                        lambda date, seats: [_entry("w1")])
-    monkeypatch.setattr(voice.tee_waitlist, "mark_offered",
-                        lambda entry_id, time_label: offered.append((entry_id, time_label)))
-    _cancel_a_booking(client)
-    assert offered == [("w1", "8:01 AM")]
-
-
-def test_someone_wanting_the_afternoon_does_not_block_the_queue(client, monkeypatch):
-    """앞사람 시간대가 안 맞으면 **뒷사람**에게 간다.
-
-    맨 앞 한 명만 보고 포기하면, 오후만 원하는 사람이 명단 앞에 있을 때 아침에 난
-    자리로는 아무도 연락을 못 받는다.
-    """
-    offered = []
-    monkeypatch.setattr(
-        voice.tee_waitlist, "waiting_entries",
-        lambda date, seats: [_entry("afternoon", earliest="1:00 PM", latest="3:00 PM"),
-                             _entry("anytime")],
-    )
-    monkeypatch.setattr(voice.tee_waitlist, "mark_offered",
-                        lambda entry_id, time_label: offered.append((entry_id, time_label)))
-    _cancel_a_booking(client)
-    assert offered == [("anytime", "8:01 AM")]
-
-
-def test_nobody_is_texted_when_no_window_fits(client, monkeypatch):
-    offered = []
-    monkeypatch.setattr(
-        voice.tee_waitlist, "waiting_entries",
-        lambda date, seats: [_entry("afternoon", earliest="1:00 PM", latest="3:00 PM")],
-    )
-    monkeypatch.setattr(voice.tee_waitlist, "mark_offered",
-                        lambda entry_id, time_label: offered.append((entry_id, time_label)))
-    _cancel_a_booking(client)
-    assert offered == []
-
-
-def test_a_broken_waitlist_does_not_break_cancelling(client, monkeypatch):
-    def boom(date, seats):
-        raise voice.supabase_rest.SupabaseUnavailable("down")
-
-    monkeypatch.setattr(voice.tee_waitlist, "waiting_entries", boom)
-    _cancel_a_booking(client)
+# 취소된 자리를 대기자에게 다시 거는 흐름은 `test_waitlist_offers.py` 에 있다.
 
 
 def test_waitlist_rejects_a_time_it_cannot_parse(client):

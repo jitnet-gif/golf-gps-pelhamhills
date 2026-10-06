@@ -17,6 +17,8 @@
 | 파일 | 역할 |
 |---|---|
 | `backend/api/routes/voice.py` | 도구 12개 + 웹 세션 발급 + post-call 웹훅 |
+| `backend/api/routes/voice_sim.py` | 실내 골프(시뮬레이터) 도구 4개 + 문자 `C <코드>` 의 베이 쪽 |
+| `supabase/migrations/0016_phone_sim_booking.sql` | 위 도구가 부르는 service_role 전용 SQL 함수 — **아직 실행 안 됨** (0007·0008·0012 먼저) |
 | `backend/services/customer_lookup.py` | 발신번호 → 고객 (인사용. 인증 아님) |
 | `backend/services/lost_items.py` | 분실물 접수대장 (`pelham_lost_items`) |
 | `backend/services/tee_waitlist.py` | 대기자 명단 (`pelham_tee_waitlist`) |
@@ -30,8 +32,12 @@
 | `frontend/components/booking/VoiceBooking.tsx` | 웹 위젯 |
 | `frontend/lib/voice/session.ts` | signed URL 을 백엔드에서 받아온다 |
 | `backend/tests/test_voice_booking.py` | 58개 테스트 |
-| `supabase/migrations/0013_lost_items.sql` | 분실물 표 — **아직 실행 안 됨** |
-| `supabase/migrations/0014_tee_waitlist.sql` | 대기자 표 — **아직 실행 안 됨** |
+| `backend/tests/test_voice_sim.py` | 실내 골프 도구·문자 취소·문자 비서 테스트 |
+| `supabase/migrations/0013_lost_items.sql` | 분실물 표 (실행됨) |
+| `supabase/migrations/0014_tee_waitlist.sql` | 대기자 표 (실행됨) |
+| `supabase/migrations/0015_staff_lost_items.sql` | 분실물 직원 함수 + 문자 기록 열 — **아직 실행 안 됨** |
+| `frontend/app/admin/lost-items/page.tsx` | 프로 샵 분실물 화면 (Lost & Found) |
+| `backend/services/lost_item_notices.py` | "Found" 로 바꾸면 1분 안에 손님에게 문자 (8 AM – 9 PM) |
 | `backend/services/twilio_sms.py` | 문자 발송, E.164 정규화, Twilio 서명 검증 |
 | `backend/api/routes/sms.py` | 손님 답장(C 취소, STOP), 전달 상태, 리마인더 |
 
@@ -44,7 +50,7 @@
 | `find_tee_times` | 날짜·인원·시간대 → 실제로 팔 수 있는 티타임 |
 | `hold_tee_time` | 3분짜리 소프트 홀드. 이름을 받는 동안 자리를 잠근다 |
 | `release_hold` | 손님이 마음을 바꾸면 즉시 반납 |
-| `confirm_booking` | 홀드 → 실제 예약 |
+| `confirm_booking` | 홀드 → 실제 예약. `riders` 만큼 1인 카트 요금을 붙이고, 회원이라고 말하면 메모만 남긴다 |
 | `lookup_booking` | 전화번호 **+** 성으로 조회 |
 | `cancel_booking` | 취소 (`status=cancelled`, 삭제 아님). `preview=true` 면 가능 여부만 본다 |
 
@@ -57,11 +63,30 @@
 | `modify_booking` | 인원·홀 수 변경 | 시간 변경은 없다 (취소 후 재예약) |
 | `send_info_sms` | 주소·지도 또는 예약 링크 문자 | 발신번호로만, 고정 문구만 |
 | `report_lost_item` | 분실물 접수, 티켓 번호 발급 | "찾았다" 는 절대 말하지 않는다 |
-| `join_waitlist` | 대기자 등록 (손님이 요청했을 때만) | 자리를 잠그지 않는다 |
+| `join_waitlist` | 대기자 등록 (손님이 요청했을 때만) | 자리가 나면 15분 잡아 두고 YES 를 기다린다 |
 
-취소가 성공하면 그 자리를 그날 대기자 중 먼저 기다린 사람에게 문자로 알린다
-(`_offer_slot_to_waitlist`). 자리를 잡아 주지는 않는다 — 먼저 답한 사람이 가져간다.
-미리 잠가 두면 답이 없을 때 그 자리가 죽은 채로 남는다.
+실내 골프 (2026-10-06 추가, `voice_sim.py`):
+
+| 도구 | 하는 일 | 주의 |
+|---|---|---|
+| `find_sim_times` | 날짜·시간 수(1~5)·가장 이른 시각 → 시작할 수 있는 시각 | 베이 종류는 묻지 않는다 (3개 모두 좌우 겸용) |
+| `book_sim_bay` | 이름을 받으면 바로 예약 + 코드 문자 | **홀드 없음** — 베이는 한 건이 통째로 써서, 그 사이 팔리면 409 로 다른 시각을 제안 |
+| `lookup_sim_booking` | 전화번호 **+** 성으로 조회 | 세션에 `sim:<id>` 로 담는다 (티타임 id 와 안 섞이게) |
+| `cancel_sim_booking` | 취소 (`status=cancelled`). `preview=true` 먼저 | 마감은 **시작 24시간 전** — 손님 웹(0012)과 같은 규칙. 티타임의 2시간이 아니다 |
+
+시뮬레이터 예약의 원본은 Supabase `pelham_sim_reservations` 이다 (손님 웹·Bay Sheet 와 같은 표).
+도구는 0016 의 SQL 함수만 부르고 옛 `routes/simulator.py`(JSON 파일)는 쓰지 않는다 — 잠금이
+따로 놀면 같은 베이를 두 번 판다. 전화로 잡은 예약은 `source = 'voice_ai'`, 이메일은 비어 있다.
+가격은 베이 한 대 값(시간 × 시간당 요금)에 HST, 현장 결제다. 문자 비서도 `find_sim_times`·
+`book_sim_bay` 를 쓰고 티타임과 같은 하루 예약 상한(번호당 2건)을 나눠 쓴다. 대기자 명단은 없다.
+
+자리가 비면 — 전화·문자·웹·프로 샵 어느 길로 취소됐든 — 그날 먼저 기다린 사람 중
+시간대·인원이 맞는 사람에게 그 자리를 **15분 잡아 두고** 문자를 보낸다
+(`backend/services/waitlist_offers.py`). YES 로 답하면 그대로 예약되고 확인 코드가 답장으로
+간다. NO 거나 답이 없으면 홀드가 풀려 다음 사람에게 간다. 1분마다 빈자리를 훑고,
+전화·문자 취소 직후에는 바로 한 번 더 돈다. 제안 문자는 클럽 시각 7시~21시에만 보낸다
+(밤에 난 자리는 아침에). 티오프가 홀드 끝 + 2시간보다 가까운 자리는 걸지 않는다.
+대기 명단은 카트를 묻지 않으므로 예약 메모에 "체크인 때 확인" 을 남긴다.
 
 ### `identify_caller` 가 권한을 주지 않는 이유
 
@@ -252,8 +277,11 @@ python scripts/attach_voice_tools.py --apply
 ## 테스트
 
 ```
-python -m pytest backend/tests/test_voice_booking.py -q
+python -m pytest backend/tests/test_voice_booking.py backend/tests/test_voice_sim.py -q
 ```
+
+`test_voice_sim.py` 는 Supabase 를 부르지 않는다 (0016 함수 네 개의 가짜를 끼운다). SQL 자체는
+Docker 의 Postgres 16 에 0001~0016 을 차례로 적용해 확인했다 (2026-10-06).
 
 시간을 2026-09-08 06:00 으로 고정한다. "지나간 티타임은 팔지 않는다", "티오프
 2시간 전 이후에는 취소하지 않는다" 는 지금 몇 시인지에 따라 답이 달라지므로,
@@ -275,6 +303,8 @@ python -m pytest backend/tests/test_voice_booking.py -q
 - **확인 문자**는 `confirm_booking` 이 응답을 돌려준 뒤 보낸다. 6자리 확인 코드가 들어
   있고, 답장 취소는 `C <코드>` 로만 된다 — 발신 번호 하나만으로는 취소하지 않는다
   (`routes/sms.py` 머리 주석). 티오프 2시간 전부터는 전화와 똑같이 프로 샵으로 넘긴다.
+  실내 골프 코드는 16진수 10자라 길이로 갈린다 — `C <10자 코드>` 는 `voice_sim.cancel_by_code` 가
+  발신번호와 코드가 둘 다 맞는 예약만, 시작 24시간 전까지 취소한다.
 - **리마인더**는 음성 예약 손님에게만 전날 18:00 와 2시간 전에 간다. 보낸 사실을 예약의
   감사 로그에 적으므로 서버가 재시작돼도 두 번 가지 않는다.
 - `TWILIO_*` 가 비어 있으면 문자는 `skipped` 로만 기록되고, 리마인더 루프는 돌지 않고,

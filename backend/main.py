@@ -61,6 +61,7 @@ VOICE_ONLY = PUBLIC_SURFACE == "voice"
 
 # 공개 배포에서도 여는 것: 에이전트 도구와 Twilio 가 직접 부르는 경로.
 include_route_module("backend.api.routes.voice", f"{settings.API_V1_STR}", ["Voice Booking"])
+include_route_module("backend.api.routes.voice_sim", f"{settings.API_V1_STR}", ["Voice Booking"])
 include_route_module("backend.api.routes.sms", f"{settings.API_V1_STR}", ["SMS (Twilio)"])
 
 if VOICE_ONLY:
@@ -79,14 +80,19 @@ else:
 
 
 async def _reminder_loop() -> None:
-    """1분마다 티타임 리마인더 문자를 보낸다 (`routes/sms.py` 의 `run_reminders`)."""
+    """1분마다 티타임 리마인더 문자를 보내고 (`routes/sms.py` 의 `run_reminders`),
+    빈자리를 대기자에게 걸고 (`services/waitlist_offers.py`),
+    찾은 분실물을 손님에게 알린다 (`services/lost_item_notices.py`)."""
     from backend.api.routes.sms import run_reminders
+    from backend.services import lost_item_notices, waitlist_offers
 
     while True:
         try:
             await run_reminders()
         except Exception as exc:
             logger.error("리마인더 작업 실패: %s", exc)
+        await waitlist_offers.run()  # 오류는 안에서 삼킨다
+        await lost_item_notices.run()  # 마찬가지
         await asyncio.sleep(60)
 
 

@@ -1,6 +1,6 @@
 """Twilio 문자 웹훅: 손님 답장, 전달 상태, 그리고 티타임 리마인더.
 
-  POST /sms/inbound   손님 문자 — STOP/START, "C <코드>" 로 취소,
+  POST /sms/inbound   손님 문자 — STOP/START, "C <코드>" 로 취소(티타임·시뮬레이터), 대기자 제안에 YES/NO,
                       "book"/"reservation" 첫 문자에는 예약 양식, 그 밖은 문자 예약 비서
   POST /sms/status    Twilio 전달 상태 콜백
   GET  /sms/messages  최근 발송·수신 기록 (Calls & SMS 화면용)
@@ -28,9 +28,9 @@ import os
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 
 from backend.api.routes import tee_sheet as ts
-from backend.api.routes import voice
+from backend.api.routes import voice, voice_sim
 from backend.core.config import settings
-from backend.services import sms_agent
+from backend.services import sms_agent, waitlist_offers
 from backend.services.tee_sheet_store import Scope
 from backend.services.twilio_sms import (
     SmsMessage,
@@ -54,6 +54,8 @@ STOP_FIRST_WORDS = {"STOP", "STOPALL", "UNSUBSCRIBE", "OPTOUT", "REVOKE"}
 
 #: 확인 코드 꼴 (`voice._confirmation_code`). "C u saturday" 같은 문장을 취소로 읽지 않게.
 CODE_RE = re.compile(r"[A-Z0-9]{6}")
+#: 시뮬레이터 예약 코드 (0003·0016 이 매기는 16진수 10자). 티타임 코드와 길이로 갈린다.
+SIM_CODE_RE = re.compile(r"[0-9A-F]{10}")
 
 #: 리마인더 두 번. (감사 로그 표시, 보낼 시각을 티타임으로부터 구하는 함수, 문구)
 #: 감사 로그에 남기는 이유: 서버가 재시작돼도 같은 문자를 두 번 보내지 않는다.
@@ -166,11 +168,27 @@ async def inbound(request: Request, background: BackgroundTasks) -> Response:
     if keyword in START_WORDS and (keyword != "YES" or sender in opted_out):
         opted_out.discard(sender)
         return _twiml()
-    if words and words[0] == "C" and (len(words) == 1 or (len(words) == 2 and CODE_RE.fullmatch(words[1]))):
-        # 저장소 호출은 동기다. 이벤트 루프를 막지 않게 스레드로 넘긴다.
-        from starlette.concurrency import run_in_threadpool
+    # 저장소 호출은 동기다. 이벤트 루프를 막지 않게 스레드로 넘긴다.
+    from starlette.concurrency import run_in_threadpool
 
-        return _twiml(await run_in_threadpool(cancel_by_reply, sender, "".join(words[1:])))
+    if words and words[0] == "C" and len(words) == 2 and SIM_CODE_RE.fullmatch(words[1]):
+        # 시뮬레이터는 Supabase 에 있다 — 발신번호와 코드가 둘 다 맞아야 한다 (`voice_sim`).
+        reply = await run_in_threadpool(voice_sim.cancel_by_code, sender, words[1])
+        return _twiml(reply)
+
+    if words and words[0] == "C" and (len(words) == 1 or (len(words) == 2 and CODE_RE.fullmatch(words[1]))):
+        reply = await run_in_threadpool(cancel_by_reply, sender, "".join(words[1:]))
+        # 자리가 비었으면 대기자에게 바로 건다 (1분 루프를 기다리지 않게).
+        background.add_task(waitlist_offers.run)
+        return _twiml(reply)
+
+    # 대기자 제안에 대한 YES/NO. 이 번호에 걸린 제안이 있을 때만 가로챈다 — 아니면
+    # 문자 비서에게 "Yes" 라고 답한 손님의 대화를 뺏게 된다.
+    if waitlist_offers.reply_word(body):
+        reply = await run_in_threadpool(waitlist_offers.handle_reply, sender, body)
+        if reply is not None:
+            background.add_task(waitlist_offers.run)  # NO 면 다음 사람에게 바로
+            return _twiml(reply)
 
     # 수신 거부한 번호에는 비서를 돌리지 않는다. 예약은 되는데 확인 문자도 답장도
     # 못 받는 일이 생긴다.

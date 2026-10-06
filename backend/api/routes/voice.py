@@ -1079,7 +1079,6 @@ def cancel_booking(body: CancelRequest, background: BackgroundTasks) -> CancelRe
         )
         ts._audit(booking, message)
         iso_date, time_label = booking.date, booking.time
-        seats_freed = len(booking.players)
 
     if caller.phone:
         background.add_task(
@@ -1090,9 +1089,9 @@ def cancel_booking(body: CancelRequest, background: BackgroundTasks) -> CancelRe
             booking_ref=_confirmation_code(body.booking_id),
         )
 
-    # 빈자리가 생겼다는 것을 대기자에게 알린다. 응답이 나간 뒤에 돈다 — 대기자 명단이
-    # 느리거나 꺼져 있어도 취소 자체는 이미 끝났고, 에이전트가 기다릴 이유가 없다.
-    background.add_task(_offer_slot_to_waitlist, iso_date, time_label, seats_freed)
+    # 빈자리를 대기자에게 바로 건다 (1분 루프를 기다리지 않게). 응답이 나간 뒤에 돈다 —
+    # 대기자 명단이 느리거나 꺼져 있어도 취소 자체는 이미 끝났다.
+    background.add_task(_offer_to_waitlist)
 
     return CancelResponse(
         ok=True,
@@ -1566,7 +1565,7 @@ def join_waitlist(body: WaitlistRequest) -> WaitlistResponse:
         spoken_date=spoken_date(iso_date),
         message=(
             f"On the list for {spoken_date(iso_date)}, {body.party_size} players. Tell them we "
-            "will text if a spot opens, and that whoever answers first gets it."
+            "will text if a spot opens and hold it for them for 15 minutes; they reply YES to book it."
         ),
     )
 
@@ -1588,40 +1587,11 @@ def _window_allows(entry: dict[str, Any], minutes: int | None) -> bool:
     return True
 
 
-async def _offer_slot_to_waitlist(iso_date: str, time_label: str, seats: int) -> None:
-    """취소로 자리가 비면 그날 먼저 기다린 사람에게 문자.
+async def _offer_to_waitlist() -> None:
+    """빈자리를 대기자에게 건다 — `services/waitlist_offers.py`. 오류는 거기서 삼킨다."""
+    from backend.services import waitlist_offers  # 그 모듈이 이 모듈을 임포트한다
 
-    **자리를 잡아 주지 않는다.** 미리 잠가 두면 답이 없을 때 그 자리가 죽은 채로
-    남는다. 먼저 답한 사람이 가져가는 방식이라고 문자에 적는다.
-
-    대기자 명단이 꺼져 있거나 느려도 취소는 이미 끝났다 — 여기서 나는 오류는
-    통화에 영향을 주지 않아야 하므로 전부 조용히 삼킨다.
-    """
-    try:
-        entries = await asyncio.to_thread(tee_waitlist.waiting_entries, iso_date, seats)
-    except supabase_rest.SupabaseUnavailable:
-        return
-
-    # 원하는 시간대가 맞는 **첫 사람**을 찾는다. 맨 앞 한 명만 보고 포기하면, 오후만
-    # 원하는 사람이 명단 앞에 있을 때 아침에 난 자리로는 아무도 연락을 못 받는다.
-    minutes = ts.label_to_minutes(time_label)
-    entry = next((e for e in entries if _window_allows(e, minutes)), None)
-    if entry is None:
-        return
-
-    try:
-        await asyncio.to_thread(tee_waitlist.mark_offered, entry["id"], time_label)
-    except supabase_rest.SupabaseUnavailable:
-        return
-
-    await send_sms(
-        entry["phone"],
-        (
-            f"{CLUB_NAME}: a {time_label} tee time just opened on {spoken_date(iso_date)} for up "
-            f"to {seats}. Book at {SITE_URL}/book/tee-time or call us — first to answer gets it."
-        ),
-        template="waitlist_offer",
-    )
+    await waitlist_offers.run()
 
 
 router.include_router(tools_router)

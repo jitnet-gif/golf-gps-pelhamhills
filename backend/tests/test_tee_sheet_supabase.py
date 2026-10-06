@@ -428,6 +428,7 @@ def test_post_error_carries_status_and_code_but_no_doc_values(fake):
 
     err = info.value
     assert err.status == 500
+    assert err.code == "XX000"
     message = str(err)
     assert "POST" in message and sb.TABLE in message and "500" in message and "XX000" in message
     assert_no_leak(err, SECRET_NAME, SECRET_PHONE, SECRET_ID, "Quackenbush")
@@ -704,3 +705,37 @@ def test_fake_select_star_and_fail_next_is_one_shot():
         response = client.get(PATH, params={"select": "*"})
     assert response.status_code == 200
     assert set(response.json()[0]) == set(COLUMNS)
+
+
+# ===== 정원 트리거(0017) 거절 ==========================================
+
+
+def test_capacity_trigger_rejection_becomes_the_same_409_as_the_python_check(fake):
+    """읽은 뒤 다른 쪽(웹·직원 화면)이 그 티타임을 채웠으면 DB 가 PT409 로 거절한다."""
+    from fastapi import HTTPException
+
+    from backend.api.routes import tee_sheet as ts
+    from backend.services.tee_sheet_store import Scope
+
+    fake.seed([make_doc("b-first")])
+    with pytest.raises(HTTPException) as info:
+        with ts.bookings_tx(Scope(dates={"2026-09-08"})) as bookings:
+            bookings[0].notes = "second writer"
+            fake.fail_next(409, "PT409")
+
+    assert info.value.status_code == 409
+    assert "filled up" in info.value.detail
+    assert fake.rows["b-first"]["doc"].get("notes", "") != "second writer"
+
+
+def test_other_conflicts_are_not_mistaken_for_a_full_tee_time(fake):
+    from backend.api.routes import tee_sheet as ts
+    from backend.services.tee_sheet_store import Scope
+
+    fake.seed([make_doc("b-first")])
+    with pytest.raises(sb.SupabaseStoreError) as info:
+        with ts.bookings_tx(Scope(dates={"2026-09-08"})) as bookings:
+            bookings[0].notes = "second writer"
+            fake.fail_next(409, "23505")
+
+    assert info.value.code == "23505"

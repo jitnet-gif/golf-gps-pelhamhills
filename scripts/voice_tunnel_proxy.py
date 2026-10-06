@@ -48,6 +48,11 @@ ALLOW = {
     "/api/v1/voice/tools/confirm-booking",
     "/api/v1/voice/tools/lookup-booking",
     "/api/v1/voice/tools/cancel-booking",
+    # 실내 골프 (`backend/api/routes/voice_sim.py`)
+    "/api/v1/voice/tools/find-sim-times",
+    "/api/v1/voice/tools/book-sim-bay",
+    "/api/v1/voice/tools/lookup-sim-booking",
+    "/api/v1/voice/tools/cancel-sim-booking",
 }
 
 # post-call 웹훅은 `VOICE_TOOL_SECRET` 이 아니라 ElevenLabs 의 HMAC 서명으로 검증한다.

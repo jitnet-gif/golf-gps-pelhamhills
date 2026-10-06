@@ -1,8 +1,8 @@
 """티타임 대기자 명단 (`pelham_tee_waitlist`).
 
-자리가 비면 먼저 기다린 사람에게 문자를 보낸다. **자리를 잡아 주지는 않는다** —
-문자는 "먼저 답한 사람이 가져간다" 는 안내이고, 예약은 평소 경로로 들어온다.
-미리 잠가 두면 답이 없을 때 그 자리가 죽은 채로 남는다.
+자리가 비면 먼저 기다린 사람에게 그 자리를 **잠깐 잡아 두고** 문자를 보낸다.
+YES 로 답하면 그대로 예약이 되고, 답이 없으면 잡아 둔 자리가 풀려 다음 사람에게
+간다. 흐름 전체는 `services/waitlist_offers.py` 에 있고, 여기는 표 읽기·쓰기뿐이다.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from backend.services import supabase_rest as rest
 
 TABLE = "pelham_tee_waitlist"
 
-__all__ = ["TABLE", "join", "waiting_entries", "mark_offered", "already_waiting"]
+__all__ = ["TABLE", "join", "already_waiting", "open_entries", "claim_offer", "set_status"]
 
 
 def join(
@@ -57,38 +57,47 @@ def already_waiting(date: str, phone: str) -> bool:
     return bool(rows)
 
 
-def waiting_entries(date: str, seats: int, limit: int = 10) -> list[dict[str, Any]]:
-    """그날 기다리는 사람들 중 비는 자리에 들어갈 수 있는 사람, 먼저 온 순서로.
+def open_entries(date_from: str) -> list[dict[str, Any]]:
+    """`date_from` 이후 날짜의, 아직 끝나지 않은(기다리는 중·제안받은) 대기자 전부.
 
-    인원이 자리보다 많은 사람은 건너뛴다 — 넷이 기다리는데 두 자리가 비었다고
-    문자를 보내면 헛된 기대만 준다.
-
-    **한 명이 아니라 목록을 돌려준다.** 시간대 조건은 호출부가 거르는데(라벨 비교라
-    Postgres 필터로 보내면 "10:00 AM" 이 "9:00 AM" 보다 작게 나온다), 한 명만
-    돌려주면 오후만 원하는 첫 번째 사람이 아침에 난 자리를 막아 뒤의 사람들까지
-    아무도 연락을 못 받는다.
+    먼저 온 순서로 돌려준다. 시간대 조건은 호출부가 분으로 바꿔 거른다 — 라벨을
+    Postgres 필터로 보내면 "10:00 AM" 이 "9:00 AM" 보다 작게 나온다.
     """
     return rest.select(
         TABLE,
         {
-            "select": "id,date,earliest,latest,party_size,first_name,last_name,phone",
-            "date": f"eq.{date}",
-            "status": "eq.waiting",
-            "party_size": f"lte.{seats}",
+            "select": "id,date,earliest,latest,party_size,holes,first_name,last_name,phone,"
+                      "status,offered_time,offered_at",
+            "date": f"gte.{date_from}",
+            "status": "in.(waiting,offered)",
             "order": "created_at.asc",
-            "limit": str(limit),
+            "limit": "200",
         },
     )
 
 
-def mark_offered(entry_id: str, time_label: str) -> None:
-    rest.update(
+def claim_offer(entry_id: str, time_label: str) -> bool:
+    """`waiting` 인 줄만 `offered` 로 바꾼다. 바뀌었으면 True.
+
+    조건부로 바꾸는 이유: 1분 루프와 취소 직후의 즉시 실행이 겹치면 같은 사람에게
+    자리를 두 번 잡아 줄 수 있다. 진 쪽은 False 를 받고 잡아 둔 자리를 돌려놓는다.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    rows = rest.update(
         TABLE,
-        {"id": f"eq.{entry_id}"},
-        {
-            "status": "offered",
-            "offered_time": time_label,
-            "offered_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        },
+        {"id": f"eq.{entry_id}", "status": "eq.waiting"},
+        {"status": "offered", "offered_time": time_label, "offered_at": now, "updated_at": now},
     )
+    return bool(rows)
+
+
+def set_status(entry_id: str, status: str, *, only_from: str | None = None) -> bool:
+    """상태를 바꾼다. `only_from` 을 주면 그 상태일 때만 바꾼다. 바뀌었으면 True."""
+    params = {"id": f"eq.{entry_id}"}
+    if only_from:
+        params["status"] = f"eq.{only_from}"
+    rows = rest.update(
+        TABLE, params,
+        {"status": status, "updated_at": datetime.now(timezone.utc).isoformat()},
+    )
+    return bool(rows)

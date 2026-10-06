@@ -621,12 +621,12 @@ export default function IndoorGolfBooking() {
               <li className="font-semibold text-[#214d2f]">
                 No payment now — you pay at the front desk when you arrive.
               </li>
-              <li>Free cancellations up to 12 hours before reservation start time.</li>
+              {/* 시스템이 실제로 지키는 규칙만 적는다: 온라인·전화·문자 변경·취소는 시작 24시간
+                  전까지(0012·0016). 수수료 규칙은 시스템에 없으므로 적지 않는다. */}
               <li>
-                Cancellations after the 12 hour delay will be billed 50% of reservation
-                total.
+                Change or cancel online, by phone or by text up to 24 hours before your
+                start time. After that, please call the pro shop.
               </li>
-              <li>No shows will be billed 100% of reservation total.</li>
               <li>
                 Please bring indoor or CLEAN golf shoes for simulators. Dirty Shoes will
                 not be allowed in the simulators

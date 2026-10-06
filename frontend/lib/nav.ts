@@ -107,6 +107,7 @@ export const adminNav: NavItem[] = [
   { label: "Tour Operators", href: "/admin/tour-operators", glyph: "✈" },
   { label: "Promotions", href: "/admin/promotions", glyph: "▶" },
   { label: "Calls & SMS", href: "/admin/calls", glyph: "☏" },
+  { label: "Lost & Found", href: "/admin/lost-items", glyph: "?" },
   { label: "Reports", href: ADMIN_REPORTS, glyph: "▥" },
   { label: "Business Intelligence", href: "/admin/business-intelligence", glyph: "◧" },
   { label: "Radar", href: "/admin/radar", glyph: "◎" },

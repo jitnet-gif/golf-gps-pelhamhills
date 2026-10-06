@@ -479,12 +479,25 @@ def bookings_tx(scope: Scope | None = None) -> Iterator[ScopedBookings]:
     """읽기-수정-쓰기 트랜잭션. 이 블록 안에서 절대 `await` 하지 말 것.
 
     `scope` 밖의 예약은 목록에 없고, 저장소도 건드리지 않는다 (`store.mutate` 참고).
+
+    블록 안의 정원 검사는 읽은 시점 기준이다. 그사이 웹·직원 화면이 같은 티타임을 채웠으면
+    DB 트리거(0017)가 쓰기를 거절하고, 여기서 `require_tee_time_capacity` 와 같은 409 로
+    바꾼다. 거절된 쓰기는 저장되지 않는다.
     """
-    with store.mutate(scope) as raw:
-        models = ScopedBookings(sorted(_to_models(raw), key=_sort_key), scope)
-        yield models
-        models.sort(key=_sort_key)
-        raw[:] = [m.model_dump(mode="json") for m in models]
+    try:
+        with store.mutate(scope) as raw:
+            models = ScopedBookings(sorted(_to_models(raw), key=_sort_key), scope)
+            yield models
+            models.sort(key=_sort_key)
+            raw[:] = [m.model_dump(mode="json") for m in models]
+    except RuntimeError as exc:
+        # `SupabaseStoreError` 를 임포트하지 않는다: JSON 모드는 그 모듈(httpx) 없이 돈다.
+        if getattr(exc, "code", None) != "PT409":
+            raise
+        raise HTTPException(
+            status_code=409,
+            detail="That tee time just filled up. Please pick another time.",
+        ) from None
 
 
 def _require_loaded(bookings: list[TeeBooking], iso_date: str) -> None:

@@ -1,6 +1,6 @@
-"""문자로 티타임 예약: 손님이 보낸 문자를 Claude 가 읽고 음성 예약 도구로 처리한다.
+"""문자로 티타임·실내 골프 예약: 손님이 보낸 문자를 Claude 가 읽고 음성 예약 도구로 처리한다.
 
-전화 비서(`api/routes/voice.py`)와 **같은 도구 함수**를 프로세스 안에서 부른다.
+전화 비서(`api/routes/voice.py`, 실내 골프는 `voice_sim.py`)와 **같은 도구 함수**를 프로세스 안에서 부른다.
 정원·요금·예약 창의 규칙은 전부 그쪽에 있고, 여기는 문자 대화를 이어 주는 일만 한다.
 두 벌이 되면 전화와 문자가 서로 다른 자리를 팔게 된다.
 
@@ -41,7 +41,7 @@ from fastapi import BackgroundTasks, HTTPException
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
-from backend.api.routes import voice
+from backend.api.routes import voice, voice_sim
 from backend.core.config import settings
 from backend.services.twilio_sms import send_sms
 
@@ -68,8 +68,8 @@ MAX_ROUNDS_PER_TEXT = 8
 MAX_TEXTS_PER_SENDER_PER_DAY = 40
 MAX_TEXTS_PER_DAY = 600
 
-#: 번호 하나가 하루에 문자로 잡을 수 있는 티타임 수. 번호 하나가 토요일을 통째로
-#: 채우지 못하게 한다. 더 필요한 손님은 프로 샵에 전화하면 된다.
+#: 번호 하나가 하루에 문자로 잡을 수 있는 예약 수 (티타임과 시뮬레이터 베이를 합쳐서).
+#: 번호 하나가 토요일을 통째로 채우지 못하게 한다. 더 필요한 손님은 프로 샵에 전화하면 된다.
 MAX_BOOKINGS_PER_SENDER_PER_DAY = 2
 
 #: 답장 길이. 문자는 160자 단위로 쪼개져 과금된다. 긴 답은 손님도 읽지 않는다.
@@ -97,7 +97,7 @@ def fallback_reply() -> str:
 #: "book"·"booking"·"reserve"·"reservation" 이 들어간 첫 문자에 보내는 빈 양식.
 #: 손님이 채워 보내면 비서가 그대로 읽어 예약한다. 모델을 부르지 않으니 비용이 들지 않는다.
 #: GSM-7 글자만 쓴다 (`_ASCII` 참고). 이름은 성까지 받는다 — 예약 도구가 둘 다 요구한다.
-#: 문자 비서는 아직 야외 티타임만 잡는다. "Indoor" 를 고른 손님은 웹 예약으로 안내한다.
+#: 시뮬레이터는 몇 시간 쓸지가 더 필요해서 마지막 줄에 덧붙였다.
 BOOKING_FORM = (
     "Pelham Hills: to book, copy this, fill it in and text it back.\n"
     "0. Outdoor or Indoor (simulator):\n"
@@ -105,7 +105,8 @@ BOOKING_FORM = (
     "2. Time:\n"
     "3. Players:\n"
     "4. Cart (yes/no):\n"
-    "5. Booking name (first and last):"
+    "5. Booking name (first and last):\n"
+    "Indoor: also add how many hours (1-5)."
 )
 
 _BOOKING_WORD_RE = re.compile(r"\b(book|reserv)", re.IGNORECASE)
@@ -145,12 +146,20 @@ def start_booking_form(sender: str, text: str) -> str:
 
 # ===== 프롬프트 ========================================================
 
-SYSTEM_PROMPT = f"""You are the text-message booking assistant for {voice.CLUB_NAME}. Golfers text this number to book a tee time. You reply by SMS.
+#: 멤버십 안내는 홈페이지의 "View Memberships" 와 같은 곳으로 보낸다. 가격은 여기 두지 않는다.
+MEMBERSHIP_URL = "https://www.pelhamhills.com/membership/2026-memberships/"
+
+SYSTEM_PROMPT = f"""You are the text-message booking assistant for {voice.CLUB_NAME}. Golfers text this number to book a tee time or an indoor golf simulator bay. You reply by SMS.
 
 # What you can do
 
 Find open tee times, quote rates, book a tee time, and put someone on the waitlist when a day is full.
-You cannot look up, change, or cancel an existing booking. To cancel, the golfer replies C and the code from their confirmation text (for example: C 4F2K9Q). For changes, leagues, events, lessons, groups over 4, or anything else, give them the pro shop number: {settings.PROSHOP_PHONE_NUMBER}.
+Find open indoor simulator times and book a simulator bay.
+You cannot look up, change, or cancel an existing booking. To cancel, the golfer replies C and the code from their confirmation text (for example: C 4F2K9Q). That works for tee times and simulator bays. For changes, leagues, events, lessons, groups over 4, or anything else, give them the pro shop number: {settings.PROSHOP_PHONE_NUMBER}.
+
+# Membership
+
+You have no membership prices or details. If someone asks about joining, membership prices or what a membership includes, do not look for tee times. Send them {MEMBERSHIP_URL} and the pro shop number, and offer to book a tee time if they also want one.
 
 # The most important rule
 
@@ -170,17 +179,25 @@ The tee time is booked to the number they are texting from. Never ask for a phon
 After book_tee_time succeeds, a separate text with the confirmation code goes out automatically. Do not repeat the code; just confirm the day, time and players, and say the code is in the confirmation text.
 If book_tee_time says the time was taken, apologise briefly and offer other times.
 
+# Indoor simulator
+
+When the golfer asks for the simulator, indoor golf or a bay, it is a different booking from a tee time. You need: the day, how many hours (1 to 5), how many players (1 to 4), and roughly what time.
+The simulator is open Wednesday to Sunday, 2 PM to 10 PM, but always check with find_sim_times rather than saying so from memory.
+The price is for the whole bay, not per player. Quote it the way find_sim_times gives it: the price plus HST, paid at the club.
+Call book_sim_bay only when the golfer has clearly asked for one specific start time and you have their first and last name. A confirmation text with the code goes out automatically. Cancelling online or by text closes 24 hours before the start time; after that they call the pro shop.
+There is no waitlist for the simulator.
+
 # The booking form
 
-When a golfer first texts about booking, they are sent this form and asked to fill it in: 0. Outdoor or Indoor (simulator), 1. Date, 2. Time, 3. Players, 4. Cart, 5. Booking name (first and last).
-When they send it back filled in, that counts as clearly asking for that one time. Check it with find_tee_times and, if that exact time is open, book it straight away without asking again.
+When a golfer first texts about booking, they are sent this form and asked to fill it in: 0. Outdoor or Indoor (simulator), 1. Date, 2. Time, 3. Players, 4. Cart, 5. Booking name (first and last), and for indoor how many hours.
+When they send it back filled in, that counts as clearly asking for that one time. Check it with find_tee_times (outdoor) or find_sim_times (indoor) and, if that exact time is open, book it straight away without asking again.
 If the time is not open, do not book; offer the two or three closest open times. If a field is missing or unclear, ask only for that field. If they only gave one name, ask for the last name.
-Cart: "yes" means every player rides; a number means that many riders; "no" or blank means walking. Pass it as riders on book_tee_time.
-If they chose Indoor (the golf simulator), you cannot book that by text yet. Send them {voice.SITE_URL}/book/indoor to book online, or the pro shop number.
+Cart: "yes" means every player rides; a number means that many riders; "no" or blank means walking. Pass it as riders on book_tee_time. Indoor bookings have no cart; ignore it. If indoor hours are missing, ask how many hours.
 
 # Waitlist
 
 Only when a day is full and the golfer asks to be told if something opens. They are texting us, so we can text them back.
+If a spot opens we hold it for them for 15 minutes and text them; replying YES books it, and if they do not answer in time it goes to the next person waiting. Tell them that when they join.
 
 # When a tool pushes back
 
@@ -266,6 +283,41 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "find_sim_times",
+        "description": "Find open start times for an indoor golf simulator bay on a day.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "date": _DATE,
+                "duration_hours": {"type": "integer", "minimum": 1, "maximum": 5},
+                "earliest": {"type": "string", "description": "Like '6:00 PM'. Omit if any time."},
+            },
+            "required": ["date", "duration_hours"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "book_sim_bay",
+        "description": (
+            "Book an indoor golf simulator bay for the golfer, to the number they are texting "
+            "from. The time must be one that find_sim_times returned for the same number of "
+            "hours. A confirmation text with the code is sent automatically."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "date": _DATE,
+                "time": {"type": "string", "description": "Exactly as find_sim_times returned it, e.g. '6:30 PM'."},
+                "duration_hours": {"type": "integer", "minimum": 1, "maximum": 5},
+                "players": _PLAYERS,
+                "first_name": {"type": "string"},
+                "last_name": {"type": "string"},
+            },
+            "required": ["date", "time", "duration_hours", "players", "first_name", "last_name"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "join_waitlist",
         "description": "Put the golfer on the waitlist for a full day. Only when they ask.",
         "input_schema": {
@@ -286,7 +338,7 @@ TOOLS: list[dict[str, Any]] = [
 ]
 
 #: 모델에게 보여 주지 않는 내부 값. 손님에게 읽힐 일이 없게 결과에서 뺀다.
-_HIDDEN_KEYS = {"booking_id", "hold_id"}
+_HIDDEN_KEYS = {"booking_id", "hold_id", "reservation_id"}
 
 
 def _scrub(value: Any) -> Any:
@@ -341,17 +393,23 @@ def _rates(_sender: str, conversation_id: str, args: dict) -> tuple[Any, Backgro
     return voice.get_rates(body), None
 
 
-def _book(sender: str, conversation_id: str, args: dict) -> tuple[Any, BackgroundTasks | None]:
-    """잡고 바로 확정한다. 확정이 실패하면 잡은 자리를 즉시 돌려놓는다."""
+def _booking_cap(sender: str) -> str:
+    """오늘 이 번호가 더 예약할 수 있으면 셀 키를, 아니면 429. 티타임·베이가 같은 상한을 쓴다."""
     booked_key = f"{voice.today_iso()}|{sender}|booked"
     if _daily.get(booked_key, 0) >= MAX_BOOKINGS_PER_SENDER_PER_DAY:
         raise HTTPException(
             status_code=429,
             detail=(
-                f"This number has already booked {MAX_BOOKINGS_PER_SENDER_PER_DAY} tee times by text "
+                f"This number has already made {MAX_BOOKINGS_PER_SENDER_PER_DAY} bookings by text "
                 f"today. For more, the golfer should call the pro shop at {settings.PROSHOP_PHONE_NUMBER}."
             ),
         )
+    return booked_key
+
+
+def _book(sender: str, conversation_id: str, args: dict) -> tuple[Any, BackgroundTasks | None]:
+    """잡고 바로 확정한다. 확정이 실패하면 잡은 자리를 즉시 돌려놓는다."""
+    booked_key = _booking_cap(sender)
     hold = voice.hold_tee_time(
         voice.HoldRequest(
             conversation_id=conversation_id,
@@ -383,6 +441,33 @@ def _book(sender: str, conversation_id: str, args: dict) -> tuple[Any, Backgroun
     return confirmed, background
 
 
+def _find_sim(_sender: str, conversation_id: str, args: dict) -> tuple[Any, BackgroundTasks | None]:
+    body = voice_sim.FindSimTimesRequest(conversation_id=conversation_id, **args)
+    return voice_sim.find_sim_times(body), None
+
+
+def _book_sim(sender: str, conversation_id: str, args: dict) -> tuple[Any, BackgroundTasks | None]:
+    """베이는 홀드 없이 한 번에 잡힌다 (`voice_sim` 참고). 번호는 언제나 발신번호."""
+    booked_key = _booking_cap(sender)
+    background = BackgroundTasks()
+    booked = voice_sim.book_sim_bay(
+        voice_sim.BookSimRequest(
+            conversation_id=conversation_id,
+            date=args["date"],
+            time=args["time"],
+            duration_hours=args["duration_hours"],
+            players=args["players"],
+            first_name=args["first_name"],
+            last_name=args["last_name"],
+            # `phone` 은 넘기지 않는다 — 모델이 다른 번호를 적어 넣을 길을 막는다.
+            caller_number=sender,
+        ),
+        background,
+    )
+    _daily[booked_key] = _daily.get(booked_key, 0) + 1
+    return booked, background
+
+
 def _waitlist(sender: str, conversation_id: str, args: dict) -> tuple[Any, BackgroundTasks | None]:
     body = voice.WaitlistRequest(conversation_id=conversation_id, caller_number=sender, **args)
     return voice.join_waitlist(body), None
@@ -394,6 +479,8 @@ _HANDLERS: dict[str, Callable[[str, str, dict], tuple[Any, BackgroundTasks | Non
     "get_rates": _rates,
     "book_tee_time": _book,
     "join_waitlist": _waitlist,
+    "find_sim_times": _find_sim,
+    "book_sim_bay": _book_sim,
 }
 
 

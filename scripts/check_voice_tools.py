@@ -3,6 +3,7 @@
 도구 하나를 추가할 때 손대야 하는 곳이 셋이다:
 
   1. `backend/api/routes/voice.py`      — 실제 구현 (`@tools_router.post`)
+     `backend/api/routes/voice_sim.py`  — 실내 골프 도구 (`@router.post`)
   2. `ops/elevenlabs/agent.json`        — 에이전트가 아는 도구 목록
   3. `scripts/voice_tunnel_proxy.py`    — 터널로 내보낼 허용 경로
 
@@ -20,6 +21,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VOICE = ROOT / "backend" / "api" / "routes" / "voice.py"
+VOICE_SIM = ROOT / "backend" / "api" / "routes" / "voice_sim.py"
 AGENT = ROOT / "ops" / "elevenlabs" / "agent.json"
 PROXY = ROOT / "scripts" / "voice_tunnel_proxy.py"
 
@@ -27,8 +29,10 @@ API_PREFIX = "/api/v1"
 
 
 def implemented() -> set[str]:
-    """voice.py 가 실제로 서비스하는 도구 경로."""
-    return set(re.findall(r'tools_router\.post\("([^"]+)"', VOICE.read_text(encoding="utf-8")))
+    """voice.py · voice_sim.py 가 실제로 서비스하는 도구 경로."""
+    paths = set(re.findall(r'tools_router\.post\("([^"]+)"', VOICE.read_text(encoding="utf-8")))
+    paths |= set(re.findall(r'@router\.post\("(/voice/tools/[^"]+)"', VOICE_SIM.read_text(encoding="utf-8")))
+    return paths
 
 
 def declared() -> dict[str, str]:

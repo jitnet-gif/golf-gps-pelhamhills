@@ -1199,8 +1199,8 @@ export default function SimulatorSheetPage() {
                   </button>
                 </div>
                 <p className="text-[10px] leading-4 text-[#5d6673]">
-                  Policy: free cancellation up to 12h before start · 50% within
-                  12h · 100% no-show.
+                  Guests can change or cancel online, by phone or by text until 24h
+                  before start. After that, only staff can.
                 </p>
               </div>
             )}
