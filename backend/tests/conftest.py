@@ -46,6 +46,7 @@ def _isolate_tee_sheet_backend(monkeypatch):
     monkeypatch.setenv("NEXT_PUBLIC_SUPABASE_URL", _NO_NETWORK_URL)
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _NO_NETWORK_KEY)
     monkeypatch.setattr(sb, "_transport", httpx.MockTransport(_refuse))
+    monkeypatch.setenv("SMS_BOOKING_ENABLED", "")
 
     # Twilio 도 꺼 둔다. `send_sms` 는 `settings.TWILIO_ENABLED` 가 참이면 **진짜로**
     # 보낸다. 번호가 비어 있던 동안은 우연히 안전했을 뿐이고, `.env` 에
@@ -69,6 +70,9 @@ def _isolate_tee_sheet_backend(monkeypatch):
             "TWILIO_AUTH_TOKEN",
             "TWILIO_PHONE_NUMBER",
             "TWILIO_MESSAGING_SERVICE_SID",
+            # 문자 예약 비서(`services/sms_agent.py`)도 같은 이유로 끈다. `.env` 에 키가
+            # 있으면 손님 문자를 흉내 낸 테스트가 실제 Claude API 를 부른다.
+            "ANTHROPIC_API_KEY",
         ):
             monkeypatch.setattr(cfg.settings, field, "", raising=False)
 

@@ -1,6 +1,6 @@
 """Twilio 문자 웹훅: 손님 답장, 전달 상태, 그리고 티타임 리마인더.
 
-  POST /sms/inbound   손님 답장 — STOP/START, "C <코드>" 로 취소
+  POST /sms/inbound   손님 문자 — STOP/START, "C <코드>" 로 취소, 그 밖은 문자 예약 비서
   POST /sms/status    Twilio 전달 상태 콜백
   GET  /sms/messages  최근 발송·수신 기록 (Calls & SMS 화면용)
 
@@ -17,17 +17,19 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qsl
 from xml.sax.saxutils import escape
 
 import os
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 
 from backend.api.routes import tee_sheet as ts
 from backend.api.routes import voice
 from backend.core.config import settings
+from backend.services import sms_agent
 from backend.services.tee_sheet_store import Scope
 from backend.services.twilio_sms import (
     SmsMessage,
@@ -44,6 +46,13 @@ router = APIRouter()
 
 STOP_WORDS = {"STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT", "OPTOUT", "REVOKE"}
 START_WORDS = {"START", "UNSTOP", "YES", "OPTIN"}
+
+#: 문장 첫머리에 와도 수신 거부로 읽는 단어. CANCEL·END·QUIT 는 빠졌다 — "Cancel my
+#: 9am", "End time?" 처럼 평범한 뜻으로 문장을 시작하기 때문이다.
+STOP_FIRST_WORDS = {"STOP", "STOPALL", "UNSUBSCRIBE", "OPTOUT", "REVOKE"}
+
+#: 확인 코드 꼴 (`voice._confirmation_code`). "C u saturday" 같은 문장을 취소로 읽지 않게.
+CODE_RE = re.compile(r"[A-Z0-9]{6}")
 
 #: 리마인더 두 번. (감사 로그 표시, 보낼 시각을 티타임으로부터 구하는 함수, 문구)
 #: 감사 로그에 남기는 이유: 서버가 재시작돼도 같은 문자를 두 번 보내지 않는다.
@@ -113,8 +122,24 @@ def cancel_by_reply(sender: str, code: str) -> str:
     return f"Pelham Hills: cancelled your tee time, {when}. Hope to see you soon."
 
 
+def _keyword(body: str) -> str:
+    """문자 **전체**가 한 단어일 때 그 단어. 그 밖에는 분명한 수신 거부 단어로 시작할 때만.
+
+    예전에는 모든 키워드를 첫 단어로 봤다. 손님이 자유롭게 문자를 보내기 시작하면
+    "Cancel my 9am" 이 수신 거부(CANCEL)로, 비서 질문에 답한 "Yes" 가 수신 재개(YES)로
+    먹혀 답장이 오지 않는다. 반대로 문자 전체만 보면 "Stop texting me" 가 수신 거부가
+    안 된다 — 그만 보내 달라는 사람에게 리마인더가 계속 간다.
+    """
+    words = re.sub(r"[^\w\s]", "", body).upper().split()
+    if len(words) == 1:
+        return words[0]
+    if words and words[0] in STOP_FIRST_WORDS:
+        return words[0]
+    return ""
+
+
 @router.post("/sms/inbound")
-async def inbound(request: Request) -> Response:
+async def inbound(request: Request, background: BackgroundTasks) -> Response:
     params = await _twilio_params(request)
     sender = normalize_phone(params.get("From")) or params.get("From", "")
     body = (params.get("Body") or "").strip()
@@ -130,20 +155,28 @@ async def inbound(request: Request) -> Response:
         ),
     )
 
+    keyword = _keyword(body)
     words = body.upper().split()
-    keyword = words[0] if words else ""
 
     if keyword in STOP_WORDS:
         opted_out.add(sender)
         return _twiml()
-    if keyword in START_WORDS:
+    # "YES" 는 수신 거부한 사람에게만 수신 재개다. 그 밖에는 비서에게 하는 대답이다.
+    if keyword in START_WORDS and (keyword != "YES" or sender in opted_out):
         opted_out.discard(sender)
         return _twiml()
-    if keyword == "C":
+    if words and words[0] == "C" and (len(words) == 1 or (len(words) == 2 and CODE_RE.fullmatch(words[1]))):
         # 저장소 호출은 동기다. 이벤트 루프를 막지 않게 스레드로 넘긴다.
         from starlette.concurrency import run_in_threadpool
 
         return _twiml(await run_in_threadpool(cancel_by_reply, sender, "".join(words[1:])))
+
+    # 수신 거부한 번호에는 비서를 돌리지 않는다. 예약은 되는데 확인 문자도 답장도
+    # 못 받는 일이 생긴다.
+    if sms_agent.enabled() and body and sender not in opted_out:
+        # 답장은 응답이 나간 뒤 REST 로 보낸다 (`sms_agent.handle_text` 참고).
+        background.add_task(sms_agent.handle_text, sender, body)
+        return _twiml()
 
     return _twiml(
         f"Pelham Hills: reply C and your code to cancel. For anything else call {settings.PROSHOP_PHONE_NUMBER}."

@@ -58,6 +58,9 @@ SECRETS = (
     "ALLOWED_ORIGINS",
     "CLUB_TIMEZONE",
     "PROSHOP_PHONE_NUMBER",
+    # 문자 예약 비서. 켜는 스위치(SMS_BOOKING_ENABLED)는 fly.toml 에 있다.
+    "ANTHROPIC_API_KEY",
+    "SMS_AGENT_MODEL",
 )
 
 

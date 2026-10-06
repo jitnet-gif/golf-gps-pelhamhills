@@ -9,6 +9,7 @@
 #   - simulator  : 실내 시뮬레이터 (표준 라이브러리 smtplib)
 #   - retail     : 프로 샵 판매    (JSON 저장소)
 #   - voice      : 음성 예약       (httpx)
+#   - sms        : 문자 답장·문자 예약 (httpx, anthropic)
 #
 # 뜨지 않는 라우터: chat / agents / onboarding. 셋 다 저장소에 없는 모듈을
 # 임포트하므로 로컬에서도 이미 실패한다. `include_route_module` 이
@@ -20,6 +21,10 @@ pydantic==2.6.3
 pydantic-settings==2.2.1
 python-dotenv==1.0.0
 httpx==0.25.2
+
+# 문자 예약 비서 (`backend/services/sms_agent.py`). 1.x 는 httpx 대신 httpx2 를 쓰므로
+# 위의 httpx 고정과 맞는 0.x 에 묶어 둔다.
+anthropic==0.86.0
 
 # voice.py 가 `zoneinfo.ZoneInfo("America/Toronto")` 를 쓴다. slim 이미지에는
 # 시간대 데이터베이스가 없어서 이게 없으면 ZoneInfoNotFoundError 로 죽는다.

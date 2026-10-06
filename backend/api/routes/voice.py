@@ -843,7 +843,14 @@ def confirm_booking(body: ConfirmRequest, background: BackgroundTasks) -> Confir
         hold.color = "blue"
         hold.source = ts.BookingSource.VOICE
         hold.holdExpiresAt = None
-        hold.notes = "Booked by phone with the voice assistant."
+        # 문자 비서도 이 함수로 확정한다 (`services/sms_agent.py`). 출처는 VOICE 로 두어
+        # 리마인더·확인 문자를 그대로 받게 하고, 어느 경로였는지는 메모로 남긴다.
+        by_text = (body.conversation_id or "").startswith("sms:")
+        hold.notes = (
+            "Booked by text message with the booking assistant."
+            if by_text
+            else "Booked by phone with the voice assistant."
+        )
         ts._audit(
             hold, f"Phone assistant confirmed {party_size} players for {first} {last} ({phone})."
         )

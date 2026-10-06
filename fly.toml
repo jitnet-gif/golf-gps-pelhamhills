@@ -42,6 +42,11 @@ primary_region = "yyz"   # 토론토. 클럽과 손님이 온타리오에 있다
   # /data/tee_sheet.json 을 다시 읽는다 — 전환 뒤의 예약은 거기 없다.
   TEE_SHEET_BACKEND = "supabase"
 
+  # 문자 예약 비서 (`backend/services/sms_agent.py`). 이 스위치와 `fly secrets` 의
+  # ANTHROPIC_API_KEY 가 **둘 다** 있어야 돈다. 키가 없으면 예전처럼
+  # "C 와 코드로 취소, 그 밖은 전화" 안내만 보낸다.
+  SMS_BOOKING_ENABLED = "1"
+
   # 나머지 두 저장소는 볼륨으로 보낸다. 하나라도 빠뜨리면 그 데이터는 컨테이너
   # 파일시스템에 쓰이고 재배포 때마다 조용히 사라진다. TEE_SHEET_DATA_FILE 은
   # supabase 모드에서는 읽지 않지만, 전환 전 예약이 남아 있는 파일이라 그대로 둔다.
