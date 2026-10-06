@@ -12,27 +12,55 @@
     "llm 모델은 일부러 지정하지 않는다. 모델 이름은 ElevenLabs 쪽에서 바뀌는데,",
     "여기 굳혀 두면 어느 날 조용히 400 이 난다. 계정 기본값을 쓴다."
   ],
-
   "name": "Pelham Hills Tee Sheet Assistant",
-
   "conversation_config": {
     "agent": {
       "language": "en",
-
       "first_message": "Thanks for calling Pelham Hills Golf Club. I can book a tee time or cancel one for you. Which would you like?",
-
       "prompt": {
         "temperature": 0.2,
-
-        "prompt": "You are the booking assistant for Pelham Hills Golf Club. You take tee time reservations and cancellations over the phone and on the club website. You are warm, brief, and you never waste a caller's time.\n\n# What you can and cannot do\n\nYou can: find open tee times, book them, look up an existing reservation, and cancel one.\nYou cannot: change a reservation's time (cancel and rebook instead), handle leagues, tournaments, outings, lessons, pro shop purchases, or anything about the restaurant. For those, transfer the caller to the pro shop.\n\n# The single most important rule\n\nEvery fact about availability, times, dates, rates, and reservations comes from a tool result. NEVER state a tee time, a price, or whether something is available unless a tool just told you so. If you do not have a tool result, say you need to check and then call the tool.\n\n# Dates\n\nYou do not reliably know today's date. Never calculate one. When the caller says \"today\" or \"tomorrow\", pass exactly the word \"today\" or \"tomorrow\" as the date and the server will resolve it. For any other day, ask the caller for the month and day, then pass it as YYYY-MM-DD. Every tool result includes a spoken_date field — read that back to the caller rather than repeating the raw date.\n\n# Booking a tee time\n\nAsk one question at a time, in this order:\n1. Which day.\n2. How many players (1 to 4; a tee time holds 4 people, so if they need more than 4, transfer to the pro shop).\n3. Morning, afternoon, or evening. If they do not care, use \"any\".\n\nThen call find_tee_times. Read back two or three of the times it returns, not all of them. When the caller picks one, immediately call hold_tee_time to lock the seats before you ask for anything else. The hold expires in a few minutes, so move quickly.\n\nWith the hold in place, collect: first name, last name, and a phone number. Read the phone number back digit by digit and get a yes. Then call confirm_booking.\n\nFinally, read the confirmation code back one character at a time, and tell them the rate per player that find_tee_times reported.\n\nIf the caller changes their mind after you have placed a hold, call release_hold right away so the seats go back on the sheet.\n\n# Cancelling a reservation\n\nThis is the part where a mistake costs someone their round, so go slowly.\n\n1. Ask for the phone number on the reservation AND the last name. You need both.\n2. Call lookup_booking.\n3. Read the reservation back: the day, the time, and how many players.\n4. Ask plainly: \"Would you like me to cancel that?\" Wait for a clear yes.\n5. Only then call cancel_booking.\n\nNever call cancel_booking without calling lookup_booking first in this same conversation. If lookup_booking finds nothing, do not guess and do not try other spellings more than once — offer to transfer the caller to the pro shop.\n\n# When a tool pushes back\n\nEvery tool result carries a message field written for you. If a tool returns an error or ok:false, read its message and do exactly what it says. Common cases:\n- The tee time was taken while you were talking: apologise briefly and offer the other times.\n- The hold expired: say you need to check again, then search and hold once more.\n- The tee time is less than two hours away: the pro shop has to cancel it, so transfer the caller.\n\n# Transfer to the pro shop when\n\n- The caller asks for a person.\n- A lookup fails and the caller cannot give matching details.\n- The tee time is within two hours and they want to cancel.\n- A group larger than 4, a league, an event, a lesson, or a refund question.\n\n# How to speak\n\n- One question per turn. Do not stack questions.\n- Say times the way people say them: \"seven forty-three in the morning\", not \"7:43 AM\".\n- Never say a booking id or a hold id out loud. They are internal.\n- Never invent a policy. If you do not know, say the pro shop can answer that.\n- Keep replies to one or two sentences."
+        "prompt": "You are the booking assistant for Pelham Hills Golf Club. You take tee time reservations and cancellations over the phone and on the club website. You are warm, brief, and you never waste a caller's time.\n\n# What you can and cannot do\n\nYou can: find open tee times, book them, look up an existing reservation, and cancel one.\nYou cannot: change a reservation's time (cancel and rebook instead), handle leagues, tournaments, outings, lessons, pro shop purchases, or anything about the restaurant. For those, transfer the caller to the pro shop.\n\n# The single most important rule\n\nEvery fact about availability, times, dates, rates, and reservations comes from a tool result. NEVER state a tee time, a price, or whether something is available unless a tool just told you so. If you do not have a tool result, say you need to check and then call the tool.\n\n# Dates\n\nYou do not reliably know today's date. Never calculate one. When the caller says \"today\" or \"tomorrow\", pass exactly the word \"today\" or \"tomorrow\" as the date and the server will resolve it. For any other day, ask the caller for the month and day, then pass it as YYYY-MM-DD. Every tool result includes a spoken_date field — read that back to the caller rather than repeating the raw date.\n\n# Booking a tee time\n\nAsk one question at a time, in this order:\n1. Which day.\n2. How many players (1 to 4; a tee time holds 4 people, so if they need more than 4, transfer to the pro shop).\n3. Morning, afternoon, or evening. If they do not care, use \"any\".\n\nThen call find_tee_times. Read back two or three of the times it returns, not all of them. When the caller picks one, immediately call hold_tee_time to lock the seats before you ask for anything else. The hold expires in a few minutes, so move quickly.\n\nWith the hold in place, collect: first name, last name, and a phone number. Read the phone number back digit by digit and get a yes. Then call confirm_booking.\n\nFinally, read the confirmation code back one character at a time, and tell them the rate per player that find_tee_times reported.\n\nIf the caller changes their mind after you have placed a hold, call release_hold right away so the seats go back on the sheet.\n\n# Cancelling a reservation\n\nThis is the part where a mistake costs someone their round, so go slowly.\n\n1. Ask for the phone number on the reservation AND the last name. You need both.\n2. Call lookup_booking.\n3. Read the reservation back: the day, the time, and how many players.\n4. Ask plainly: \"Would you like me to cancel that?\" Wait for a clear yes.\n5. Only then call cancel_booking.\n\nNever call cancel_booking without calling lookup_booking first in this same conversation. If lookup_booking finds nothing, do not guess and do not try other spellings more than once — offer to transfer the caller to the pro shop.\n\n# When a tool pushes back\n\nEvery tool result carries a message field written for you. If a tool returns an error or ok:false, read its message and do exactly what it says. Common cases:\n- The tee time was taken while you were talking: apologise briefly and offer the other times.\n- The hold expired: say you need to check again, then search and hold once more.\n- The tee time is less than two hours away: the pro shop has to cancel it, so transfer the caller.\n\n# Transfer to the pro shop when\n\n- The caller asks for a person.\n- A lookup fails and the caller cannot give matching details.\n- The tee time is within two hours and they want to cancel.\n- A group larger than 4, a league, an event, a lesson, or a refund question.\n\n# How to speak\n\n- One question per turn. Do not stack questions.\n- Say times the way people say them: \"seven forty-three in the morning\", not \"7:43 AM\".\n- Never say a booking id or a hold id out loud. They are internal.\n- Never invent a policy. If you do not know, say the pro shop can answer that.\n- Keep replies to one or two sentences.\n\n# Greeting the caller\n\nCall identify_caller before you say hello. If it gives you a first name, use it (\"Hey Daniel!\"). If it\ndoes not, greet them warmly without a name — never guess, and never read back the phone number.\n\nKnowing who is calling does not prove who is calling. Caller ID can be faked. Before you show, change or\ncancel any reservation you must still ask for the phone number and last name and call lookup_booking.\n\n# Quoting prices\n\nNever say a price from memory. Call get_rates with the date, how many are playing, and how many want a\ncart seat, then read the total it gives you. If the caller has not picked a date yet, ask for one — the\nrate is different on weekends. If they want nine holes, get_rates will refuse: tell them the pro shop\nhandles nine-hole pricing and offer to transfer.\n\n# Changing a reservation\n\nTo change the number of players or nine versus eighteen holes: lookup_booking first, read the reservation\nback, then call modify_booking. You cannot move a tee time to a different hour — for that, cancel and book\nagain, and say so plainly.\n\nBefore cancelling, call cancel_booking with preview set to true. Tell the caller what it says, get a clear\nyes, then call cancel_booking again without preview. Never state a cancellation fee: we do not have one in\nthe system, so you do not know it.\n\n# Texting the caller\n\nYou can text two things, and only to the number they are calling from: our address with a map link, and a\nlink to book online. Use send_info_sms rather than reading an address out twice. You cannot text anything\nelse — no hours, no menu, no prices — and you cannot change the wording.\n\n# What you must not make up\n\nYou do not know our opening hours, the snack bar menu, parking, the lost-and-found policy, nine-hole\nprices, or the cancellation fee. None of those are confirmed. If a caller asks, say you want to get it\nright and offer to put them through to a person.\n\n# Something left behind\n\nTake the report with report_lost_item: what it is, what it looks like, when they played, and where they\nlast had it. Read the reference number back one character at a time.\n\nYou cannot see the lost and found. Never say we have it, that it is probably there, or that someone found\nit. Say staff will text them if it turns up.\n\n# When a day is full\n\nIf find_tee_times comes back with nothing for the day they want, offer two things: a different day, or the\nwaitlist. Only call join_waitlist if they say yes — it means keeping their number to text them. Tell them\nplainly that we text everyone waiting and whoever answers first gets the spot; we do not hold it.\n\nget_rates quotes the public rate. If identify_caller told you this is a member, do not read that\nnumber out — member rates are different and we do not have them. Offer to put them through instead.",
+        "_built_in_tools_comment": [
+          "transfer_to_number 는 ElevenLabs 내장 도구다 (우리 서버를 거치지 않는다).",
+          "`transfers` 항목의 정확한 스키마는 계정에 밀어 넣어 봐야 확정된다 — convai 권한이",
+          "있는 키가 생기면 `--dry-run` 으로 페이로드를 먼저 확인할 것. 거부되면 여기만 고친다.",
+          "번호: 직원 연결용 (2026-10-05 확인)."
+        ],
+        "built_in_tools": {
+          "end_call": {
+            "type": "system",
+            "name": "end_call",
+            "description": "",
+            "params": {
+              "system_tool_type": "end_call"
+            }
+          },
+          "transfer_to_number": {
+            "type": "system",
+            "name": "transfer_to_number",
+            "description": "",
+            "params": {
+              "system_tool_type": "transfer_to_number",
+              "transfers": [
+                {
+                  "transfer_destination": {
+                    "type": "phone",
+                    "phone_number": "+14168227609"
+                  },
+                  "condition": "The caller asks for a person, wants to sign up or pay for a membership, asks about leagues, tournaments, outings, lessons, the restaurant, a lost item, nine-hole pricing, or anything you were not given a tool or a confirmed fact for.",
+                  "transfer_type": "conference"
+                }
+              ],
+              "transfer_rules": []
+            }
+          }
+        }
       }
     },
-
     "tts": {
       "voice_id": "EXAVITQu4vr4xnSDxMaL"
     }
   },
-
   "_tools_comment": [
     "아래 도구들은 `/v1/convai/tools` 에 개별 리소스로 만들어지고, 에이전트는",
     "`prompt.tool_ids` 로 참조한다. 스크립트가 이름으로 짝을 맞춰 upsert 한다.",
@@ -40,7 +68,6 @@
     "conversation_id 는 LLM 이 채우지 않는다. dynamic_variable 로 시스템이 넣는다 —",
     "이 값이 취소 권한을 '이 통화' 에 묶는 열쇠라, 모델이 만질 수 있으면 의미가 없다."
   ],
-
   "tools": [
     {
       "type": "webhook",
@@ -59,7 +86,6 @@
           "properties": {
             "conversation_id": {
               "type": "string",
-              "description": "Internal call id.",
               "value_type": "dynamic_variable",
               "dynamic_variable": "system__conversation_id"
             },
@@ -76,11 +102,13 @@
               "description": "One of 'morning', 'afternoon', 'evening', or 'any' when the caller has no preference."
             }
           },
-          "required": ["date", "party_size"]
+          "required": [
+            "date",
+            "party_size"
+          ]
         }
       }
     },
-
     {
       "type": "webhook",
       "name": "hold_tee_time",
@@ -98,7 +126,6 @@
           "properties": {
             "conversation_id": {
               "type": "string",
-              "description": "Internal call id.",
               "value_type": "dynamic_variable",
               "dynamic_variable": "system__conversation_id"
             },
@@ -115,11 +142,14 @@
               "description": "How many players, from 1 to 4."
             }
           },
-          "required": ["date", "time", "party_size"]
+          "required": [
+            "date",
+            "time",
+            "party_size"
+          ]
         }
       }
     },
-
     {
       "type": "webhook",
       "name": "release_hold",
@@ -137,7 +167,6 @@
           "properties": {
             "conversation_id": {
               "type": "string",
-              "description": "Internal call id.",
               "value_type": "dynamic_variable",
               "dynamic_variable": "system__conversation_id"
             },
@@ -146,11 +175,12 @@
               "description": "The hold_id that hold_tee_time returned."
             }
           },
-          "required": ["hold_id"]
+          "required": [
+            "hold_id"
+          ]
         }
       }
     },
-
     {
       "type": "webhook",
       "name": "confirm_booking",
@@ -168,7 +198,6 @@
           "properties": {
             "conversation_id": {
               "type": "string",
-              "description": "Internal call id.",
               "value_type": "dynamic_variable",
               "dynamic_variable": "system__conversation_id"
             },
@@ -193,11 +222,15 @@
               "description": "9 or 18. Use 18 unless the caller asked for nine holes."
             }
           },
-          "required": ["hold_id", "first_name", "last_name", "phone"]
+          "required": [
+            "hold_id",
+            "first_name",
+            "last_name",
+            "phone"
+          ]
         }
       }
     },
-
     {
       "type": "webhook",
       "name": "lookup_booking",
@@ -215,7 +248,6 @@
           "properties": {
             "conversation_id": {
               "type": "string",
-              "description": "Internal call id.",
               "value_type": "dynamic_variable",
               "dynamic_variable": "system__conversation_id"
             },
@@ -228,11 +260,13 @@
               "description": "The last name on the reservation."
             }
           },
-          "required": ["phone", "last_name"]
+          "required": [
+            "phone",
+            "last_name"
+          ]
         }
       }
     },
-
     {
       "type": "webhook",
       "name": "cancel_booking",
@@ -250,7 +284,6 @@
           "properties": {
             "conversation_id": {
               "type": "string",
-              "description": "Internal call id.",
               "value_type": "dynamic_variable",
               "dynamic_variable": "system__conversation_id"
             },
@@ -265,9 +298,288 @@
             "reason": {
               "type": "string",
               "description": "A short reason if the caller gave one, otherwise leave it out."
+            },
+            "preview": {
+              "type": "boolean",
+              "description": "True to check whether it can still be cancelled WITHOUT cancelling. Do this first, tell the caller, get a yes, then call again without preview."
             }
           },
-          "required": ["booking_id", "last_name"]
+          "required": [
+            "booking_id",
+            "last_name"
+          ]
+        }
+      }
+    },
+    {
+      "type": "webhook",
+      "name": "identify_caller",
+      "description": "Find out who is calling, from the phone line's caller ID, so you can greet them by name. Call this once at the very start, before you say hello. This does NOT let you show or change a reservation — for that you still need lookup_booking with the phone number and last name.",
+      "response_timeout_secs": 20,
+      "api_schema": {
+        "url": "{{API_BASE}}/voice/tools/identify-caller",
+        "method": "POST",
+        "request_headers": {
+          "X-Voice-Tool-Secret": "{{TOOL_SECRET}}"
+        },
+        "request_body_schema": {
+          "type": "object",
+          "description": "Taken from the phone line, not from the conversation.",
+          "properties": {
+            "conversation_id": {
+              "type": "string",
+              "value_type": "dynamic_variable",
+              "dynamic_variable": "system__conversation_id"
+            },
+            "caller_number": {
+              "type": "string",
+              "value_type": "dynamic_variable",
+              "dynamic_variable": "system__caller_id"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "webhook",
+      "name": "get_rates",
+      "description": "Get the exact price for a specific date before you quote any number. Covers 18 holes and power carts. Nine-hole pricing is not in the rate table, so this tool will refuse it — transfer those callers.",
+      "response_timeout_secs": 20,
+      "api_schema": {
+        "url": "{{API_BASE}}/voice/tools/get-rates",
+        "method": "POST",
+        "request_headers": {
+          "X-Voice-Tool-Secret": "{{TOOL_SECRET}}"
+        },
+        "request_body_schema": {
+          "type": "object",
+          "description": "The date and party the caller asked about.",
+          "properties": {
+            "conversation_id": {
+              "type": "string",
+              "value_type": "dynamic_variable",
+              "dynamic_variable": "system__conversation_id"
+            },
+            "date": {
+              "type": "string",
+              "description": "ISO date (YYYY-MM-DD), or 'today' / 'tomorrow'."
+            },
+            "players": {
+              "type": "integer",
+              "description": "How many people are playing. Defaults to 1."
+            },
+            "holes": {
+              "type": "integer",
+              "description": "9 or 18. Defaults to 18."
+            },
+            "riders": {
+              "type": "integer",
+              "description": "How many people want a cart seat. 0 if they are walking."
+            }
+          },
+          "required": [
+            "date"
+          ]
+        }
+      }
+    },
+    {
+      "type": "webhook",
+      "name": "modify_booking",
+      "description": "Change the number of players or the number of holes on a reservation you have already found with lookup_booking in this same call. You cannot change the tee time — cancel and rebook instead.",
+      "response_timeout_secs": 20,
+      "api_schema": {
+        "url": "{{API_BASE}}/voice/tools/modify-booking",
+        "method": "POST",
+        "request_headers": {
+          "X-Voice-Tool-Secret": "{{TOOL_SECRET}}"
+        },
+        "request_body_schema": {
+          "type": "object",
+          "description": "What the caller wants changed.",
+          "properties": {
+            "conversation_id": {
+              "type": "string",
+              "value_type": "dynamic_variable",
+              "dynamic_variable": "system__conversation_id"
+            },
+            "booking_id": {
+              "type": "string",
+              "description": "The booking_id lookup_booking returned in this call."
+            },
+            "last_name": {
+              "type": "string",
+              "description": "The last name on the reservation."
+            },
+            "party_size": {
+              "type": "integer",
+              "description": "The new number of players. Leave out if unchanged."
+            },
+            "holes": {
+              "type": "integer",
+              "description": "9 or 18. Leave out if unchanged."
+            }
+          },
+          "required": [
+            "booking_id",
+            "last_name"
+          ]
+        }
+      }
+    },
+    {
+      "type": "webhook",
+      "name": "send_info_sms",
+      "description": "Text the caller our address and a map link, or a link to book online. It always goes to the number they are calling from — you cannot send it anywhere else, and you cannot change the wording. Use it instead of reading an address out twice.",
+      "response_timeout_secs": 20,
+      "api_schema": {
+        "url": "{{API_BASE}}/voice/tools/send-info-sms",
+        "method": "POST",
+        "request_headers": {
+          "X-Voice-Tool-Secret": "{{TOOL_SECRET}}"
+        },
+        "request_body_schema": {
+          "type": "object",
+          "description": "Which of the two texts to send.",
+          "properties": {
+            "conversation_id": {
+              "type": "string",
+              "value_type": "dynamic_variable",
+              "dynamic_variable": "system__conversation_id"
+            },
+            "caller_number": {
+              "type": "string",
+              "value_type": "dynamic_variable",
+              "dynamic_variable": "system__caller_id"
+            },
+            "topic": {
+              "type": "string",
+              "description": "Either 'directions' or 'booking_link'."
+            }
+          },
+          "required": [
+            "topic"
+          ]
+        }
+      }
+    },
+    {
+      "type": "webhook",
+      "name": "report_lost_item",
+      "description": "Log something a caller left behind and give them a reference number. You are only taking the report — you cannot see whether we have the item, and you must never say it has been found.",
+      "response_timeout_secs": 20,
+      "api_schema": {
+        "url": "{{API_BASE}}/voice/tools/report-lost-item",
+        "method": "POST",
+        "request_headers": {
+          "X-Voice-Tool-Secret": "{{TOOL_SECRET}}"
+        },
+        "request_body_schema": {
+          "type": "object",
+          "description": "What was lost and who lost it.",
+          "properties": {
+            "conversation_id": {
+              "type": "string",
+              "value_type": "dynamic_variable",
+              "dynamic_variable": "system__conversation_id"
+            },
+            "item": {
+              "type": "string",
+              "description": "What it is, in a word or two: rangefinder, cap, car key."
+            },
+            "last_name": {
+              "type": "string",
+              "description": "The caller's last name."
+            },
+            "first_name": {
+              "type": "string",
+              "description": "The caller's first name, if they give it."
+            },
+            "description": {
+              "type": "string",
+              "description": "Colour, brand, case — whatever helps staff recognise it."
+            },
+            "lost_on": {
+              "type": "string",
+              "description": "'today', 'yesterday', or an ISO date. Leave out if they are unsure."
+            },
+            "where_lost": {
+              "type": "string",
+              "description": "Where they last had it: a cart number, a hole, the clubhouse."
+            },
+            "caller_number": {
+              "type": "string",
+              "value_type": "dynamic_variable",
+              "dynamic_variable": "system__caller_id"
+            }
+          },
+          "required": [
+            "item",
+            "last_name"
+          ]
+        }
+      }
+    },
+    {
+      "type": "webhook",
+      "name": "join_waitlist",
+      "description": "Put the caller on the waitlist for a day that is full. Only call this if they ask for it — it means keeping their number to text them. If a spot opens, everyone waiting is told and whoever answers first gets it; we do not hold it for them.",
+      "response_timeout_secs": 20,
+      "api_schema": {
+        "url": "{{API_BASE}}/voice/tools/join-waitlist",
+        "method": "POST",
+        "request_headers": {
+          "X-Voice-Tool-Secret": "{{TOOL_SECRET}}"
+        },
+        "request_body_schema": {
+          "type": "object",
+          "description": "The day and party they are waiting for.",
+          "properties": {
+            "conversation_id": {
+              "type": "string",
+              "value_type": "dynamic_variable",
+              "dynamic_variable": "system__conversation_id"
+            },
+            "date": {
+              "type": "string",
+              "description": "ISO date (YYYY-MM-DD), or 'today' / 'tomorrow'."
+            },
+            "party_size": {
+              "type": "integer",
+              "description": "How many are playing."
+            },
+            "last_name": {
+              "type": "string",
+              "description": "The caller's last name."
+            },
+            "first_name": {
+              "type": "string",
+              "description": "The caller's first name, if they give it."
+            },
+            "earliest": {
+              "type": "string",
+              "description": "Earliest time they would take, like '9:00 AM'. Leave out if any time works."
+            },
+            "latest": {
+              "type": "string",
+              "description": "Latest time they would take. Leave out if any time works."
+            },
+            "holes": {
+              "type": "integer",
+              "description": "9 or 18. Defaults to 18."
+            },
+            "caller_number": {
+              "type": "string",
+              "value_type": "dynamic_variable",
+              "dynamic_variable": "system__caller_id"
+            }
+          },
+          "required": [
+            "date",
+            "party_size",
+            "last_name"
+          ]
         }
       }
     }

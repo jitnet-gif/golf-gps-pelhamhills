@@ -439,3 +439,327 @@ def test_voice_sessions_are_rate_limited(client):
         assert client.post(f"{API}/voice/session").status_code == 503
 
     assert client.post(f"{API}/voice/session").status_code == 429
+
+
+# ===== 도구 7: 발신번호로 손님 알아보기 =================================
+
+def identify(client, number="905-892-1234", conversation="c-id"):
+    return client.post(
+        f"{API}/voice/tools/identify-caller",
+        json={"caller_number": number, "conversation_id": conversation},
+    )
+
+
+def test_identify_caller_does_not_unlock_cancelling(client):
+    """번호를 안다고 취소 권한이 생기면 안 된다. 발신번호는 위조할 수 있다."""
+    booking = book(client, time="8:01 AM", party=2, conversation="c-booked")
+    assert identify(client, conversation="c-spoof").status_code == 200
+    refused = cancel(client, booking["booking_id"], conversation="c-spoof")
+    assert refused.status_code == 403
+
+
+def test_identify_caller_counts_upcoming_without_reading_them_out(client):
+    """건수만 알려 준다. 시간까지 읽어 주면 번호만 아는 사람에게 일정을 알려 주는 셈이다."""
+    book(client, time="8:01 AM", party=2, conversation="c-booked")
+    body = identify(client).json()
+    assert body["upcoming"] == 1
+    assert "8:01" not in body["message"]
+
+
+def test_identify_caller_without_a_number_greets_without_a_name(client):
+    body = identify(client, number="").json()
+    assert body["known"] is False
+    assert body["greeting_name"] == ""
+
+
+# ===== 도구 8: 요금 확인 ===============================================
+
+def rates(client, date=TOMORROW, players=2, holes=18, riders=0, conversation="c-rate"):
+    return client.post(
+        f"{API}/voice/tools/get-rates",
+        json={"date": date, "players": players, "holes": holes, "riders": riders,
+              "conversation_id": conversation},
+    )
+
+
+def test_get_rates_uses_the_tee_sheets_own_numbers(client):
+    body = rates(client).json()
+    green = ts.slot_rate_for(TOMORROW)
+    assert body["green_fee_per_player"] == green
+    subtotal = round(green * 2, 2)
+    assert body["subtotal"] == subtotal
+    assert body["total"] == round(subtotal + round(subtotal * voice.TAX_RATE, 2), 2)
+
+
+def test_get_rates_refuses_nine_holes_instead_of_inventing_one(client):
+    """9홀 요금은 요금표에 없다. 지어내면 전화와 프로 샵의 금액이 달라진다."""
+    assert rates(client, holes=9).status_code == 422
+
+
+def test_get_rates_charges_a_cart_per_rider(client):
+    walking = rates(client, riders=0).json()["total"]
+    riding = rates(client, riders=2).json()["total"]
+    assert riding > walking
+
+
+# ===== 도구 9: 예약 수정 ===============================================
+
+def modify(client, booking_id, conversation, last="Nakamura", **fields):
+    payload = {"booking_id": booking_id, "last_name": last, "conversation_id": conversation}
+    payload.update(fields)
+    return client.post(f"{API}/voice/tools/modify-booking", json=payload)
+
+
+def test_modify_needs_a_lookup_on_the_same_call(client):
+    booking = book(client, time="8:01 AM", party=2, conversation="c-booked")
+    assert modify(client, booking["booking_id"], "c-other", party_size=3).status_code == 403
+
+
+def test_modify_rejects_a_last_name_that_does_not_match(client):
+    booking = book(client, time="8:01 AM", party=2, conversation="c-booked")
+    lookup_first(client, "c-mod")
+    refused = modify(client, booking["booking_id"], "c-mod", last="Wrong", party_size=3)
+    assert refused.status_code == 403
+
+
+def test_modify_shrinks_a_party_and_gives_the_seat_back(client):
+    booking = book(client, time="8:01 AM", party=3, conversation="c-booked")
+    assert "8:01 AM" not in [o["time"] for o in find(client, party=2).json()["options"]]
+    lookup_first(client, "c-mod")
+    done = modify(client, booking["booking_id"], "c-mod", party_size=2)
+    assert done.status_code == 200
+    assert done.json()["booking"]["party_size"] == 2
+    assert open_count(client, party=2) > 0
+
+
+def test_modify_cannot_overfill_a_tee_time(client):
+    first = book(client, time="8:01 AM", party=2, conversation="c-a")
+    book(client, time="8:01 AM", party=1, conversation="c-b")
+    lookup_first(client, "c-mod")
+    refused = modify(client, first["booking_id"], "c-mod", party_size=4)
+    assert refused.status_code == 409
+
+
+def test_modify_changes_the_number_of_holes(client):
+    booking = book(client, time="8:01 AM", party=2, conversation="c-booked")
+    lookup_first(client, "c-mod")
+    done = modify(client, booking["booking_id"], "c-mod", holes=9)
+    assert done.status_code == 200
+    assert done.json()["booking"]["holes"] == 9
+
+
+def test_modify_cannot_move_the_tee_time(client):
+    """시간 변경은 일부러 없다. 보내도 무시되는 게 아니라 바꿀 것이 없다고 답해야 한다."""
+    booking = book(client, time="8:01 AM", party=2, conversation="c-booked")
+    lookup_first(client, "c-mod")
+    nothing = modify(client, booking["booking_id"], "c-mod")
+    assert nothing.status_code == 422
+
+
+# ===== 취소 미리보기 ===================================================
+
+def preview_cancel(client, booking_id, conversation, last="Nakamura"):
+    return client.post(
+        f"{API}/voice/tools/cancel-booking",
+        json={"booking_id": booking_id, "last_name": last,
+              "conversation_id": conversation, "preview": True},
+    )
+
+
+def test_cancel_preview_leaves_the_booking_alone(client):
+    booking = book(client, time="8:01 AM", party=2, conversation="c-booked")
+    lookup_first(client, "c-prev")
+    body = preview_cancel(client, booking["booking_id"], "c-prev")
+    assert body.status_code == 200
+    assert body.json()["cancelled"] is False
+    assert lookup_first(client, "c-check").json()["found"] == 1
+
+
+def test_cancel_preview_still_needs_a_lookup(client):
+    booking = book(client, time="8:01 AM", party=2, conversation="c-booked")
+    assert preview_cancel(client, booking["booking_id"], "c-nope").status_code == 403
+
+
+# ===== 도구 10: 안내 문자 =============================================
+
+def info_sms(client, topic="directions", number="905-892-1234", conversation="c-info"):
+    return client.post(
+        f"{API}/voice/tools/send-info-sms",
+        json={"topic": topic, "caller_number": number, "conversation_id": conversation},
+    )
+
+
+def test_info_sms_has_no_path_to_a_number_the_caller_said(client):
+    """받는 번호는 발신번호에서만 온다. 없으면 보내지 않고 읽어 주라고 답한다."""
+    refused = info_sms(client, number="")
+    assert refused.status_code == 422
+
+
+def test_info_sms_is_capped_per_call(client):
+    assert info_sms(client).status_code == 200
+    assert info_sms(client).status_code == 200
+    assert info_sms(client).status_code == 429
+
+
+def test_info_sms_rejects_a_topic_we_have_not_confirmed(client):
+    """영업시간처럼 확인 안 된 사실은 보낼 통로 자체가 없어야 한다."""
+    assert info_sms(client, topic="hours").status_code == 422
+
+
+def test_info_sms_sends_the_clubs_real_address(client):
+    from backend.services import twilio_sms
+
+    twilio_sms.sms_messages.clear()
+    assert info_sms(client).status_code == 200
+    assert twilio_sms.sms_messages, "문자가 기록되지 않았다"
+    assert voice.CLUB_ADDRESS in twilio_sms.sms_messages[0].body
+
+
+# ===== 도구 11: 분실물 접수 ============================================
+
+def lost(client, conversation="c-lost", **fields):
+    payload = {"item": "rangefinder", "last_name": "Walton",
+               "caller_number": "+19058921234", "conversation_id": conversation}
+    payload.update(fields)
+    return client.post(f"{API}/voice/tools/report-lost-item", json=payload)
+
+
+def test_lost_item_stores_the_caller_id_not_a_spoken_number(client, monkeypatch):
+    seen = {}
+
+    def fake_report(**kwargs):
+        seen.update(kwargs)
+        return {"ticket": "LF-0401"}
+
+    monkeypatch.setattr(voice.lost_items, "report", fake_report)
+    body = lost(client, description="black Bushnell", where_lost="cart 34")
+    assert body.status_code == 200
+    assert body.json()["ticket"] == "LF-0401"
+    assert seen["caller_phone"] == "+19058921234"
+
+
+def test_lost_item_never_tells_the_agent_it_was_found(client, monkeypatch):
+    monkeypatch.setattr(voice.lost_items, "report", lambda **kw: {"ticket": "LF-0402"})
+    message = lost(client).json()["message"].lower()
+    assert "never say it has been found" in message
+
+
+def test_lost_item_without_the_list_promises_nothing(client, monkeypatch):
+    def boom(**kwargs):
+        raise voice.supabase_rest.SupabaseUnavailable("down")
+
+    monkeypatch.setattr(voice.lost_items, "report", boom)
+    assert lost(client).status_code == 503
+
+
+def test_lost_item_does_not_guess_a_date_it_cannot_parse(client, monkeypatch):
+    seen = {}
+
+    def fake_report(**kwargs):
+        seen.update(kwargs)
+        return {"ticket": "LF-0403"}
+
+    monkeypatch.setattr(voice.lost_items, "report", fake_report)
+    assert lost(client, lost_on="last Tuesday").status_code == 200
+    assert seen["lost_on"] is None
+
+
+# ===== 도구 12: 대기자 등록 ============================================
+
+def waitlist(client, conversation="c-wait", **fields):
+    payload = {"date": TOMORROW, "party_size": 2, "last_name": "Walton",
+               "caller_number": "+19058921234", "conversation_id": conversation}
+    payload.update(fields)
+    return client.post(f"{API}/voice/tools/join-waitlist", json=payload)
+
+
+def test_waitlist_needs_a_number_to_text(client):
+    assert waitlist(client, caller_number="").status_code == 422
+
+
+def test_waitlist_does_not_add_the_same_caller_twice(client, monkeypatch):
+    monkeypatch.setattr(voice.tee_waitlist, "already_waiting", lambda date, phone: True)
+    body = waitlist(client).json()
+    assert body["joined"] is False
+
+
+def test_waitlist_records_what_the_caller_asked_for(client, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(voice.tee_waitlist, "already_waiting", lambda date, phone: False)
+    monkeypatch.setattr(voice.tee_waitlist, "join", lambda **kw: seen.update(kw) or {"id": "w1"})
+    assert waitlist(client, earliest="9:00 AM", latest="11:00 AM").status_code == 200
+    assert seen["earliest"] == "9:00 AM"
+    assert seen["phone"] == "+19058921234"
+
+
+def test_waitlist_without_the_list_promises_nothing(client, monkeypatch):
+    def boom(date, phone):
+        raise voice.supabase_rest.SupabaseUnavailable("down")
+
+    monkeypatch.setattr(voice.tee_waitlist, "already_waiting", boom)
+    assert waitlist(client).status_code == 503
+
+
+# ===== 취소하면 대기자에게 알린다 =======================================
+
+def _entry(eid, earliest=None, latest=None, phone="+15550001111"):
+    return {"id": eid, "phone": phone, "earliest": earliest, "latest": latest}
+
+
+def _cancel_a_booking(client):
+    booking = book(client, time="8:01 AM", party=2, conversation="c-booked")
+    lookup_first(client, "c-cancel")
+    assert cancel(client, booking["booking_id"]).status_code == 200
+
+
+def test_cancelling_offers_the_seat_to_the_first_person_waiting(client, monkeypatch):
+    offered = []
+    monkeypatch.setattr(voice.tee_waitlist, "waiting_entries",
+                        lambda date, seats: [_entry("w1")])
+    monkeypatch.setattr(voice.tee_waitlist, "mark_offered",
+                        lambda entry_id, time_label: offered.append((entry_id, time_label)))
+    _cancel_a_booking(client)
+    assert offered == [("w1", "8:01 AM")]
+
+
+def test_someone_wanting_the_afternoon_does_not_block_the_queue(client, monkeypatch):
+    """앞사람 시간대가 안 맞으면 **뒷사람**에게 간다.
+
+    맨 앞 한 명만 보고 포기하면, 오후만 원하는 사람이 명단 앞에 있을 때 아침에 난
+    자리로는 아무도 연락을 못 받는다.
+    """
+    offered = []
+    monkeypatch.setattr(
+        voice.tee_waitlist, "waiting_entries",
+        lambda date, seats: [_entry("afternoon", earliest="1:00 PM", latest="3:00 PM"),
+                             _entry("anytime")],
+    )
+    monkeypatch.setattr(voice.tee_waitlist, "mark_offered",
+                        lambda entry_id, time_label: offered.append((entry_id, time_label)))
+    _cancel_a_booking(client)
+    assert offered == [("anytime", "8:01 AM")]
+
+
+def test_nobody_is_texted_when_no_window_fits(client, monkeypatch):
+    offered = []
+    monkeypatch.setattr(
+        voice.tee_waitlist, "waiting_entries",
+        lambda date, seats: [_entry("afternoon", earliest="1:00 PM", latest="3:00 PM")],
+    )
+    monkeypatch.setattr(voice.tee_waitlist, "mark_offered",
+                        lambda entry_id, time_label: offered.append((entry_id, time_label)))
+    _cancel_a_booking(client)
+    assert offered == []
+
+
+def test_a_broken_waitlist_does_not_break_cancelling(client, monkeypatch):
+    def boom(date, seats):
+        raise voice.supabase_rest.SupabaseUnavailable("down")
+
+    monkeypatch.setattr(voice.tee_waitlist, "waiting_entries", boom)
+    _cancel_a_booking(client)
+
+
+def test_waitlist_rejects_a_time_it_cannot_parse(client):
+    """"9am" 을 그대로 저장하면 조건이 조용히 무시되고 새벽 문자를 받게 된다."""
+    assert waitlist(client, earliest="9am").status_code == 422

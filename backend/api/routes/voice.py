@@ -28,11 +28,21 @@ from time import monotonic
 from typing import Any, Literal, Optional
 from zoneinfo import ZoneInfo
 
+from urllib.parse import quote_plus
+
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from backend.api.routes import tee_sheet as ts
-from backend.services import voice_agent
+# HST 는 리테일이 이미 상수로 갖고 있다. 여기에 13% 를 또 적으면 언젠가 한쪽만 바뀐다.
+from backend.api.routes.retail import TAX_RATE
+from backend.services import (
+    customer_lookup,
+    lost_items,
+    supabase_rest,
+    tee_waitlist,
+    voice_agent,
+)
 from backend.services.tee_sheet_store import Scope
 from backend.services.twilio_sms import send_sms
 
@@ -66,6 +76,18 @@ SESSION_TTL_SECONDS = 2 * 60 * 60
 CLUB_TIMEZONE = ZoneInfo(os.getenv("CLUB_TIMEZONE", "America/Toronto"))
 
 CLUB_NAME = os.getenv("CLUB_NAME", "Pelham Hills Golf Club")
+
+#: 안내 문자에 쓰는 사실들. **저장소가 이미 아는 값만** 둔다.
+#: 주소는 `frontend/lib/nav.ts` 의 `CLUB.mailingAddress` 와 같은 표기다 (클럽이 쓰던
+#: Lightspeed 영수증 2026-09-15 기준). 영업시간·메뉴·분실물 규정 같은 건 넣지 않는다 —
+#: 시연 시나리오에 나오는 그 값들은 클럽 확인 전 샘플이라, 문자로 보내면 틀린 정보가
+#: 손님 손에 남는다.
+CLUB_ADDRESS = "196 Webber Road, Welland, Ontario, L3B 5N9"
+SITE_URL = os.getenv("PUBLIC_SITE_URL", "https://pelhamhills.vercel.app").rstrip("/")
+
+#: 한 통화가 보낼 수 있는 안내 문자 수. 에이전트가 말에 끌려 같은 문자를 반복해서
+#: 보내는 것을 막는다.
+MAX_INFO_SMS_PER_CALL = 2
 
 DayPart = Literal["morning", "afternoon", "evening", "any"]
 
@@ -147,7 +169,9 @@ def _check_session_rate(caller: str) -> None:
 # 그래서 "이 통화에서 조회로 확인된 예약" 만 취소 대상이 되게 묶어 둔다.
 
 class _Session:
-    __slots__ = ("conversation_id", "created_at", "last_seen", "revealed", "holds", "calls")
+    __slots__ = (
+        "conversation_id", "created_at", "last_seen", "revealed", "holds", "calls", "info_sms",
+    )
 
     def __init__(self, conversation_id: str) -> None:
         now = datetime.now(timezone.utc)
@@ -157,6 +181,7 @@ class _Session:
         self.revealed: set[str] = set()   # 조회로 손님에게 확인된 booking_id
         self.holds: set[str] = set()      # 이 통화가 잡은 홀드 id
         self.calls = 0
+        self.info_sms = 0                 # 이 통화가 보낸 안내 문자 수
 
 
 _sessions: dict[str, _Session] = {}
@@ -398,6 +423,10 @@ class CancelRequest(_VoiceRequest):
     booking_id: str
     last_name: str = Field(..., min_length=1, max_length=60)
     reason: str = Field(default="Caller asked to cancel.", max_length=200)
+    preview: bool = Field(
+        default=False,
+        description="True 면 취소하지 않고 취소할 수 있는지만 본다. 손님에게 먼저 알려 줄 때 쓴다.",
+    )
 
 
 class CancelResponse(BaseModel):
@@ -406,6 +435,114 @@ class CancelResponse(BaseModel):
     date: str
     spoken_date: str
     time: str
+    message: str
+    #: preview 호출이면 False. 기존 호출부가 깨지지 않게 기본값은 True 다.
+    cancelled: bool = True
+
+
+class IdentifyCallerRequest(_VoiceRequest):
+    caller_number: str = Field(
+        default="",
+        max_length=40,
+        description="전화선이 알려 준 발신번호. 손님이 말한 번호를 여기 넣지 말 것.",
+    )
+
+
+class IdentifyCallerResponse(BaseModel):
+    ok: bool
+    known: bool
+    greeting_name: str
+    is_member: bool
+    upcoming: int
+    message: str
+
+
+class RatesRequest(_VoiceRequest):
+    date: str
+    players: int = Field(default=1, ge=1, le=ts.PLAYERS_PER_TEE_TIME)
+    holes: Literal[9, 18] = 18
+    riders: int = Field(default=0, ge=0, le=ts.PLAYERS_PER_TEE_TIME)
+
+
+class RatesResponse(BaseModel):
+    ok: bool
+    date: str
+    spoken_date: str
+    players: int
+    riders: int
+    green_fee_per_player: float
+    cart_fee_per_rider: float
+    subtotal: float
+    tax: float
+    total: float
+    message: str
+
+
+class ModifyRequest(_VoiceRequest):
+    booking_id: str
+    last_name: str = Field(..., min_length=1, max_length=60)
+    party_size: Optional[int] = Field(default=None, ge=1, le=ts.PLAYERS_PER_TEE_TIME)
+    holes: Optional[Literal[9, 18]] = None
+
+
+class ModifyResponse(BaseModel):
+    ok: bool
+    booking: BookingSummary
+    message: str
+
+
+#: 보낼 수 있는 안내 문자. 새 항목은 **클럽이 확인해 준 사실**만 추가한다.
+InfoTopic = Literal["directions", "booking_link"]
+
+
+class InfoSmsRequest(_VoiceRequest):
+    topic: InfoTopic
+    caller_number: str = Field(
+        default="",
+        max_length=40,
+        description="전화선이 알려 준 발신번호. 손님이 말한 번호를 여기 넣지 말 것.",
+    )
+
+
+class InfoSmsResponse(BaseModel):
+    ok: bool
+    sent: bool
+    topic: str
+    message: str
+
+
+class LostItemRequest(_VoiceRequest):
+    item: str = Field(..., min_length=2, max_length=80)
+    last_name: str = Field(..., min_length=1, max_length=60)
+    first_name: str = Field(default="", max_length=60)
+    description: str = Field(default="", max_length=200)
+    lost_on: str = Field(default="", max_length=20, description="ISO date, 'today' 또는 'yesterday'.")
+    where_lost: str = Field(default="", max_length=80)
+    caller_number: str = Field(default="", max_length=40)
+
+
+class LostItemResponse(BaseModel):
+    ok: bool
+    ticket: str
+    message: str
+
+
+class WaitlistRequest(_VoiceRequest):
+    date: str
+    party_size: int = Field(..., ge=1, le=ts.PLAYERS_PER_TEE_TIME)
+    last_name: str = Field(..., min_length=1, max_length=60)
+    first_name: str = Field(default="", max_length=60)
+    earliest: str = Field(default="", max_length=10)
+    latest: str = Field(default="", max_length=10)
+    holes: Literal[9, 18] = 18
+    caller_number: str = Field(default="", max_length=40)
+
+
+class WaitlistResponse(BaseModel):
+    ok: bool
+    joined: bool
+    date: str
+    spoken_date: str
     message: str
 
 
@@ -864,11 +1001,34 @@ def cancel_booking(body: CancelRequest, background: BackgroundTasks) -> CancelRe
                 ),
             )
 
+        # 미리보기: 문 세 개를 다 지났다는 것만 알려 주고 아무것도 바꾸지 않는다.
+        # 손님에게 "취소해도 괜찮습니다" 를 먼저 말하고 동의를 받기 위한 것이다.
+        #
+        # **수수료 금액을 말하지 않는다.** 코드에 취소 수수료라는 개념 자체가 없다.
+        # 데모 시나리오는 "24시간 전까지 무료" 라고 말하지만 이 저장소가 아는 규칙은
+        # `CANCEL_CUTOFF_MINUTES`(2시간) 하나뿐이고, 둘은 서로 다른 값이다.
+        # 확정되기 전까지 금액이나 시간 규정을 지어내지 않는다.
+        if body.preview:
+            return CancelResponse(
+                ok=True,
+                cancelled=False,
+                booking_id=booking.id,
+                date=booking.date,
+                spoken_date=spoken_date(booking.date),
+                time=booking.time,
+                message=(
+                    f"This reservation can still be cancelled: {spoken_date(booking.date)} at "
+                    f"{booking.time}. Ask the caller to confirm, then call cancel_booking again "
+                    "without preview. Do not quote a cancellation fee."
+                ),
+            )
+
         message = ts._apply_status(
             booking, ts.BookingStatus.CANCELLED, f"{body.reason.strip()} (phone assistant)"
         )
         ts._audit(booking, message)
         iso_date, time_label = booking.date, booking.time
+        seats_freed = len(booking.players)
 
     if caller.phone:
         background.add_task(
@@ -878,6 +1038,10 @@ def cancel_booking(body: CancelRequest, background: BackgroundTasks) -> CancelRe
             template="cancel",
             booking_ref=_confirmation_code(body.booking_id),
         )
+
+    # 빈자리가 생겼다는 것을 대기자에게 알린다. 응답이 나간 뒤에 돈다 — 대기자 명단이
+    # 느리거나 꺼져 있어도 취소 자체는 이미 끝났고, 에이전트가 기다릴 이유가 없다.
+    background.add_task(_offer_slot_to_waitlist, iso_date, time_label, seats_freed)
 
     return CancelResponse(
         ok=True,
@@ -894,6 +1058,521 @@ def cancel_booking(body: CancelRequest, background: BackgroundTasks) -> CancelRe
 
 # 도구 라우터를 합친다. `include_router` 는 tools_router 의 의존성(시크릿 검사)을
 # 그대로 들고 오므로, `main.py` 는 지금처럼 `voice.router` 하나만 달면 된다.
+# ===== 도구 7: 발신번호로 손님 알아보기 =================================
+
+@tools_router.post("/voice/tools/identify-caller", response_model=IdentifyCallerResponse)
+def identify_caller(body: IdentifyCallerRequest) -> IdentifyCallerResponse:
+    """발신번호로 이름을 찾아 **인사에만** 쓴다.
+
+    `lookup_booking` 과 달리 이 도구는 `_Session.revealed` 를 건드리지 않는다.
+    발신번호는 위조할 수 있으므로 이것으로 취소·수정 권한을 주면 첫 번째 문이
+    그대로 무너진다. 예약을 보거나 바꾸려면 여전히 번호 **와** 성을 받아
+    `lookup_booking` 을 거쳐야 한다.
+
+    다가오는 예약도 **건수만** 돌려준다. 시간과 인원까지 읽어 주면 번호만 아는
+    사람에게 남의 일정을 알려 주는 셈이다.
+
+    번호 하나에 고객이 둘 이상이면 이름을 부르지 않는다 — 소스에 부부가 유선
+    하나를 같이 쓰는 행이 여럿 있다 (`customer_lookup.find_by_phone` 참고).
+    """
+    _touch_session(body.conversation_id)
+
+    phone = normalize_phone(body.caller_number)
+    if not phone:
+        return IdentifyCallerResponse(
+            ok=True,
+            known=False,
+            greeting_name="",
+            is_member=False,
+            upcoming=0,
+            message="The caller's number did not come through. Greet them warmly without a name.",
+        )
+
+    today = today_iso()
+    now = datetime.now(timezone.utc)
+    upcoming = 0
+    for booking in ts.read_bookings(Scope(date_from=today)):
+        if booking.date < today:
+            continue
+        if booking.status in (ts.BookingStatus.CANCELLED, ts.BookingStatus.BLOCKED):
+            continue
+        if booking.source == ts.BookingSource.VOICE_HOLD or ts.hold_expired(booking, now):
+            continue
+        if any(not p.cancelled and normalize_phone(p.phone) == phone for p in booking.players):
+            upcoming += 1
+
+    caller = customer_lookup.find_by_phone(phone)
+    guard = (
+        "Use this only for the greeting. Before showing or changing any reservation, still ask "
+        "for the phone number and last name and call lookup_booking."
+    )
+
+    if caller is None or caller.ambiguous or not caller.display:
+        reason = (
+            "More than one customer shares that number, so do not guess a name."
+            if caller is not None and caller.ambiguous
+            else "No customer on file for that number."
+        )
+        return IdentifyCallerResponse(
+            ok=True,
+            known=False,
+            greeting_name="",
+            is_member=False,
+            upcoming=upcoming,
+            message=f"{reason} Greet the caller warmly without a name. {guard}",
+        )
+
+    name = caller.first_name or caller.display
+    standing = "a member" if caller.is_member else "a public player"
+    tail = ""
+    if upcoming:
+        word = "reservation" if upcoming == 1 else "reservations"
+        tail = f" They have {upcoming} upcoming {word}."
+    return IdentifyCallerResponse(
+        ok=True,
+        known=True,
+        greeting_name=name,
+        is_member=caller.is_member,
+        upcoming=upcoming,
+        message=(
+            f"This is {caller.display}, {standing}. Greet them by first name ({name}).{tail} {guard}"
+        ),
+    )
+
+
+# ===== 도구 8: 요금 확인 ===============================================
+
+@tools_router.post("/voice/tools/get-rates", response_model=RatesResponse)
+def get_rates(body: RatesRequest) -> RatesResponse:
+    """그 날짜에 **실제로 청구되는** 금액. 에이전트가 외운 숫자를 말하지 않게 한다.
+
+    숫자는 전부 `tee_sheet` 의 요금 함수에서 온다 — `slot_rate_for`(주말/평일과
+    `RATE_OVERRIDES`)와 `cart_fee_for`. 세율은 리테일의 `TAX_RATE` 한 벌을 쓴다.
+
+    **9홀 요금은 코드에 없다.** 데모 시나리오에는 오후·트와일라잇·가을 요금이
+    나오지만 요금표에는 평일/주말 두 가지뿐이다. 없는 요금을 여기서 지어내면
+    손님이 전화로 들은 금액과 프로 샵에서 내는 금액이 달라진다. 그래서 9홀은
+    금액을 말하지 않고 사람에게 넘긴다.
+    """
+    _touch_session(body.conversation_id)
+    iso_date = resolve_date(body.date)
+
+    if body.holes == 9:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Nine-hole pricing is not in our rate table, so do not quote a number. "
+                "Offer to transfer the caller to the pro shop."
+            ),
+        )
+
+    green = ts.slot_rate_for(iso_date)
+    cart = ts.cart_fee_for("Public", body.holes)
+    subtotal = round(green * body.players + cart * body.riders, 2)
+    tax = round(subtotal * TAX_RATE, 2)
+    total = round(subtotal + tax, 2)
+
+    players_word = "player" if body.players == 1 else "players"
+    cart_part = ""
+    if body.riders:
+        riders_word = "rider" if body.riders == 1 else "riders"
+        cart_part = f" plus ${cart:.2f} per {riders_word} for a cart,"
+    return RatesResponse(
+        ok=True,
+        date=iso_date,
+        spoken_date=spoken_date(iso_date),
+        players=body.players,
+        riders=body.riders,
+        green_fee_per_player=green,
+        cart_fee_per_rider=cart,
+        subtotal=subtotal,
+        tax=tax,
+        total=total,
+        message=(
+            f"On {spoken_date(iso_date)} it is ${green:.2f} per player for 18 holes "
+            f"before tax,{cart_part} so ${total:.2f} in total for {body.players} "
+            f"{players_word} with tax. Read the total, not the breakdown, unless they ask."
+        ),
+    )
+
+
+# ===== 도구 9: 예약 수정 ===============================================
+
+@tools_router.post("/voice/tools/modify-booking", response_model=ModifyResponse)
+def modify_booking(body: ModifyRequest) -> ModifyResponse:
+    """인원과 홀 수만 바꾼다. **시간은 바꾸지 않는다** — 취소하고 다시 잡는다.
+
+    시간 변경을 넣지 않는 이유: 옮길 자리를 잡는 동안 원래 자리를 들고 있어야 하고,
+    실패하면 어느 쪽도 잃지 않게 되돌려야 한다. 그 경로는 홀드와 똑같은 경합 문제를
+    다시 만든다. 취소 후 재예약은 이미 두 도구로 안전하게 된다.
+
+    취소와 **같은 문 세 개**를 지난다 — 이 통화의 조회로 확인된 예약인가, 성이
+    맞는가, 티오프까지 `CANCEL_CUTOFF_MINUTES` 이상 남았는가. 인원을 늘릴 때는
+    정원도 다시 센다 (`tee_time_players`). 늘린 뒤에 자리가 모자라면 그 티 타임이
+    초과 예약된다.
+    """
+    session = _touch_session(body.conversation_id)
+    if session is None or body.booking_id not in session.revealed:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Look the reservation up first with the caller's phone number and last name. "
+                "Only a reservation confirmed on this call can be changed."
+            ),
+        )
+
+    if body.party_size is None and body.holes is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Ask the caller what to change — the number of players, or nine versus eighteen holes.",
+        )
+
+    # 정원을 다시 세려면 그 날짜를 통째로 읽어야 하는데, 날짜는 예약을 봐야 안다.
+    found = [b for b in ts.read_bookings(Scope(ids={body.booking_id})) if b.id == body.booking_id]
+    if not found or found[0].source == ts.BookingSource.VOICE_HOLD:
+        raise HTTPException(status_code=404, detail="That reservation is not on the sheet.")
+    iso_date = found[0].date
+
+    wanted_last = body.last_name.strip().casefold()
+
+    with ts.bookings_tx(Scope(dates={iso_date}, ids={body.booking_id})) as bookings:
+        booking = next((b for b in bookings if b.id == body.booking_id), None)
+        if booking is None or booking.source == ts.BookingSource.VOICE_HOLD:
+            raise HTTPException(status_code=404, detail="That reservation is not on the sheet.")
+
+        if booking.status == ts.BookingStatus.CANCELLED:
+            raise HTTPException(
+                status_code=409,
+                detail="That reservation is already cancelled. Offer to book a new tee time.",
+            )
+
+        if not any(p.lastName.strip().casefold() == wanted_last for p in booking.players):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "That last name does not match the reservation. Do not change it. Offer to "
+                    "transfer the caller to the pro shop."
+                ),
+            )
+
+        at = slot_datetime(booking.date, booking.time)
+        if at is not None and (at - club_now()).total_seconds() / 60 < CANCEL_CUTOFF_MINUTES:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"That tee time is less than {CANCEL_CUTOFF_MINUTES // 60} hours away, so "
+                    "the pro shop has to change it. Transfer the caller."
+                ),
+            )
+
+        changes: list[str] = []
+
+        if body.party_size is not None and body.party_size != len(booking.players):
+            before = len(booking.players)
+            if body.party_size > before:
+                taken = ts.tee_time_players(
+                    bookings, booking.date, booking.time, exclude_id=booking.id
+                )
+                if taken + body.party_size > ts.PLAYERS_PER_TEE_TIME:
+                    free = max(ts.PLAYERS_PER_TEE_TIME - taken, 0)
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"That tee time only has room for {free}. Offer the caller a "
+                            "different time for the larger group."
+                        ),
+                    )
+                booking.players.extend(
+                    ts.Player(name="Guest", ratePlan="Public")
+                    for _ in range(body.party_size - before)
+                )
+            else:
+                # 뒤에서부터 줄인다. 첫 자리는 전화한 손님이라 남긴다.
+                booking.players = booking.players[: body.party_size]
+            changes.append(f"players {before} to {body.party_size}")
+
+        if body.holes is not None and body.holes != booking.holes:
+            changes.append(f"holes {booking.holes} to {body.holes}")
+            booking.holes = body.holes
+
+        if not changes:
+            summary = _summary(booking)
+            return ModifyResponse(
+                ok=True,
+                booking=summary,
+                message="Nothing changed — the reservation already matches what the caller asked for.",
+            )
+
+        note = "Phone assistant changed " + " and ".join(changes) + "."
+        ts._audit(booking, note)
+        summary = _summary(booking)
+
+    players_word = "player" if summary.party_size == 1 else "players"
+    return ModifyResponse(
+        ok=True,
+        booking=summary,
+        message=(
+            f"Updated: {summary.spoken_date} at {summary.time}, {summary.party_size} "
+            f"{players_word}, {summary.holes} holes. Read that back to the caller."
+        ),
+    )
+
+
+# ===== 도구 10: 안내 문자 =============================================
+
+def _info_sms_body(topic: str) -> str:
+    """고정 문구. 에이전트가 쓴 문장을 그대로 보내지 않는다."""
+    if topic == "directions":
+        maps = "https://maps.google.com/?q=" + quote_plus(f"{CLUB_NAME} {CLUB_ADDRESS}")
+        return f"{CLUB_NAME}: {CLUB_ADDRESS}. Map: {maps}"
+    return f"{CLUB_NAME}: book a tee time at {SITE_URL}/book/tee-time"
+
+
+@tools_router.post("/voice/tools/send-info-sms", response_model=InfoSmsResponse)
+def send_info_sms(body: InfoSmsRequest, background: BackgroundTasks) -> InfoSmsResponse:
+    """정해진 안내 문자를 **전화를 건 그 번호로만** 보낸다.
+
+    받는 번호를 손님 말에서 받지 않고 발신번호(`system__caller_id`)에서만 가져온다.
+    말한 번호로 보낼 수 있게 두면 에이전트를 설득해 아무 번호로나 문자를 보내게 만들 수
+    있다 — 이 도구가 문자 폭탄 장치가 된다.
+
+    문구도 고정 템플릿뿐이다. 에이전트가 쓴 문장을 그대로 실어 보내면, 지어낸 영업시간이
+    손님 손에 **글자로** 남는다. 말은 지나가지만 문자는 남는다.
+
+    한 통화당 `MAX_INFO_SMS_PER_CALL` 건까지만 보낸다.
+    """
+    session = _touch_session(body.conversation_id)
+
+    if not normalize_phone(body.caller_number):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "There is no caller number on this call, so there is nowhere to text. "
+                "Read the information out loud instead."
+            ),
+        )
+
+    if session is not None:
+        if session.info_sms >= MAX_INFO_SMS_PER_CALL:
+            raise HTTPException(
+                status_code=429,
+                detail="You have already texted this caller. Read it out loud instead.",
+            )
+        session.info_sms += 1
+
+    # 응답이 나간 뒤에 보낸다 — Twilio 가 느려도 에이전트가 기다리지 않게.
+    background.add_task(
+        send_sms,
+        body.caller_number,
+        _info_sms_body(body.topic),
+        template=f"info_{body.topic}",
+    )
+
+    what = "our address and a map link" if body.topic == "directions" else "a booking link"
+    return InfoSmsResponse(
+        ok=True,
+        sent=True,
+        topic=body.topic,
+        message=f"Texted {what} to the number they are calling from. Tell them it is on its way.",
+    )
+
+
+# ===== 도구 11: 분실물 접수 ============================================
+
+def _resolve_past_date(value: str) -> str | None:
+    """지나간 날짜. 모르겠으면 **추측하지 않고** None 을 돌려준다.
+
+    `resolve_date` 와 달리 거절하지 않는다 — 날짜를 몰라도 분실물 접수는 받아야
+    한다. 날짜 칸이 비는 것이 틀린 날짜가 적히는 것보다 낫다.
+    """
+    text = (value or "").strip().lower()
+    if not text:
+        return None
+    if text in ("today", "tonight"):
+        return today_iso()
+    if text == "yesterday":
+        return (club_now().date() - timedelta(days=1)).isoformat()
+    if ts.ISO_DATE_RE.match(text):
+        try:
+            date_cls.fromisoformat(text)
+        except ValueError:
+            return None
+        return text
+    return None
+
+
+@tools_router.post("/voice/tools/report-lost-item", response_model=LostItemResponse)
+def report_lost_item(body: LostItemRequest) -> LostItemResponse:
+    """분실물을 접수하고 티켓 번호를 돌려준다.
+
+    에이전트는 **접수만** 한다. "찾았습니다" 나 "있을 거예요" 를 말하면 안 된다 —
+    물건을 실제로 본 사람은 직원이고, 전화로 희망을 주면 헛걸음을 만든다.
+
+    연락처는 손님이 말한 번호가 아니라 발신번호를 쓴다. 찾았을 때 문자를 보낼
+    곳이고, 말한 번호를 받으면 아무 번호나 명단에 들어갈 수 있다.
+    """
+    _touch_session(body.conversation_id)
+
+    try:
+        row = lost_items.report(
+            item=body.item,
+            description=body.description,
+            lost_on=_resolve_past_date(body.lost_on),
+            where_lost=body.where_lost,
+            caller_phone=body.caller_number.strip(),
+            caller_name=f"{body.first_name} {body.last_name}".strip(),
+        )
+    except supabase_rest.SupabaseUnavailable:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "The lost and found list is not reachable, so do not promise anything. "
+                "Take the caller's details by transferring them to the pro shop."
+            ),
+        ) from None
+
+    ticket = str(row.get("ticket") or "")
+    return LostItemResponse(
+        ok=True,
+        ticket=ticket,
+        message=(
+            f"Logged. Read the reference back one character at a time: {ticket}. Tell them staff "
+            "will text if they find it. Never say it has been found — you do not know that."
+        ),
+    )
+
+
+# ===== 도구 12: 대기자 등록 + 취소 시 자동 알림 ==========================
+
+@tools_router.post("/voice/tools/join-waitlist", response_model=WaitlistResponse)
+def join_waitlist(body: WaitlistRequest) -> WaitlistResponse:
+    """그날이 다 찼을 때 대기자로 올린다. 자리가 비면 문자가 간다.
+
+    손님이 **먼저 요청했을 때만** 부른다 — 번호를 보관하고 문자를 보내는 일이라,
+    묻지 않고 넣으면 동의 없이 연락처를 쌓는 것이 된다. DB 의 `consented_at` 이
+    그 시각을 남긴다.
+    """
+    _touch_session(body.conversation_id)
+    iso_date = resolve_date(body.date)
+    require_bookable_date(iso_date)
+
+    # 시간대는 `9:00 AM` 꼴만 받는다. "9am" 을 그대로 저장하면 `label_to_minutes` 가
+    # None 을 돌려주고, 자리가 났을 때 그 조건이 **조용히 무시된다** — 오후만 원한다고
+    # 말한 손님이 새벽 티타임 문자를 받는다.
+    for label, field in ((body.earliest, "earliest"), (body.latest, "latest")):
+        text = label.strip()
+        if text and not ts.SLOT_TIME_RE.match(text):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Send the {field} time like '9:00 AM' (hour, colon, minutes, AM or PM).",
+            )
+
+    phone = body.caller_number.strip()
+    if not normalize_phone(phone):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "There is no caller number on this call, so we could not text them if a spot "
+                "opened. Offer to transfer the caller to the pro shop instead."
+            ),
+        )
+
+    try:
+        if tee_waitlist.already_waiting(iso_date, phone):
+            return WaitlistResponse(
+                ok=True,
+                joined=False,
+                date=iso_date,
+                spoken_date=spoken_date(iso_date),
+                message=(
+                    f"They are already on the list for {spoken_date(iso_date)}. Tell them that, "
+                    "and that we will text the moment something opens."
+                ),
+            )
+        tee_waitlist.join(
+            date=iso_date,
+            party_size=body.party_size,
+            last_name=body.last_name,
+            first_name=body.first_name,
+            phone=phone,
+            earliest=body.earliest,
+            latest=body.latest,
+            holes=body.holes,
+        )
+    except supabase_rest.SupabaseUnavailable:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "The waitlist is not reachable right now. Do not promise a callback — offer to "
+                "transfer the caller to the pro shop."
+            ),
+        ) from None
+
+    return WaitlistResponse(
+        ok=True,
+        joined=True,
+        date=iso_date,
+        spoken_date=spoken_date(iso_date),
+        message=(
+            f"On the list for {spoken_date(iso_date)}, {body.party_size} players. Tell them we "
+            "will text if a spot opens, and that whoever answers first gets it."
+        ),
+    )
+
+
+def _window_allows(entry: dict[str, Any], minutes: int | None) -> bool:
+    """대기자가 적어 둔 시간대 안에 드는가. 시간대를 안 적었으면 아무 때나 괜찮다.
+
+    라벨 비교는 분으로 바꿔서 한다 — 문자열로 비교하면 "10:00 AM" 이 "9:00 AM" 보다
+    작게 나온다.
+    """
+    if minutes is None:
+        return True
+    lo = ts.label_to_minutes(entry.get("earliest") or "")
+    hi = ts.label_to_minutes(entry.get("latest") or "")
+    if lo is not None and minutes < lo:
+        return False
+    if hi is not None and minutes > hi:
+        return False
+    return True
+
+
+async def _offer_slot_to_waitlist(iso_date: str, time_label: str, seats: int) -> None:
+    """취소로 자리가 비면 그날 먼저 기다린 사람에게 문자.
+
+    **자리를 잡아 주지 않는다.** 미리 잠가 두면 답이 없을 때 그 자리가 죽은 채로
+    남는다. 먼저 답한 사람이 가져가는 방식이라고 문자에 적는다.
+
+    대기자 명단이 꺼져 있거나 느려도 취소는 이미 끝났다 — 여기서 나는 오류는
+    통화에 영향을 주지 않아야 하므로 전부 조용히 삼킨다.
+    """
+    try:
+        entries = await asyncio.to_thread(tee_waitlist.waiting_entries, iso_date, seats)
+    except supabase_rest.SupabaseUnavailable:
+        return
+
+    # 원하는 시간대가 맞는 **첫 사람**을 찾는다. 맨 앞 한 명만 보고 포기하면, 오후만
+    # 원하는 사람이 명단 앞에 있을 때 아침에 난 자리로는 아무도 연락을 못 받는다.
+    minutes = ts.label_to_minutes(time_label)
+    entry = next((e for e in entries if _window_allows(e, minutes)), None)
+    if entry is None:
+        return
+
+    try:
+        await asyncio.to_thread(tee_waitlist.mark_offered, entry["id"], time_label)
+    except supabase_rest.SupabaseUnavailable:
+        return
+
+    await send_sms(
+        entry["phone"],
+        (
+            f"{CLUB_NAME}: a {time_label} tee time just opened on {spoken_date(iso_date)} for up "
+            f"to {seats}. Book at {SITE_URL}/book/tee-time or call us — first to answer gets it."
+        ),
+        template="waitlist_offer",
+    )
+
+
 router.include_router(tools_router)
 
 
@@ -942,6 +1621,14 @@ def _verify_webhook(raw: bytes, signature_header: str | None) -> None:
     """
     secret = os.getenv("ELEVENLABS_WEBHOOK_SECRET", "").strip()
     if not secret:
+        # 공개 배포에서는 시크릿이 없으면 **닫는다**. 로컬에서는 예전처럼 통과시킨다.
+        #
+        # 터널을 쓰던 동안에는 `voice_tunnel_proxy.py` 가 이 경로를 아예 안 열어서
+        # 막혀 있었다. Fly 에는 그 프록시가 없으므로 여기서 막아야 한다. 검증 없이
+        # 열어 두면 통화의 conversation_id 를 아는 사람이 남의 예약 감사 로그에
+        # 가짜 메모를 붙일 수 있다 (예약을 만들거나 지우지는 못한다).
+        if os.getenv("PUBLIC_SURFACE", "all").strip().lower() == "voice":
+            raise HTTPException(status_code=404, detail="Not Found")
         return
     if not signature_header:
         raise HTTPException(status_code=401, detail="Missing webhook signature")
