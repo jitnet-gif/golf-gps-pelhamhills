@@ -11,7 +11,7 @@ import Link from "next/link";
 import SiteFooter from "@/components/site/SiteFooter";
 import SiteHeader from "@/components/site/SiteHeader";
 import { clubHours } from "@/components/site/clubHours";
-import { BOOK_INDOOR, BOOK_TEE_TIME, CLUB } from "@/lib/nav";
+import { BOOK_INDOOR, BOOK_TEE_TIME, CLUB, SITE_MEMBERSHIPS } from "@/lib/nav";
 
 /**
  * 앵커 섹션이 sticky 헤더에 가리지 않게 하는 여백. 헤더 높이(`SiteHeader` 의
@@ -37,11 +37,7 @@ const highlights = [
 
 const quickLinks = [
   { label: "Book a Tee-Time", href: BOOK_TEE_TIME, external: false },
-  {
-    label: "View Memberships",
-    href: "https://www.pelhamhills.com/membership/2026-memberships/",
-    external: true,
-  },
+  { label: "View Memberships", href: SITE_MEMBERSHIPS, external: false },
   { label: "Reserve Indoor Golf", href: BOOK_INDOOR, external: false },
   { label: "Contact the Club", href: "/#visit", external: false },
 ];

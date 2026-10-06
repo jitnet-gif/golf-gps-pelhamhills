@@ -17,9 +17,6 @@ import Link from "next/link";
 import { clubHours } from "@/components/site/clubHours";
 import { ADMIN_HOME, BOOK_HOME, CLUB, bookNav, siteNav } from "@/lib/nav";
 
-/** 회원권 안내는 아직 기존 pelhamhills.com 에만 있다. 외부로 나가는 유일한 링크. */
-const MEMBERSHIPS_URL = "https://www.pelhamhills.com/membership/2026-memberships/";
-
 export default function SiteFooter() {
   return (
     <footer className="border-t border-[#3a5a3f] bg-[#182118] text-[#dfe6dd]">
@@ -50,9 +47,6 @@ export default function SiteFooter() {
               {item.label}
             </FooterLink>
           ))}
-          <FooterLink external href={MEMBERSHIPS_URL}>
-            Memberships
-          </FooterLink>
         </FooterColumn>
 
         <FooterColumn title="Book">

@@ -37,8 +37,12 @@ export type NavItem = {
 
 export const SITE_HOME = "/";
 
+/** 회원권 요금은 홈 섹션 하나로는 길어서 따로 한 장이다. */
+export const SITE_MEMBERSHIPS = "/memberships";
+
 export const siteNav: NavItem[] = [
   { label: "Golf", href: "/#golf", glyph: "⛳" },
+  { label: "Memberships", href: SITE_MEMBERSHIPS, glyph: "★" },
   { label: "Pub", href: "/#pub", glyph: "🍽" },
   { label: "Indoor", href: "/#indoor", glyph: "🏌" },
   { label: "Visit", href: "/#visit", glyph: "📍" },
