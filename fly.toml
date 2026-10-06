@@ -9,13 +9,34 @@
 # 티 타임을 동시에 팔 수 있다. 상점(retail)과 시뮬레이터는 아직 볼륨의 JSON 파일이라
 # 머신마다 다른 데이터를 보게 된다. `fly scale count 1` 을 유지할 것.
 
-app = "pelhamhills-api"
+# 2026-10-06: `pelhamhills-api` 에서 이름이 바뀌었다. 옛 앱은 `personal` 조직에 있고
+# 그 조직의 체험판이 끝나 **앱을 꺼내지도 못한다** (`apps move` 가 "failed fetching app:
+# trial has ended" 로 거부된다). 결제가 살아 있는 `smeag-kenneth-smeag-kenneth` 조직에
+# 새로 만들었다. Fly 앱 이름은 전역 고유라 같은 이름을 다시 쓸 수 없다.
+#
+# 옛 볼륨에 든 retail.json / simulator.json 은 버렸다. 그 데이터는 이미 Supabase 에
+# 있고(프론트엔드가 `pelham_retail_*`·`pelham_sim_*` 를 직접 읽고 쓴다), 볼륨 쪽 파일은
+# 아무도 읽지 않는 낡은 사본이었다.
+app = "pelham-hills-api"
 primary_region = "yyz"   # 토론토. 클럽과 손님이 온타리오에 있다.
 
 [build]
   dockerfile = "backend/Dockerfile"
 
 [env]
+  # 음성 에이전트와 Twilio 웹훅만 공개한다. 티 시트·리테일·시뮬레이터 라우터에는
+  # 인증이 없어서 공개하면 실제 고객 이름·전화번호가 주소만 알면 읽힌다.
+  # 그 화면들은 2026-09 에 Supabase 로 옮겨가서(0004) 이 서버가 필요 없다.
+  # 자세한 이유는 `backend/main.py` 의 "공개 표면" 주석.
+  PUBLIC_SURFACE = "voice"
+
+  # Twilio 가 전달 상태를 돌려줄 주소(`StatusCallback`)를 이 값으로 만든다
+  # (`backend/services/twilio_sms.py`). 비어 있으면 기본값인 localhost 가 들어가고,
+  # Twilio 는 그 요청을 **거부한다** — 2026-10-05 의 테스트 문자 43건이 전부
+  # error 21609(잘못된 StatusCallback)로 실패한 원인이 이것이다. 즉 이 값이 없으면
+  # 확인 문자·취소 문자·리마인더가 **하나도 나가지 않는다.**
+  PUBLIC_API_BASE_URL = "https://pelham-hills-api.fly.dev/api/v1"
+
   # 티 시트 저장소. URL 과 service_role 키는 여기 말고 `fly secrets` 에 있다
   # (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY). json 으로 되돌리면 볼륨의
   # /data/tee_sheet.json 을 다시 읽는다 — 전환 뒤의 예약은 거기 없다.

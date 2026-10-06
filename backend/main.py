@@ -40,16 +40,42 @@ def include_route_module(module_name: str, prefix: str, tags: list[str]) -> None
         logger.error("라우터 등록 실패: %s (%s)", module_name, exc)
 
 
-# 라우터 연결
-include_route_module("backend.api.routes.tee_sheet", f"{settings.API_V1_STR}", ["Tee Sheet"])
-include_route_module("backend.api.routes.chat", f"{settings.API_V1_STR}/chat", ["Chat"])
-include_route_module("backend.api.routes.agents", f"{settings.API_V1_STR}/agents", ["Agents"])
-include_route_module("backend.api.routes.onboarding", f"{settings.API_V1_STR}/onboarding", ["Onboarding"])
-include_route_module("backend.api.routes.simulator", f"{settings.API_V1_STR}", ["Simulator"])
-include_route_module("backend.api.routes.retail", f"{settings.API_V1_STR}", ["Retail"])
+# ===== 공개 표면 =======================================================
+#
+# `PUBLIC_SURFACE=voice` 면 **음성 에이전트와 Twilio 웹훅만** 연다. 공개 배포가
+# 이 값을 쓴다 (`fly.toml`).
+#
+# 왜: `/tee-sheet/*` 에는 인증이 없다. 관리자 화면이 브라우저에서 직접 부르던
+# 구조였기 때문인데, 2026-09 에 그 화면들이 전부 Supabase 로 옮겨갔다
+# (`supabase/migrations/0004_staff_tee_sheet.sql` — 직원 함수 11개, 함수마다 직원
+# 확인). 지금 `frontend/lib/teeSheet/api.ts` 는 FastAPI 를 **한 번도** 부르지 않고
+# 전부 RPC 로 간다. 그래서 공개 서버가 이 경로를 열어 둘 이유가 더는 없고, 열어 두면
+# 실제 고객 이름과 전화번호가 주소만 알면 읽힌다.
+#
+# 이식되지 않은 것이 음성 에이전트다. 그것이 이 서버가 공개로 떠 있어야 하는
+# 유일한 이유이므로, 공개 표면도 거기까지만 둔다.
+#
+# 로컬 개발은 기본값(`all`)이라 예전처럼 전부 뜬다.
+PUBLIC_SURFACE = os.getenv("PUBLIC_SURFACE", "all").strip().lower()
+VOICE_ONLY = PUBLIC_SURFACE == "voice"
+
+# 공개 배포에서도 여는 것: 에이전트 도구와 Twilio 가 직접 부르는 경로.
 include_route_module("backend.api.routes.voice", f"{settings.API_V1_STR}", ["Voice Booking"])
 include_route_module("backend.api.routes.sms", f"{settings.API_V1_STR}", ["SMS (Twilio)"])
-include_route_module("backend.api.routes.simulator_admin", f"{settings.API_V1_STR}", ["Simulator Admin"])
+
+if VOICE_ONLY:
+    logger.warning(
+        "PUBLIC_SURFACE=voice — 음성/SMS 만 연다. 티 시트·리테일·시뮬레이터 라우터는 "
+        "등록하지 않는다 (인증이 없어 공개하면 고객 개인정보가 노출된다)."
+    )
+else:
+    include_route_module("backend.api.routes.tee_sheet", f"{settings.API_V1_STR}", ["Tee Sheet"])
+    include_route_module("backend.api.routes.chat", f"{settings.API_V1_STR}/chat", ["Chat"])
+    include_route_module("backend.api.routes.agents", f"{settings.API_V1_STR}/agents", ["Agents"])
+    include_route_module("backend.api.routes.onboarding", f"{settings.API_V1_STR}/onboarding", ["Onboarding"])
+    include_route_module("backend.api.routes.simulator", f"{settings.API_V1_STR}", ["Simulator"])
+    include_route_module("backend.api.routes.retail", f"{settings.API_V1_STR}", ["Retail"])
+    include_route_module("backend.api.routes.simulator_admin", f"{settings.API_V1_STR}", ["Simulator Admin"])
 
 
 async def _reminder_loop() -> None:

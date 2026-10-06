@@ -44,7 +44,7 @@ type FormState = {
 
 const storageKey = "pelham-hills-tee-sniper-slots";
 // 알림 수신처는 운영 번호로 고정한다. 화면에는 노출하지 않지만, 생성하는 모든 요청에 저장된다.
-const FIXED_NOTIFICATION_TARGET = "+19057356768";
+const FIXED_NOTIFICATION_TARGET = "+12498050556";
 const ONTARIO_TIME_ZONE = "America/Toronto";
 const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -105,7 +105,7 @@ const demoSlots: WantedSlot[] = [
     end_time: "09:30",
     num_slots: 4,
     partners: ["Member guest"],
-    notify: "+19057356768",
+    notify: "+12498050556",
     status: "pending",
     attempts: [
       {

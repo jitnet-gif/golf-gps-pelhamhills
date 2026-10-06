@@ -141,6 +141,23 @@ def sync(dry_run: bool) -> int:
 
     current = voice_agent.agent_id()
     if current:
+        # 이 스크립트는 에이전트 설정을 **통째로** 밀어 넣는다. 대시보드에서 손으로
+        # 만든 에이전트에 돌리면 프롬프트·첫 인사·목소리가 날아간다. 실제로
+        # PELHAMHILLS PROSHOP 은 프롬프트 8천 자에 지식베이스 문서 두 개를 갖고 있다.
+        # 지식베이스는 이 저장소가 만들 수 없는 것이므로, 그게 붙어 있으면 손으로
+        # 만든 에이전트라고 보고 멈춘다.
+        live = voice_agent.get_agent(current)
+        kb = (
+            live.get("conversation_config", {})
+            .get("agent", {}).get("prompt", {}).get("knowledge_base") or []
+        )
+        if kb:
+            raise SystemExit(
+                f"{current} ({live.get('name')}) 에는 지식베이스가 붙어 있다: "
+                f"{[d.get('name') for d in kb]}\n"
+                "이 스크립트는 설정을 통째로 덮어쓰므로 프롬프트와 목소리가 사라진다.\n"
+                "도구만 붙이려면: python scripts/attach_voice_tools.py --apply"
+            )
         voice_agent.update_agent(current, config)
         print(f"\n✅ 에이전트 갱신됨: {current}")
     else:

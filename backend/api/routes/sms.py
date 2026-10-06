@@ -21,7 +21,9 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qsl
 from xml.sax.saxutils import escape
 
-from fastapi import APIRouter, HTTPException, Request, Response
+import os
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from backend.api.routes import tee_sheet as ts
 from backend.api.routes import voice
@@ -157,7 +159,19 @@ async def status(request: Request) -> Response:
     return Response(status_code=204)
 
 
-@router.get("/sms/messages")
+def hide_on_public_surface() -> None:
+    """공개 배포(`PUBLIC_SURFACE=voice`)에서는 이 경로를 없는 것처럼 둔다.
+
+    이 목록에는 손님 전화번호와 문자 본문이 그대로 들어 있는데 인증이 없다.
+    Twilio 가 부르는 것은 `/sms/inbound` 와 `/sms/status` 둘뿐이고, 기록 조회는
+    어드민 화면(Calls & SMS) 용이다. 403 이 아니라 404 를 주는 이유는, 403 이면
+    "거기 뭔가 있다" 는 사실을 알려 주기 때문이다.
+    """
+    if os.getenv("PUBLIC_SURFACE", "all").strip().lower() == "voice":
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
+@router.get("/sms/messages", dependencies=[Depends(hide_on_public_surface)])
 def list_messages(booking_ref: str | None = None, limit: int = 100) -> list[dict]:
     rows = [m for m in sms_messages if not booking_ref or m.booking_ref == booking_ref]
     return [

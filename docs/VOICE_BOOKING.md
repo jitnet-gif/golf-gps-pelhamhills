@@ -16,18 +16,28 @@
 
 | 파일 | 역할 |
 |---|---|
-| `backend/api/routes/voice.py` | 도구 6개 + 웹 세션 발급 + post-call 웹훅 |
+| `backend/api/routes/voice.py` | 도구 12개 + 웹 세션 발급 + post-call 웹훅 |
+| `backend/services/customer_lookup.py` | 발신번호 → 고객 (인사용. 인증 아님) |
+| `backend/services/lost_items.py` | 분실물 접수대장 (`pelham_lost_items`) |
+| `backend/services/tee_waitlist.py` | 대기자 명단 (`pelham_tee_waitlist`) |
+| `backend/services/supabase_rest.py` | 보조 표들이 쓰는 얇은 PostgREST 계층 |
+| `scripts/voice_tunnel_proxy.py` | 도구 경로만 공개하는 프록시 |
+| `scripts/check_voice_tools.py` | 구현·에이전트·프록시 세 곳 일치 검사 |
 | `backend/services/voice_agent.py` | ElevenLabs HTTP 클라이언트 |
 | `backend/api/routes/tee_sheet.py` | 홀드 개념(`BookingSource`, `holdExpiresAt`)이 사는 곳 |
 | `ops/elevenlabs/agent.json` | 에이전트 프롬프트와 도구 스키마의 **원본** |
 | `scripts/elevenlabs_sync_agent.py` | 위 JSON 을 계정에 밀어 넣는다 |
 | `frontend/components/booking/VoiceBooking.tsx` | 웹 위젯 |
 | `frontend/lib/voice/session.ts` | signed URL 을 백엔드에서 받아온다 |
-| `backend/tests/test_voice_booking.py` | 29개 테스트 |
+| `backend/tests/test_voice_booking.py` | 58개 테스트 |
+| `supabase/migrations/0013_lost_items.sql` | 분실물 표 — **아직 실행 안 됨** |
+| `supabase/migrations/0014_tee_waitlist.sql` | 대기자 표 — **아직 실행 안 됨** |
 | `backend/services/twilio_sms.py` | 문자 발송, E.164 정규화, Twilio 서명 검증 |
 | `backend/api/routes/sms.py` | 손님 답장(C 취소, STOP), 전달 상태, 리마인더 |
 
-## 도구 여섯 개
+## 도구 열두 개
+
+예약 (원래 여섯):
 
 | 도구 | 하는 일 |
 |---|---|
@@ -36,7 +46,41 @@
 | `release_hold` | 손님이 마음을 바꾸면 즉시 반납 |
 | `confirm_booking` | 홀드 → 실제 예약 |
 | `lookup_booking` | 전화번호 **+** 성으로 조회 |
-| `cancel_booking` | 취소 (`status=cancelled`, 삭제 아님) |
+| `cancel_booking` | 취소 (`status=cancelled`, 삭제 아님). `preview=true` 면 가능 여부만 본다 |
+
+그 밖 (2026-10-05 추가):
+
+| 도구 | 하는 일 | 주의 |
+|---|---|---|
+| `identify_caller` | 발신번호로 이름을 찾아 **인사에만** 쓴다 | 권한을 주지 않는다 — 아래 참고 |
+| `get_rates` | 그 날짜에 실제로 청구되는 금액 | 9홀 요금은 요금표에 없어 거절한다 |
+| `modify_booking` | 인원·홀 수 변경 | 시간 변경은 없다 (취소 후 재예약) |
+| `send_info_sms` | 주소·지도 또는 예약 링크 문자 | 발신번호로만, 고정 문구만 |
+| `report_lost_item` | 분실물 접수, 티켓 번호 발급 | "찾았다" 는 절대 말하지 않는다 |
+| `join_waitlist` | 대기자 등록 (손님이 요청했을 때만) | 자리를 잠그지 않는다 |
+
+취소가 성공하면 그 자리를 그날 대기자 중 먼저 기다린 사람에게 문자로 알린다
+(`_offer_slot_to_waitlist`). 자리를 잡아 주지는 않는다 — 먼저 답한 사람이 가져간다.
+미리 잠가 두면 답이 없을 때 그 자리가 죽은 채로 남는다.
+
+### `identify_caller` 가 권한을 주지 않는 이유
+
+발신번호는 위조할 수 있다. 번호를 안다고 예약을 보여 주거나 취소하게 두면, 번호를
+흉내 낸 사람이 남의 라운드를 지울 수 있다. 그래서 이 도구는 `_Session.revealed` 를
+건드리지 않고, 다가오는 예약도 **건수만** 돌려준다. 조회·수정·취소는 여전히
+`lookup_booking`(번호 **+** 성)을 거쳐야 한다.
+
+한 번호에 고객이 둘 이상이면 이름을 부르지 않는다 — 소스에 부부가 유선 하나를 같이
+쓰는 행이 여럿 있다.
+
+### 에이전트가 말하면 안 되는 것
+
+영업시간, 스낵바 메뉴, 주차, 분실물 보관 규정, 9홀 요금, 취소 수수료. 시연
+시뮬레이터에는 나오지만 **클럽이 확인해 준 값이 아니다**. 확인 전까지 프롬프트는
+이것들을 모른다고 말하고 사람에게 넘기도록 돼 있다.
+
+취소 규정도 아직 하나로 정해지지 않았다 — 음성은 `CANCEL_CUTOFF_MINUTES`(2시간)를
+쓰고, 0012 의 온라인 취소는 24시간이다. 둘 중 하나로 정해야 한다.
 
 ## 왜 홀드가 필요한가
 
@@ -102,13 +146,55 @@ override=True)` 로 `.env` 를 읽으므로 **`.env` 가 항상 이긴다.** 값
 ## 세우는 순서
 
 1. **권한이 켜진 키**를 `.env` 에 넣는다.
-2. 공개 주소를 만든다. 로컬이면 터널을 띄운다:
+2. 공개 주소를 만든다. ElevenLabs 서버는 localhost 에 닿지 못한다 — 이 값이
+   localhost 면 도구 호출이 전부 실패한다 (스크립트가 경고한다).
+
+   **백엔드를 터널에 직접 걸지 말 것.** `TEE_SHEET_BACKEND=supabase` 라서
+   `/api/v1/tee-sheet/*` 는 실제 고객의 예약과 연락처를 돌려주는데 그쪽에는 인증이
+   없다. 터널 주소가 임의의 긴 문자열이라는 건 보호가 아니다. 그래서 도구 경로만
+   통과시키는 프록시를 앞에 둔다:
+
    ```
-   ngrok http 8000
-   # PUBLIC_API_BASE_URL=https://<주소>.ngrok-free.app/api/v1
+   python scripts/voice_tunnel_proxy.py                  # 8099 -> 8000, 허용 목록만
+   cloudflared tunnel --url http://localhost:8099        # 공개 HTTPS 주소를 받는다
+   # PUBLIC_API_BASE_URL=https://<주소>.trycloudflare.com/api/v1
    ```
-   ElevenLabs 서버는 localhost 에 닿지 못한다. 이 값이 localhost 면 도구 호출이
-   전부 실패한다 (스크립트가 경고한다).
+
+   **2026-10-06부터는 터널이 필요 없다.** 백엔드가 Fly 에 상시 떠 있다:
+
+   ```
+   https://pelham-hills-api.fly.dev/api/v1     ← PUBLIC_API_BASE_URL
+   ```
+
+   앱: `pelham-hills-api` (조직 `smeag-kenneth-smeag-kenneth`). 옛 `pelhamhills-api` 는
+   `personal` 조직에 있고 그 조직의 체험판이 끝나 **앱을 꺼내지도 못한다** —
+   `apps move` 가 "failed fetching app: trial has ended" 로 거부된다. 그래서 결제가
+   살아 있는 조직에 새 이름으로 만들었다. 배포는 `python scripts/fly_up.py --apply`.
+
+   **공개 표면은 음성과 Twilio 웹훅까지다.** `fly.toml` 의 `PUBLIC_SURFACE=voice` 가
+   티 시트·리테일·시뮬레이터 라우터와 `/sms/messages` 를 아예 등록하지 않는다. 전부
+   인증이 없어서 공개하면 고객 이름·전화번호가 주소만 알면 읽히는데, 그 화면들은
+   2026-09 에 Supabase 로 옮겨가서(0004) 이 서버가 필요 없다. 확인:
+   `/api/v1/tee-sheet/bookings` 와 `/api/v1/sms/messages` 가 **404** 여야 한다.
+
+   Fly 가 없을 때의 임시방편(개발·장애 시)은 터널이다. 백엔드·프록시·터널을 띄우고
+   `.env` 와 ElevenLabs 도구 주소까지 한꺼번에 맞춰 준다:
+
+   ```
+   python scripts/voice_up.py
+   ```
+
+   터널 주소는 띄울 때마다 바뀐다. 주소가 바뀌면 등록된 도구 12개가 죽은 주소를
+   가리키므로, **터널을 띄우는 일과 도구 주소를 갱신하는 일은 항상 같이** 해야 한다.
+   손으로 하면 언젠가 한쪽을 빠뜨리고, 그때는 손님이 전화한 뒤에야 알게 된다.
+
+   프록시는 도구 경로와 post-call 웹훅만 넘기고 나머지는 404 를 돌려준다
+   (`/voice/session` 도 막는다 — 브라우저 위젯용이고 호출마다 대화 크레딧을 태운다).
+   확인: 공개 주소로 `/api/v1/tee-sheet/bookings` 를 불러 404 가 나와야 한다.
+
+   `trycloudflare.com` 주소는 터널을 다시 띄울 때마다 바뀐다. 바뀌면 `.env` 의
+   `PUBLIC_API_BASE_URL` 을 고치고 동기화 스크립트를 다시 돌려야 에이전트가 새
+   주소를 부른다.
 3. 에이전트를 만든다:
    ```
    python scripts/elevenlabs_sync_agent.py --dry-run   # 페이로드 확인
@@ -124,11 +210,44 @@ override=True)` 로 `.env` 를 읽으므로 **`.env` 가 항상 이긴다.** 값
    ```
    번호 자체는 **Twilio 에서 사서 ElevenLabs 대시보드에 등록**해야 한다. 이
    저장소 밖의 계정 작업이라 스크립트가 대신할 수 없다.
+
+   번호는 이미 있다 — `+1 249-805-0556` (Twilio 계정 active/Full, `.env` 의
+   `TWILIO_PHONE_NUMBER`). **되돌릴 지점을 먼저 적어 둔다**: 이 번호의 현재
+   `voice_url` 은 TwiML Bin `EH0c606645a2f5502adf82864c62bdb086` 다. ElevenLabs 에
+   연결하면 이 값이 덮어써지므로, 지금 이 번호로 들어오는 전화가 있다면 무엇을
+   하고 있는지 확인한 뒤에 넘길 것. 되돌리려면 Twilio 콘솔에서 `voice_url` 을 위
+   핸들러로 되돌린다. 걸려 오는 전화(인바운드)에는 Twilio 의 geo permissions
+   가 상관없다 — 그 설정은 **나가는 전화**에만 걸린다.
 6. post-call 웹훅을 `{PUBLIC_API_BASE_URL}/voice/post-call` 로 등록하고, 발급된
    시크릿을 `ELEVENLABS_WEBHOOK_SECRET` 에 넣는다.
 
-프롬프트나 도구를 고칠 때는 `ops/elevenlabs/agent.json` 을 고치고 스크립트를 다시
-돌린다. 대시보드에서 직접 고치면 다음 동기화에 덮어써진다.
+   **시크릿을 먼저 넣고 프록시를 다시 띄울 것.** `_verify_webhook` 은 이 시크릿이
+   비면 서명 검증을 건너뛴다. 그래서 프록시는 시크릿이 있을 때만 이 경로를 공개한다
+   (없으면 404). 순서를 바꾸면 "등록은 했는데 404" 가 되고, 억지로 열면 통화의
+   conversation_id 를 아는 사람이 남의 예약 감사 로그에 가짜 메모를 붙일 수 있다.
+
+## ⚠️ 지금 쓰는 에이전트는 손으로 만든 것이다
+
+계정의 `PELHAMHILLS PROSHOP` (`agent_6601m3hn7evjegn8v3mz8jhvw9rk`) 은 대시보드에서
+만들어졌다 — 프롬프트 8천 자, 지식베이스 문서 두 개, 지정한 목소리. 이 저장소가
+만든 것은 **도구 12개뿐**이다.
+
+그래서 **`elevenlabs_sync_agent.py` 를 이 에이전트에 돌리지 말 것.** 그 스크립트는
+`agent.json` 의 설정을 통째로 밀어 넣어 프롬프트와 목소리를 지운다. 지식베이스가
+붙어 있으면 멈추도록 막아 뒀지만, 애초에 쓰는 스크립트가 다르다:
+
+```
+python scripts/attach_voice_tools.py --dry-run
+python scripts/attach_voice_tools.py --apply
+```
+
+이쪽은 도구를 이름으로 upsert 하고 `tool_ids` 와 도구 사용 규칙 블록만 더한다.
+규칙 블록은 `<!-- pelham-tools: start/end -->` 로 감싸여 있어 다시 돌려도 덧붙지 않고
+교체된다. 프롬프트의 나머지, 첫 인사, 목소리, 지식베이스는 건드리지 않는다.
+
+**도구의 스키마와 설명**은 여전히 `ops/elevenlabs/agent.json` 이 원본이다. 거기를
+고치고 `attach_voice_tools.py --apply` 를 다시 돌린다. 반면 **에이전트의 말투와
+사실관계**는 대시보드와 지식베이스가 원본이다 — 그쪽은 이 저장소가 관리하지 않는다.
 
 ## 테스트
 
