@@ -384,8 +384,11 @@ class ConfirmRequest(_VoiceRequest):
     hold_id: str
     first_name: str = Field(..., min_length=1, max_length=60)
     last_name: str = Field(..., min_length=1, max_length=60)
-    phone: str = Field(..., min_length=7, max_length=40)
     holes: Literal[9, 18] = 18
+    #: 손님이 **다른** 번호를 불러 줬을 때만 채운다. 비면 발신번호를 쓴다.
+    phone: str = Field(default="", max_length=40)
+    #: 전화선이 알려 준 발신번호 (`system__caller_id`). LLM 이 채우지 않는다.
+    caller_number: str = Field(default="", max_length=40)
 
 
 class BookingSummary(BaseModel):
@@ -782,12 +785,25 @@ def confirm_booking(body: ConfirmRequest, background: BackgroundTasks) -> Confir
 
     first = body.first_name.strip()
     last = body.last_name.strip()
-    phone = body.phone.strip()
+
+    # 번호는 **발신번호를 기본으로** 쓰고, 손님이 다른 번호를 불러 줬을 때만 그것을 쓴다.
+    #
+    # 예전에는 LLM 이 받아 적은 `phone` 하나만 받았다. 2026-10-06 첫 실제 통화에서
+    # 에이전트가 그 자리에 `"caller_number"` 라는 **글자 그대로**를 넣어 보냈고
+    # (다른 도구에서 그 이름의 동적 변수를 보고 따라 한 것으로 보인다), 422 가 세 번
+    # 난 뒤 통화가 직원에게 넘어갔다. 홀드만 남고 예약은 만들어지지 않았다.
+    #
+    # 전화선이 주는 번호가 손님이 말한 번호보다 정확하다. 받아 적기는 틀릴 수 있다.
+    spoken = body.phone.strip()
+    phone = spoken if normalize_phone(spoken) else body.caller_number.strip()
 
     if not normalize_phone(phone):
         raise HTTPException(
             status_code=422,
-            detail="That phone number did not come through. Ask the caller to repeat it.",
+            detail=(
+                "No usable phone number for this booking. Ask the caller to say the number "
+                "digit by digit and send just the digits — never a placeholder word."
+            ),
         )
 
     # 인원을 늘리지 않는다 (홀드가 이미 자리를 잡고 있다) → 그 홀드 하나만 읽는다.

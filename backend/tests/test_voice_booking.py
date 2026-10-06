@@ -763,3 +763,29 @@ def test_a_broken_waitlist_does_not_break_cancelling(client, monkeypatch):
 def test_waitlist_rejects_a_time_it_cannot_parse(client):
     """"9am" 을 그대로 저장하면 조건이 조용히 무시되고 새벽 문자를 받게 된다."""
     assert waitlist(client, earliest="9am").status_code == 422
+
+
+def test_confirm_falls_back_to_the_caller_id(client):
+    """2026-10-06 첫 실제 통화: 에이전트가 phone 자리에 "caller_number" 라는 글자를
+    그대로 넣어 422 가 세 번 나고 통화가 직원에게 넘어갔다. 홀드만 남고 예약은 없었다.
+    받아 적은 값이 번호가 아니면 발신번호를 쓴다."""
+    held = hold(client, time="8:01 AM", party=2, conversation="c-fallback")
+    done = client.post(
+        f"{API}/voice/tools/confirm-booking",
+        json={"hold_id": held.json()["hold_id"], "first_name": "Kenneth", "last_name": "Tanath",
+              "phone": "caller_number", "caller_number": "+19058921234",
+              "conversation_id": "c-fallback"},
+    )
+    assert done.status_code == 200, done.text
+    assert lookup_first(client, "c-check", phone="905-892-1234", last="Tanath").json()["found"] == 1
+
+
+def test_confirm_without_any_number_is_refused(client):
+    held = hold(client, time="8:10 AM", party=2, conversation="c-nonum")
+    refused = client.post(
+        f"{API}/voice/tools/confirm-booking",
+        json={"hold_id": held.json()["hold_id"], "first_name": "Kenneth", "last_name": "Tanath",
+              "conversation_id": "c-nonum"},
+    )
+    assert refused.status_code == 422
+    assert "placeholder" in refused.json()["detail"]
