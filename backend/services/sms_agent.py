@@ -32,6 +32,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
@@ -91,6 +92,57 @@ def fallback_reply() -> str:
     return f"Pelham Hills: sorry, I can't book that by text right now. {_help_line()}"
 
 
+# ===== 예약 안내 양식 =====================================================
+
+#: "book"·"booking"·"reserve"·"reservation" 이 들어간 첫 문자에 보내는 빈 양식.
+#: 손님이 채워 보내면 비서가 그대로 읽어 예약한다. 모델을 부르지 않으니 비용이 들지 않는다.
+#: GSM-7 글자만 쓴다 (`_ASCII` 참고). 이름은 성까지 받는다 — 예약 도구가 둘 다 요구한다.
+#: 문자 비서는 아직 야외 티타임만 잡는다. "Indoor" 를 고른 손님은 웹 예약으로 안내한다.
+BOOKING_FORM = (
+    "Pelham Hills: to book, copy this, fill it in and text it back.\n"
+    "0. Outdoor or Indoor (simulator):\n"
+    "1. Date:\n"
+    "2. Time:\n"
+    "3. Players:\n"
+    "4. Cart (yes/no):\n"
+    "5. Booking name (first and last):"
+)
+
+_BOOKING_WORD_RE = re.compile(r"\b(book|reserv)", re.IGNORECASE)
+#: 채운 양식의 칸 이름. 두 개 이상 보이면 이미 양식을 채워 보낸 것이다.
+_FORM_LABEL_RE = re.compile(r"\b(date|time|players|cart|booking name|outdoor|indoor)\s*[:(]", re.IGNORECASE)
+
+
+def wants_booking_form(sender: str, text: str) -> bool:
+    """양식을 보낼 문자인가: 예약 단어가 있고, 채운 양식이 아니고, 진행 중인 대화가 없을 때.
+
+    대화 중이면 보내지 않는다 — "Yes, book the 9:10" 에 양식이 가면 잡던 예약이 날아간다.
+    채운 양식에도 "Booking name" 이 들어 있으니, 30분이 지나 답한 손님이 양식을 또
+    받지 않게 칸 이름으로 거른다.
+    """
+    if not _BOOKING_WORD_RE.search(text) or len(_FORM_LABEL_RE.findall(text)) >= 2:
+        return False
+    convo = _conversations.get(sender)
+    return convo is None or datetime.now(timezone.utc) - convo.last_seen > CONVERSATION_TTL
+
+
+def start_booking_form(sender: str, text: str) -> str:
+    """새 대화를 열고 손님 문자와 양식을 기록에 남긴 뒤 양식을 돌려준다 (웹훅 답장으로 나간다).
+
+    기록에 남기는 이유: 채운 양식이 다음 user 턴으로 들어올 때 비서가 무엇에 대한
+    답인지 안다. user → assistant 순서라 API 의 대화 순서도 맞다.
+    하루 상한에 걸리면 고정 답장을 돌려준다.
+    """
+    if not _within_daily_caps(sender):
+        return fallback_reply()
+    now = datetime.now(timezone.utc)
+    convo = _Conversation(sender=sender, started=now, last_seen=now)
+    convo.messages.append({"role": "user", "content": f"{_date_note()}\n{text}"})
+    convo.messages.append({"role": "assistant", "content": BOOKING_FORM})
+    _conversations[sender] = convo
+    return BOOKING_FORM
+
+
 # ===== 프롬프트 ========================================================
 
 SYSTEM_PROMPT = f"""You are the text-message booking assistant for {voice.CLUB_NAME}. Golfers text this number to book a tee time. You reply by SMS.
@@ -117,6 +169,14 @@ Call book_tee_time only when the golfer has clearly asked for one specific time 
 The tee time is booked to the number they are texting from. Never ask for a phone number.
 After book_tee_time succeeds, a separate text with the confirmation code goes out automatically. Do not repeat the code; just confirm the day, time and players, and say the code is in the confirmation text.
 If book_tee_time says the time was taken, apologise briefly and offer other times.
+
+# The booking form
+
+When a golfer first texts about booking, they are sent this form and asked to fill it in: 0. Outdoor or Indoor (simulator), 1. Date, 2. Time, 3. Players, 4. Cart, 5. Booking name (first and last).
+When they send it back filled in, that counts as clearly asking for that one time. Check it with find_tee_times and, if that exact time is open, book it straight away without asking again.
+If the time is not open, do not book; offer the two or three closest open times. If a field is missing or unclear, ask only for that field. If they only gave one name, ask for the last name.
+Cart: "yes" means every player rides; a number means that many riders; "no" or blank means walking. Pass it as riders on book_tee_time.
+If they chose Indoor (the golf simulator), you cannot book that by text yet. Send them {voice.SITE_URL}/book/indoor to book online, or the pro shop number.
 
 # Waitlist
 
@@ -194,6 +254,12 @@ TOOLS: list[dict[str, Any]] = [
                 "first_name": {"type": "string"},
                 "last_name": {"type": "string"},
                 "holes": _HOLES,
+                "riders": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4,
+                    "description": "How many players ride in a cart. 0 if walking. Not more than party_size.",
+                },
             },
             "required": ["date", "time", "party_size", "first_name", "last_name"],
             "additionalProperties": False,
@@ -303,6 +369,7 @@ def _book(sender: str, conversation_id: str, args: dict) -> tuple[Any, Backgroun
                 first_name=args["first_name"],
                 last_name=args["last_name"],
                 holes=args.get("holes", 18),
+                riders=args.get("riders", 0),
                 # 번호는 언제나 발신번호. `phone` 은 비워 두어 confirm_booking 이
                 # caller_number 를 쓰게 한다.
                 caller_number=sender,

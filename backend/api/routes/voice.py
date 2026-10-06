@@ -385,6 +385,11 @@ class ConfirmRequest(_VoiceRequest):
     first_name: str = Field(..., min_length=1, max_length=60)
     last_name: str = Field(..., min_length=1, max_length=60)
     holes: Literal[9, 18] = 18
+    #: 카트를 탈 사람 수. 0 이면 걸어서 친다. 앞에서부터 이 수만큼 카트 요금을 붙인다.
+    riders: int = Field(default=0, ge=0, le=ts.PLAYERS_PER_TEE_TIME)
+    #: 손님이 **스스로 회원이라고 말했는지**. 확인된 사실이 아니므로 요금제는 바꾸지 않고
+    #: 메모만 남긴다 — 프로 샵이 체크인 때 실제 회원 요금제로 고친다.
+    member: bool = False
     #: 손님이 **다른** 번호를 불러 줬을 때만 채운다. 비면 발신번호를 쓴다.
     phone: str = Field(default="", max_length=40)
     #: 전화선이 알려 준 발신번호 (`system__caller_id`). LLM 이 채우지 않는다.
@@ -828,6 +833,14 @@ def confirm_booking(body: ConfirmRequest, background: BackgroundTasks) -> Confir
             )
 
         party_size = len(hold.players)
+        if body.riders > party_size:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"{body.riders} cart riders but only {party_size} players are booked. "
+                    "Ask the caller how many of the group want to ride in a cart."
+                ),
+            )
 
         # 첫 자리는 전화한 손님. 나머지는 이름을 모르는 동반자라 Guest 로 둔다 —
         # 프로 샵이 체크인 때 채운다.
@@ -840,6 +853,14 @@ def confirm_booking(body: ConfirmRequest, background: BackgroundTasks) -> Confir
         ]
         hold.title = f"{last}, {first}".strip(", ")
         hold.holes = body.holes
+
+        # 카트. 예전에는 전화 예약에 카트가 전혀 적히지 않아, 계산서에 카트 요금이 빠졌다.
+        # 계산서는 사람마다 `cart`/`cartFee` 를 읽고, `cartCount` 는 실제 카트 대수다.
+        # 둘 다 채운다. 대수는 웹 예약과 같이 한 대에 두 명(올림).
+        for player in hold.players[: body.riders]:
+            player.cart = True
+            player.cartFee = ts.cart_fee_for(player.ratePlan, body.holes)
+        hold.cartCount = -(-body.riders // 2)
         hold.color = "blue"
         hold.source = ts.BookingSource.VOICE
         hold.holdExpiresAt = None
@@ -851,9 +872,16 @@ def confirm_booking(body: ConfirmRequest, background: BackgroundTasks) -> Confir
             if by_text
             else "Booked by phone with the voice assistant."
         )
+        if body.member:
+            hold.notes += " Caller says they are a member — set their rate plan at check-in."
         ts._audit(
             hold, f"Phone assistant confirmed {party_size} players for {first} {last} ({phone})."
         )
+        if body.riders:
+            ts._audit(
+                hold,
+                f"{body.riders} riding, {hold.cartCount} cart{'' if hold.cartCount == 1 else 's'}.",
+            )
         summary = _summary(hold)
 
     if session is not None:

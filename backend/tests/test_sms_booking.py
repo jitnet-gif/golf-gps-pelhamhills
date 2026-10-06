@@ -360,3 +360,80 @@ def test_reply_is_kept_to_plain_characters(client, monkeypatch):
     run("thanks")
 
     assert replies() == ["You're set - see you at 9:10 AM..."]
+
+
+# ===== 예약 안내 양식 ====================================================
+
+def _enable(monkeypatch) -> None:
+    monkeypatch.setenv("SMS_BOOKING_ENABLED", "1")
+    monkeypatch.setattr(sms_agent.settings, "ANTHROPIC_API_KEY", "test-key")
+
+
+def test_booking_word_gets_the_form_without_calling_claude(client, monkeypatch):
+    _enable(monkeypatch)
+    fake = install(monkeypatch)
+
+    res = _inbound(client, monkeypatch, "Hi, I'd like to make a reservation")
+
+    assert "1. Date:" in res.text and "5. Booking name" in res.text
+    assert fake.requests == []  # 양식은 모델 없이 나간다
+    convo = sms_agent._conversations[SENDER]
+    assert [m["role"] for m in convo.messages] == ["user", "assistant"]
+
+
+def test_filled_form_is_booked_by_the_assistant_with_cart(client, monkeypatch):
+    _enable(monkeypatch)
+    time = find(client).json()["options"][0]["time"]
+    fake = install(
+        monkeypatch,
+        tool_call(
+            "book_tee_time", date=TOMORROW, time=time, party_size=2,
+            first_name="Dana", last_name="Lee", riders=2,
+        ),
+        says(f"You're booked for 2 tomorrow at {time} with a cart."),
+    )
+
+    _inbound(client, monkeypatch, "book")
+    filled = f"0. Outdoor\n1. Date: tomorrow\n2. Time: {time}\n3. Players: 2\n4. Cart: yes\n5. Booking name: Dana Lee"
+    res = _inbound(client, monkeypatch, filled)
+
+    assert "<Message>" not in res.text  # 양식을 또 보내지 않고 비서에게 갔다
+    # 비서가 본 기록: 처음 문자 → 양식 → 채운 양식
+    first = fake.requests[0]["messages"]
+    assert first[1]["content"] == sms_agent.BOOKING_FORM
+    assert "Booking name: Dana Lee" in first[2]["content"]
+    assert tool_results(fake, 1)[0]["is_error"] is False
+    booked = [b for b in ts.read_bookings(Scope(dates={TOMORROW})) if b.time == time]
+    assert len(booked) == 1
+    assert [p.cart for p in booked[0].players] == [True, True]
+
+
+def test_filled_form_after_the_conversation_expired_does_not_resend_the_form(client, monkeypatch):
+    _enable(monkeypatch)
+    install(monkeypatch, says("Which time works?"))
+
+    res = _inbound(client, monkeypatch, "Date: Saturday\nTime: 9am\nPlayers: 2\nBooking name: Dana Lee")
+
+    assert "<Message>" not in res.text
+    assert replies() == ["Which time works?"]
+
+
+def test_booking_word_mid_conversation_stays_with_the_assistant(client, monkeypatch):
+    _enable(monkeypatch)
+    install(monkeypatch, says("Which day?"), says("Booked."))
+
+    run("Any times Saturday?")
+    res = _inbound(client, monkeypatch, "Yes, book the 9:10")
+
+    assert "<Message>" not in res.text
+    assert replies() == ["Booked.", "Which day?"]  # 최신이 앞
+
+
+def test_word_containing_book_is_not_a_booking(client, monkeypatch):
+    _enable(monkeypatch)
+    install(monkeypatch, says("Hi!"))
+
+    res = _inbound(client, monkeypatch, "Saw you on facebook")
+
+    assert "<Message>" not in res.text
+    assert replies() == ["Hi!"]

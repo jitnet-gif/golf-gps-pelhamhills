@@ -1,6 +1,7 @@
 """Twilio 문자 웹훅: 손님 답장, 전달 상태, 그리고 티타임 리마인더.
 
-  POST /sms/inbound   손님 문자 — STOP/START, "C <코드>" 로 취소, 그 밖은 문자 예약 비서
+  POST /sms/inbound   손님 문자 — STOP/START, "C <코드>" 로 취소,
+                      "book"/"reservation" 첫 문자에는 예약 양식, 그 밖은 문자 예약 비서
   POST /sms/status    Twilio 전달 상태 콜백
   GET  /sms/messages  최근 발송·수신 기록 (Calls & SMS 화면용)
 
@@ -174,6 +175,10 @@ async def inbound(request: Request, background: BackgroundTasks) -> Response:
     # 수신 거부한 번호에는 비서를 돌리지 않는다. 예약은 되는데 확인 문자도 답장도
     # 못 받는 일이 생긴다.
     if sms_agent.enabled() and body and sender not in opted_out:
+        # "book"·"reservation" 으로 처음 연락한 손님에게는 채워 보낼 양식을 준다.
+        # 채운 답장은 아래 비서가 읽고 예약한다.
+        if sms_agent.wants_booking_form(sender, body):
+            return _twiml(sms_agent.start_booking_form(sender, body))
         # 답장은 응답이 나간 뒤 REST 로 보낸다 (`sms_agent.handle_text` 참고).
         background.add_task(sms_agent.handle_text, sender, body)
         return _twiml()
