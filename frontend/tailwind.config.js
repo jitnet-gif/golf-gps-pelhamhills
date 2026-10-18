@@ -1,0 +1,96 @@
+// Tailwind CSS Configuration for Golf GPS Frontend
+// Version: Tailwind CSS 3.4 (with traditional config file, not v4)
+// Reference: https://tailwindcss.com/docs/configuration
+
+export default {
+  // Follow the OS setting, because that is what the theme tokens already do:
+  // index.css defines its dark values under `@media (prefers-color-scheme: dark)`
+  // and nothing in the app ever applies a `.dark` class. Under the previous
+  // `class` strategy every `dark:*` utility was dead code - status pills kept
+  // their light-mode colours on a near-black background.
+  darkMode: 'media',
+
+  // Content paths for detecting class names
+  content: [
+    './index.html',
+    './src/**/*.{js,jsx,ts,tsx}',
+  ],
+
+  // Theme customization
+  theme: {
+    extend: {
+      // `short:` - a phone turned on its side. Height, not width, is what runs
+      // out there: a 390 px tall screen cannot spare two header rows and a
+      // bottom bar around the map. Tablets on their side are taller than 500 px
+      // and keep the ordinary layout.
+      screens: {
+        short: { raw: '(orientation: landscape) and (max-height: 500px)' },
+      },
+
+      // Custom color palette
+      colors: {
+        // Using CSS custom properties for dynamic theming
+        background: 'hsl(var(--background) / <alpha-value>)',
+        foreground: 'hsl(var(--foreground) / <alpha-value>)',
+        border: 'hsl(var(--border) / <alpha-value>)',
+
+        // Panel surfaces that sit on top of the background - the header, the
+        // bottom bars and the side menu, all of which overlay the map. Six
+        // components already used `bg-card`; without this entry the class
+        // produced nothing and those panels were transparent over the map.
+        card: {
+          DEFAULT: 'hsl(var(--card) / <alpha-value>)',
+          foreground: 'hsl(var(--card-foreground) / <alpha-value>)',
+        },
+
+        primary: {
+          DEFAULT: 'hsl(var(--primary) / <alpha-value>)',
+          foreground: 'hsl(var(--primary-foreground) / <alpha-value>)',
+        },
+        secondary: {
+          DEFAULT: 'hsl(var(--secondary) / <alpha-value>)',
+          foreground: 'hsl(var(--secondary-foreground) / <alpha-value>)',
+        },
+        accent: {
+          DEFAULT: 'hsl(var(--accent) / <alpha-value>)',
+          foreground: 'hsl(var(--accent-foreground) / <alpha-value>)',
+        },
+        muted: {
+          DEFAULT: 'hsl(var(--muted) / <alpha-value>)',
+          foreground: 'hsl(var(--muted-foreground) / <alpha-value>)',
+        },
+      },
+
+      // Custom border radius
+      borderRadius: {
+        lg: '0.5rem',
+        md: '0.375rem',
+        sm: '0.1875rem',
+      },
+
+      // Custom spacing if needed
+      spacing: {
+        // Add custom spacing here if necessary
+      },
+
+      // Animation utilities for UI feedback
+      keyframes: {
+        'fade-in': {
+          '0%': { opacity: '0' },
+          '100%': { opacity: '1' },
+        },
+        'slide-up': {
+          '0%': { transform: 'translateY(10px)', opacity: '0' },
+          '100%': { transform: 'translateY(0)', opacity: '1' },
+        },
+      },
+      animation: {
+        'fade-in': 'fade-in 0.2s ease-in-out',
+        'slide-up': 'slide-up 0.3s ease-out',
+      },
+    },
+  },
+
+  // Plugins for additional utilities
+  plugins: [],
+};

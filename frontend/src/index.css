@@ -1,0 +1,387 @@
+/* Import Tailwind CSS layers */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* CSS custom properties for theming
+   Configure these to match your brand colors
+   Light mode defaults, override in dark mode below */
+:root {
+  /* Background and text colors */
+  --background: 0 0% 100%;
+  --foreground: 0 0% 3.6%;
+  --border: 0 0% 88.6%;
+
+  /* Panel surfaces over the map: lifted just enough to read as chrome rather
+     than as part of the imagery, without competing with it. */
+  --card: 0 0% 98%;
+  --card-foreground: 0 0% 3.6%;
+
+  /* Primary colors (main action color - golf green theme) */
+  --primary: 142 71.8% 29.2%;
+  --primary-foreground: 0 0% 100%;
+
+  /* Secondary colors (alternate actions) */
+  --secondary: 46 87.1% 47.1%;
+  --secondary-foreground: 0 0% 100%;
+
+  /* Accent colors (highlights and focus states) */
+  --accent: 217 91.2% 59.8%;
+  --accent-foreground: 0 0% 100%;
+
+  /* Muted colors (disabled states, secondary text) */
+  --muted: 0 0% 96.1%;
+  --muted-foreground: 0 0% 45.1%;
+}
+
+/* Dark mode overrides */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: 0 0% 3.6%;
+    --foreground: 0 0% 98.2%;
+    --border: 0 0% 14.3%;
+
+    /* Lifted above the background here too - in dark the panel is the lighter
+       of the two, which is the direction that reads as "surface". */
+    --card: 0 0% 9%;
+    --card-foreground: 0 0% 98.2%;
+
+    --primary: 142 71.8% 29.2%;
+    --primary-foreground: 0 0% 98.2%;
+
+    --secondary: 46 87.1% 47.1%;
+    --secondary-foreground: 0 0% 3.6%;
+
+    --accent: 217 91.2% 59.8%;
+    --accent-foreground: 0 0% 3.6%;
+
+    --muted: 0 0% 14.3%;
+    --muted-foreground: 0 0% 63.9%;
+  }
+}
+
+/* Global styles */
+body {
+  @apply bg-background text-foreground;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* No pull-to-refresh. Dragging down at the top of the page - the header, the
+   hole column, the menu - reloaded the whole app in Chrome and Samsung
+   Internet, mid-round. The page never scrolls as a whole (Golf.tsx is one
+   100dvh screen), so the gesture had nothing to do but reload. */
+html,
+body {
+  overscroll-behavior: none;
+}
+
+/* Focus styles for accessibility */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible {
+  @apply outline-2 outline-offset-2 outline-accent;
+}
+
+/* Leaflet map customization */
+.leaflet-container {
+  @apply bg-background;
+  font-family: inherit;
+}
+
+.leaflet-control-container .leaflet-top,
+.leaflet-control-container .leaflet-bottom {
+  @apply pointer-events-none;
+}
+
+.leaflet-control {
+  @apply pointer-events-auto;
+}
+
+.leaflet-popup-content-wrapper {
+  @apply bg-background text-foreground border border-border rounded-lg shadow-lg;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.leaflet-popup-tip {
+  @apply bg-background border-b border-r border-border;
+}
+
+.leaflet-control-zoom-in,
+.leaflet-control-zoom-out {
+  @apply bg-background text-foreground border border-border hover:bg-accent;
+  font-size: 16px !important;
+  font-weight: bold;
+}
+
+.leaflet-control-zoom-in:hover,
+.leaflet-control-zoom-out:hover {
+  @apply bg-accent;
+}
+
+.leaflet-control-attribution {
+  @apply bg-background text-xs text-muted-foreground;
+}
+
+.leaflet-marker-icon {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
+}
+
+/* A hole view turns so the pin is up (components/HoleMap). The map is drawn on
+   a square big enough to cover the frame at any angle - the frame's diagonal -
+   and turned about the frame's middle. --map-counter is the angle every upright
+   marker turns back by. It is registered so it can animate, and the square's
+   own turn is read from it, so the map and its labels move as one. */
+@property --map-counter {
+  syntax: '<angle>';
+  inherits: true;
+  initial-value: 0deg;
+}
+
+.hole-map-frame {
+  container-type: size;
+  touch-action: none;
+}
+
+/* Leaflet sets pan-x pan-y once its own drag is off; the page must not scroll
+   under a finger that is moving the map. */
+.hole-map-frame .leaflet-container {
+  touch-action: none !important;
+}
+
+.hole-map-flat {
+  position: absolute;
+  inset: 0;
+}
+
+/* max(w, h) x 1.415 always covers the diagonal; hypot() is the exact one. */
+.hole-map-turned {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(max(100cqw, 100cqh) * 1.415);
+  height: calc(max(100cqw, 100cqh) * 1.415);
+  transform: translate(-50%, -50%) rotate(calc(-1 * var(--map-counter)));
+  transition: --map-counter 0.45s ease;
+}
+
+@supports (width: hypot(1px, 1px)) {
+  .hole-map-turned {
+    width: hypot(100cqw, 100cqh);
+    height: hypot(100cqw, 100cqh);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hole-map-turned {
+    transition: none;
+  }
+}
+
+/* Utility classes */
+@layer components {
+  .btn-primary {
+    @apply px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity;
+  }
+
+  .btn-secondary {
+    @apply px-4 py-2 bg-secondary text-secondary-foreground rounded-lg font-medium hover:opacity-90 transition-opacity;
+  }
+
+  .card {
+    @apply bg-white dark:bg-slate-900 border border-border rounded-lg p-4;
+  }
+
+  .input-field {
+    @apply px-3 py-2 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full bg-accent text-accent-foreground;
+  }
+
+  .badge-primary {
+    @apply inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full bg-primary/10 text-primary;
+  }
+}
+
+/* Animations */
+@keyframes slideUp {
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@layer utilities {
+  .animate-slide-up {
+    animation: slideUp 0.3s ease-out;
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.2s ease-in-out;
+  }
+}
+
+/* Mobile optimizations */
+@media (max-width: 640px) {
+  body {
+    font-size: 14px;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * 주문서 인쇄 (components/admin/OrderReceipt)
+ *
+ * 화면에는 없는 종이입니다. 평소에는 숨겨 두고, 인쇄할 때만 이것만 남깁니다.
+ * 별도 창을 띄우지 않는 이유: 팝업 차단에 걸리고, 새 창은 앱의 CSS 를 물려
+ * 받지 못해 종이가 매번 다르게 나옵니다.
+ *
+ * 80 mm 감열지 기준입니다. A4 프린터에서도 그대로 나옵니다 - 종이 왼쪽 위에
+ * 좁은 띠로 찍힙니다.
+ * ------------------------------------------------------------------------- */
+#order-receipt {
+  display: none;
+}
+
+@media print {
+  /* 인쇄되는 것은 주문서 하나뿐입니다. 운영 화면 전체를 숨기는 쪽이,
+     인쇄용 클래스를 화면 곳곳에 뿌리는 것보다 틀릴 데가 없습니다.
+     주문서는 React 트리 안이 아니라 body 바로 밑에 붙습니다(createPortal) -
+     안에 있으면 숨겨진 #root 와 함께 딸려 사라집니다. */
+  body > *:not(#order-receipt) {
+    display: none !important;
+  }
+
+  #order-receipt {
+    display: block !important;
+    position: static;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    color: #000;
+    background: #fff;
+    font-family: ui-monospace, "Menlo", "Consolas", monospace;
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
+  @page {
+    size: 80mm auto;
+    margin: 4mm;
+  }
+
+  .receipt-club {
+    font-size: 13px;
+    font-weight: 700;
+    text-align: center;
+    margin: 0;
+  }
+
+  .receipt-sub {
+    font-size: 10px;
+    text-align: center;
+    margin: 1mm 0 0;
+  }
+
+  .receipt-rule {
+    border: 0;
+    border-top: 1px dashed #000;
+    margin: 2.5mm 0;
+  }
+
+  /* 손님이 대는 여섯 글자. 계산대에서 종이 더미를 훑어 찾는 값이라,
+     이 종이에서 제일 큰 글자입니다. */
+  .receipt-code {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-align: center;
+    margin: 0;
+  }
+
+  .receipt-pickup {
+    font-size: 14px;
+    text-align: center;
+    margin: 1mm 0 0;
+  }
+
+  .receipt-items {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .receipt-items td {
+    padding: 0.6mm 0;
+    vertical-align: top;
+  }
+
+  .receipt-qty {
+    width: 7mm;
+    font-weight: 700;
+  }
+
+  /* 긴 이름은 잘라 내지 않고 줄을 바꿉니다 - 주방이 읽어야 하는 줄입니다. */
+  .receipt-name {
+    word-break: break-word;
+  }
+
+  .receipt-amount {
+    width: 18mm;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .receipt-total-label {
+    font-weight: 700;
+    border-top: 1px solid #000;
+    padding-top: 1.2mm;
+  }
+
+  .receipt-pay {
+    font-size: 13px;
+    font-weight: 700;
+    text-align: center;
+    margin: 0 0 2mm;
+  }
+
+  .receipt-line {
+    margin: 0.8mm 0 0;
+  }
+
+  .receipt-note {
+    margin: 1.5mm 0 0;
+    font-weight: 700;
+    border: 1px solid #000;
+    padding: 1mm;
+  }
+
+  .receipt-placed {
+    font-size: 10px;
+    margin-top: 3mm;
+    text-align: center;
+  }
+}
