@@ -447,7 +447,7 @@ export function FairwayPathEditor() {
   const addPoint = (p: FairwayPoint) => {
     if (Date.now() - lastDrop.current < 700) return;
     if (full) {
-      setNotice(`꺾이는 점은 ${MAX_BENDS}개까지입니다. 점을 끌어서 옮기거나, 선택해서 지운 뒤 다시 찍으세요.`);
+      setNotice(`꺾이는 점은 ${MAX_BENDS}개까지입니다. 점을 끌어서 옮기거나, 점을 두 번 눌러(폰은 길게 눌러) 지운 뒤 다시 찍으세요.`);
       return;
     }
     const segment = nearestSegment(line, p);
@@ -455,11 +455,29 @@ export function FairwayPathEditor() {
     setSelected(segment);
   };
 
-  const removeSelected = () => {
-    if (selected === null) return;
-    void commit(waypoints.filter((_, i) => i !== selected));
+  const removeAt = (index: number) => {
+    void commit(waypoints.filter((_, i) => i !== index));
     setSelected(null);
   };
+
+  const removeSelected = () => {
+    if (selected !== null) removeAt(selected);
+  };
+
+  // Delete·Backspace 로도 지웁니다. 입력칸(좌표 붙여넣기)에서 누른 키는 건드리지 않습니다.
+  useEffect(() => {
+    if (view !== 'hole' || selected === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement;
+      if (el.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        removeAt(selected);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
 
   const straighten = () => {
     void commit([]);
@@ -648,7 +666,7 @@ export function FairwayPathEditor() {
       <p className="text-xs text-muted-foreground">
         {view === 'course'
           ? `18개 홀의 번호와 ${printedPreview ? '클럽 안내도' : '점선'}입니다 - 고객 전체 맵(${previewStyle === 'printed' ? '현시스템 지도' : '신시스템 지도'}) 미리 보기. 번호나 핀을 누르면 그 홀 편집으로 넘어갑니다. 번호가 겹치면 확대하세요.`
-          : '지도를 누르면 가장 가까운 구간에 꺾이는 점이 생깁니다 (5개까지). 초록 점을 끌어 페어웨이 가운데로 옮기세요. 선 중간의 흰 점을 끌거나 누르면 그 자리에 점이 하나 더 생깁니다. T나 번호를 끌면 티가, 깃발을 끌면 핀이 옮겨지고 점선이 따라옵니다.'}
+          : '지도를 누르면 가장 가까운 구간에 꺾이는 점이 생깁니다 (5개까지). 초록 점을 끌어 페어웨이 가운데로 옮기세요. 점을 두 번 누르거나(폰은 길게 누르기), 눌러서 고른 뒤 지도 오른쪽 위 삭제 버튼을 누르면 지워집니다. 선 중간의 흰 점을 끌거나 누르면 그 자리에 점이 하나 더 생깁니다. T나 번호를 끌면 티가, 깃발을 끌면 핀이 옮겨지고 점선이 따라옵니다.'}
       </p>
 
       {shared.length > 0 && (
@@ -665,7 +683,18 @@ export function FairwayPathEditor() {
         </p>
       )}
 
-      <div ref={mapBoxRef} className="h-[60vh] min-h-[320px] rounded-lg overflow-hidden border border-border">
+      <div ref={mapBoxRef} className="relative h-[60vh] min-h-[320px] rounded-lg overflow-hidden border border-border">
+        {/* 아래 버튼 줄은 화면 밖에 있기 쉬워, 점을 고르면 지도 위에도 삭제 버튼을 띄웁니다. */}
+        {view === 'hole' && selected !== null && (
+          <button
+            type="button"
+            onClick={removeSelected}
+            className="absolute top-2 right-2 z-[1000] inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-red-600 text-white text-sm font-medium shadow-md hover:bg-red-700"
+          >
+            <Trash2 className="w-4 h-4" />
+            선택한 점 삭제
+          </button>
+        )}
         {/* zoomSnap 0.25: 전체 코스를 정수 줌에 맞추면 코스가 화면 가운데 3분의 1로
             쪼그라들고 번호가 겹칩니다. 타일은 소수 줌에서도 그대로 늘려 그립니다. */}
         <MapContainer
@@ -806,6 +835,9 @@ export function FairwayPathEditor() {
                   zIndexOffset={1000}
                   eventHandlers={{
                     click: () => setSelected(i),
+                    // 두 번 누르기(PC)나 길게 누르기(폰)로 바로 지웁니다.
+                    dblclick: () => removeAt(i),
+                    contextmenu: () => removeAt(i),
                     dragstart: () => setSelected(i),
                     drag: (e) => setPreview(replaceAt(line, i + 1, pointOf(e))),
                     dragend: (e) => {
