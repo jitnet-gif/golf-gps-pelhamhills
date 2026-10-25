@@ -1114,6 +1114,7 @@ export default function Golf() {
                     followGps={followGps}
                     courseView={courseView}
                     printedMap={fullMapStyle === 'printed'}
+                    osmMap={fullMapStyle === 'osm'}
                     walkTo={walking ? guidance.tee : null}
                     drive={driveOnMap}
                     // The whole-screen banner's height, so the player is kept below it.

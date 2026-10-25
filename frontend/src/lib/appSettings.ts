@@ -12,8 +12,12 @@ import { problemOf, type ServerProblem } from './holePaths';
  * What the Full map button shows:
  * - satellite: 신시스템 지도 - the satellite map with every hole's dashed line
  * - printed:   현시스템 지도 - the club's printed course map
+ * - osm:       OSM 지도 - the satellite map with OpenStreetMap's greens,
+ *              fairways, bunkers and water drawn over it (data/courseAreas)
+ *
+ * A phone on an older build reads 'osm' as the printed map.
  */
-export type FullMapStyle = 'satellite' | 'printed';
+export type FullMapStyle = 'satellite' | 'printed' | 'osm';
 
 const FULL_MAP_KEY = 'full_map';
 const CACHE_KEY = 'golf.fullMapStyle';
@@ -24,8 +28,9 @@ const CACHE_KEY = 'golf.fullMapStyle';
  */
 export const FULL_MAP_STYLE_EVENT = 'golf:full-map-style';
 
-/** The printed map unless an admin has picked the satellite one - the club's choice of default. */
-const asStyle = (value: unknown): FullMapStyle => (value === 'satellite' ? 'satellite' : 'printed');
+/** The printed map unless an admin has picked another - the club's choice of default. */
+const asStyle = (value: unknown): FullMapStyle =>
+  value === 'satellite' || value === 'osm' ? value : 'printed';
 
 /** The last style this phone was told, the printed map until it has been told anything. */
 export const cachedFullMapStyle = (): FullMapStyle => {

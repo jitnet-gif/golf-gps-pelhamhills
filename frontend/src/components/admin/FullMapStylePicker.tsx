@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, Image as ImageIcon, Satellite } from 'lucide-react';
+import { Check, Image as ImageIcon, Map as MapIcon, Satellite } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import {
   cachedFullMapStyle,
@@ -25,6 +25,11 @@ const OPTIONS: { id: FullMapStyle; title: string; detail: string }[] = [
     id: 'printed',
     title: '현시스템 지도',
     detail: '클럽 코스 안내도만 흰 바탕에 보여 줍니다 (위성 지도 없이). 내 위치 점이 안내도 위에 나오고, 번호를 누르면 그 홀로 갑니다.',
+  },
+  {
+    id: 'osm',
+    title: 'OSM 지도',
+    detail: '위성 사진 위에 OpenStreetMap 의 그린·페어웨이·벙커·물을 색으로 그리고, 홀 점선과 번호도 같이 보여 줍니다.',
   },
 ];
 
@@ -74,7 +79,7 @@ export function FullMapStylePicker() {
         선수 화면의 &apos;Full map&apos; 버튼이 보여 줄 지도입니다. 모든 고객 폰에 같이 적용됩니다.
       </p>
 
-      <div className="grid grid-cols-2 gap-2" role="group" aria-label="전체 맵 종류">
+      <div className="grid grid-cols-3 gap-2" role="group" aria-label="전체 맵 종류">
         {OPTIONS.map((option) => {
           const active = option.id === style;
           return (
@@ -91,6 +96,8 @@ export function FullMapStylePicker() {
               <span className="flex h-20 items-center justify-center overflow-hidden rounded-md bg-muted">
                 {option.id === 'printed' ? (
                   <img src={COURSE_MAP_OVERLAY.url} alt="" className="h-full w-full object-cover" />
+                ) : option.id === 'osm' ? (
+                  <MapIcon className="h-8 w-8 text-muted-foreground" />
                 ) : (
                   <Satellite className="h-8 w-8 text-muted-foreground" />
                 )}

@@ -7,6 +7,7 @@ import {
   Marker,
   Popup,
   Polyline,
+  Polygon,
   useMap,
   Circle,
 } from 'react-leaflet';
@@ -16,6 +17,7 @@ import { Flag } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import type { FairwayPoint } from '@/data/pelhamHills';
 import { COURSE_MAP_OVERLAY } from '@/data/courseMap';
+import { OSM_COURSE_AREAS, OSM_STREAMS, type CourseAreaKind } from '@/data/courseAreas';
 import { pointAlong } from '@/lib/holePaths';
 import { useFairwayDistance, type FairwayDistance } from '@/hooks/useFairwayDistance';
 import { bearingDegrees, haversineMetres, METRES_TO_YARDS } from '@/lib/geo';
@@ -167,6 +169,38 @@ const NAV_ZOOM = Math.min(18, TILE_MAX_ZOOM);
 
 const PRINTED_BOUNDS = L.latLngBounds(
   COURSE_MAP_OVERLAY.bounds.map(([lat, lng]) => [lat, lng] as [number, number])
+);
+
+/**
+ * OSM 지도: each kind of area in the colours the OpenStreetMap editor gives it,
+ * see-through enough that the satellite picture still reads under them.
+ */
+const AREA_STYLE: Record<CourseAreaKind, L.PathOptions> = {
+  course: { color: '#b5e655', weight: 2, fillColor: '#b5e655', fillOpacity: 0.12 },
+  wood: { color: '#5fae4f', weight: 1, fillColor: '#3c8a3c', fillOpacity: 0.3 },
+  driving_range: { color: '#b5e655', weight: 1, fillColor: '#b5e655', fillOpacity: 0.25 },
+  fairway: { color: '#a7e36b', weight: 1.5, fillColor: '#9ee05a', fillOpacity: 0.35 },
+  tee: { color: '#c8f08f', weight: 1.5, fillColor: '#9ee05a', fillOpacity: 0.5 },
+  green: { color: '#d4ff9c', weight: 1.5, fillColor: '#7fe03f', fillOpacity: 0.6 },
+  bunker: { color: '#e3cf8a', weight: 1, fillColor: '#f2e5b5', fillOpacity: 0.85 },
+  water: { color: '#77d3de', weight: 1.5, fillColor: '#4fb4d8', fillOpacity: 0.5 },
+};
+const STREAM_STYLE: L.PathOptions = { color: '#77d3de', weight: 3, opacity: 0.9 };
+
+/**
+ * OpenStreetMap's greens, fairways, bunkers and water, in their own pane
+ * between the tiles (200) and the lines and circles (400). Not interactive:
+ * a tap goes through to the hole numbers and pins above.
+ */
+const CourseAreas: React.FC = () => (
+  <Pane name="osm-course-areas" style={{ zIndex: 350 }}>
+    {OSM_COURSE_AREAS.map((area) => (
+      <Polygon key={area.id} positions={area.points} pathOptions={AREA_STYLE[area.kind]} interactive={false} />
+    ))}
+    {OSM_STREAMS.map((stream) => (
+      <Polyline key={stream.id} positions={stream.points} pathOptions={STREAM_STYLE} interactive={false} />
+    ))}
+  </Pane>
 );
 
 /**
@@ -354,6 +388,11 @@ interface HoleMapProps {
    */
   printedMap?: boolean;
   /**
+   * On the whole course, OpenStreetMap's greens, fairways, bunkers and water
+   * over the satellite map (OSM 지도). Ignored when printedMap is set.
+   */
+  osmMap?: boolean;
+  /**
    * A walk to a tee in progress (the next one, or a hole the player picked from
    * somewhere else): the line runs to that tee instead of along the fairway to
    * the pin, and the map follows the player, turned to face that tee.
@@ -393,6 +432,7 @@ const MapContent: React.FC<{
   followGps: boolean;
   courseView: boolean;
   printedMap: boolean;
+  osmMap: boolean;
   walkTo: GuidanceTee | null;
   walkTopInset: number;
   drive: DriveOnMap | null;
@@ -411,6 +451,7 @@ const MapContent: React.FC<{
   followGps,
   courseView,
   printedMap,
+  osmMap,
   walkTo,
   walkTopInset,
   drive,
@@ -426,6 +467,7 @@ const MapContent: React.FC<{
   const gpsPosition = useAppStore((state) => state.gpsPosition);
   const selectedHole = useAppStore((state) => state.uiState.selectedHole);
   const showPrinted = courseView && printedMap;
+  const showOsm = courseView && osmMap && !printedMap;
 
   // Read by the framing effects when they run, without making every step of
   // the turn re-frame a hole the player has panned.
@@ -640,6 +682,8 @@ const MapContent: React.FC<{
           />
         </Pane>
       )}
+
+      {showOsm && <CourseAreas />}
 
       {/* Popups are for the north-up full map only: Leaflet positions them
           itself, and on a turned map they would lie on their side. A hole's
@@ -900,6 +944,7 @@ export const HoleMap: React.FC<HoleMapProps> = ({
   followGps = false,
   courseView = false,
   printedMap = false,
+  osmMap = false,
   walkTo = null,
   walkTopInset = 0,
   drive = null,
@@ -1271,6 +1316,7 @@ export const HoleMap: React.FC<HoleMapProps> = ({
             followGps={followGps}
             courseView={courseView}
             printedMap={printedMap}
+            osmMap={osmMap}
             walkTo={walkTo}
             walkTopInset={walkTopInset}
             drive={drive}
@@ -1385,6 +1431,7 @@ export const HoleMap: React.FC<HoleMapProps> = ({
         className="pointer-events-none absolute right-0 z-[800] bg-background/80 px-1 text-[10px] leading-4 text-muted-foreground"
       >
         Leaflet{showsTiles ? ` | ${TILE_ATTRIBUTION}` : ''}
+        {courseView && osmMap && showsTiles ? ' | © OpenStreetMap contributors' : ''}
       </p>
     </div>
   );
