@@ -4,7 +4,6 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Loader2, LocateFixed, RefreshCw, Trash2, Users } from 'lucide-react';
 import { TILE_ATTRIBUTION, TILE_MAX_ZOOM, TILE_URL_TEMPLATE } from '@/lib/tiles';
-import { PELHAM_HILLS_HOLES } from '@/data/pelhamHills';
 import {
   fetchPlayersOnCourse,
   forgetPlayer,
@@ -31,11 +30,11 @@ import {
 
 const REFRESH_MS = 15_000;
 
-/** 코스 한가운데. 아직 아무도 없을 때 지도가 어디를 보고 있을지. */
-const COURSE_CENTER: [number, number] = [
-  PELHAM_HILLS_HOLES.reduce((sum, h) => sum + h.latitude, 0) / PELHAM_HILLS_HOLES.length,
-  PELHAM_HILLS_HOLES.reduce((sum, h) => sum + h.longitude, 0) / PELHAM_HILLS_HOLES.length,
-];
+/**
+ * 코스 한가운데. 아직 아무도 없을 때 지도가 어디를 보고 있을지.
+ * OpenStreetMap 에서 코스 전체가 한 화면에 들어오는 자리(줌 16)입니다.
+ */
+const COURSE_CENTER: [number, number] = [42.98546, -79.29943];
 
 /**
  * 점 하나. Leaflet 기본 핀(파란 압정)은 스무 개가 겹치면 어디가 어딘지
