@@ -5,6 +5,7 @@ import Admin from './pages/Admin';
 import Book from './pages/Book';
 import Food from './pages/Food';
 import Counter from './pages/Counter';
+import Coupons from './pages/Coupons';
 import { UpdateNotice } from './components';
 import { useOfflineMode } from './hooks';
 
@@ -26,6 +27,7 @@ export default function App() {
         <Route path="/" component={Home} />
         <Route path="/book" component={Book} />
         <Route path="/food" component={Food} />
+        <Route path="/coupons" component={Coupons} />
         <Route path="/golf/:courseId" component={Golf} />
         {/* 운영자용. 플레이어에게는 링크로 노출하지 않습니다 - 주소를 아는
             사람만 들어오고, 실제 차단은 화면이 아니라 서버의 X-Admin-Key가

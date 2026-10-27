@@ -1,5 +1,5 @@
 import { Link } from 'wouter';
-import { CalendarDays, ChevronRight, MapPin, Navigation, UtensilsCrossed } from 'lucide-react';
+import { CalendarDays, ChevronRight, MapPin, Navigation, Ticket, UtensilsCrossed } from 'lucide-react';
 import { NotificationOptIn, PromoBanner } from '@/components';
 import { PELHAM_HILLS, PELHAM_HILLS_HOLES } from '@/data/pelhamHills';
 
@@ -65,6 +65,19 @@ export default function Home() {
           <span className="block font-semibold text-lg">Order food</span>
           <span className="block text-sm text-muted-foreground">
             Pick from the pro shop menu and choose a pickup time
+          </span>
+        </span>
+        <ChevronRight className="w-5 h-5 text-muted-foreground shrink-0" />
+      </Link>
+
+      <Link href="/coupons" className={tile}>
+        <span className="grid place-items-center w-12 h-12 rounded-full bg-primary/10 shrink-0">
+          <Ticket className="w-6 h-6 text-primary" />
+        </span>
+        <span className="flex-1 min-w-0">
+          <span className="block font-semibold text-lg">Coupon book</span>
+          <span className="block text-sm text-muted-foreground">
+            Play 10 rounds, get 1 free
           </span>
         </span>
         <ChevronRight className="w-5 h-5 text-muted-foreground shrink-0" />
