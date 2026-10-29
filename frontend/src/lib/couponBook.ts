@@ -14,12 +14,15 @@ import { problemOf, type ServerProblem } from './holePaths';
 /** 도장 몇 개에 무료 한 번. 서버(0023)의 10 과 같아야 합니다. */
 export const STAMPS_PER_FREE = 10;
 
+/** 라운드 몇 번에 기념품 하나. 서버(0029)의 100 과 같아야 합니다. */
+export const ROUNDS_PER_GIFT = 100;
+
 /** 도장 자리에 찍히는 클럽 로고 (pelhamhills frontend/public/pelham-hills/club-logo.png 사본). */
 export const STAMP_LOGO = '/club-logo.png';
 
 export interface CouponEntry {
-  /** cart_credit/cart_redeem 은 친구 소개 카트 무료(0025) */
-  kind: 'stamp' | 'redeem' | 'cart_credit' | 'cart_redeem';
+  /** cart_credit/cart_redeem 은 친구 소개 카트 무료(0025), gift 는 100라운드 기념품(0029) */
+  kind: 'stamp' | 'redeem' | 'cart_credit' | 'cart_redeem' | 'gift';
   at: string;
 }
 
@@ -35,6 +38,12 @@ export interface CouponBook {
   freeLeft: number;
   redeemed: number;
   stampedToday: boolean;
+  /** 누적 라운드 = 도장 + 쓴 무료 (0029) */
+  rounds: number;
+  /** 받을 기념품 수, 다음 기념품까지 남은 라운드, 받은 기념품 수 */
+  giftDue: number;
+  roundsToGift: number;
+  giftsGiven: number;
   /** 친구 소개로 쌓인, 아직 안 쓴 카트 무료 */
   cartsLeft: number;
   cartsUsed: number;
@@ -76,6 +85,11 @@ const toBook = (raw: Record<string, unknown>): CouponBook => ({
   freeLeft: Number(raw.free_left ?? 0),
   redeemed: Number(raw.redeemed ?? 0),
   stampedToday: raw.stamped_today === true,
+  // 0029 전 서버는 rounds 를 주지 않습니다 - 그때는 도장 + 사용으로 셉니다.
+  rounds: Number(raw.rounds ?? Number(raw.stamps ?? 0) + Number(raw.redeemed ?? 0)),
+  giftDue: Number(raw.gift_due ?? 0),
+  roundsToGift: Number(raw.rounds_to_gift ?? ROUNDS_PER_GIFT),
+  giftsGiven: Number(raw.gifts_given ?? 0),
   cartsLeft: Number(raw.carts_left ?? 0),
   cartsUsed: Number(raw.carts_used ?? 0),
   friendsRewarded: Number(raw.friends_rewarded ?? 0),
@@ -122,7 +136,7 @@ export const setReferrer = async (code: string): Promise<CouponBook> =>
   toBook((await call('coupon_set_referrer', { p_code: code })) as Record<string, unknown>);
 
 const act =
-  (fn: 'coupon_stamp' | 'coupon_redeem' | 'coupon_redeem_cart' | 'coupon_undo') =>
+  (fn: 'coupon_stamp' | 'coupon_redeem' | 'coupon_redeem_cart' | 'coupon_gift' | 'coupon_undo') =>
   async (holder: CouponHolder): Promise<CouponHolder> => {
     const raw = (await call(fn, { p_owner: holder.ownerId })) as Record<string, unknown>;
     return {
@@ -136,4 +150,5 @@ const act =
 export const addCouponStamp = act('coupon_stamp');
 export const redeemFreeRound = act('coupon_redeem');
 export const redeemFreeCart = act('coupon_redeem_cart');
+export const giveSouvenir = act('coupon_gift');
 export const undoCouponEntry = act('coupon_undo');

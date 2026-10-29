@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'wouter';
-import { BadgeCheck, Car, ChevronLeft, Gift, Loader2, RefreshCw, Share2, Ticket, Users, WifiOff, X } from 'lucide-react';
+import { Award, BadgeCheck, Car, ChevronLeft, Gift, Loader2, RefreshCw, Share2, Ticket, Users, WifiOff, X } from 'lucide-react';
 import { AccountForm } from '@/components/AccountPanel';
 import { useAppStore } from '@/store/appStore';
 import { startAuth } from '@/lib/auth';
@@ -8,6 +8,7 @@ import {
   CouponError,
   fetchMyCouponBook,
   setReferrer,
+  ROUNDS_PER_GIFT,
   STAMP_LOGO,
   STAMPS_PER_FREE,
   type CouponBook,
@@ -21,6 +22,7 @@ const ENTRY_LABEL: Record<CouponEntry['kind'], string> = {
   redeem: 'Free round used',
   cart_credit: 'Free cart earned - friend played',
   cart_redeem: 'Free cart used',
+  gift: `${ROUNDS_PER_GIFT}-round souvenir received`,
 };
 
 const dateOf = (iso: string) =>
@@ -103,6 +105,7 @@ export default function Coupons() {
       <p className="text-center text-sm text-muted-foreground">
         Gift cards and coupons from Pelham Hills show up here - tap one to show its barcode at
         the pro shop. Play {STAMPS_PER_FREE} rounds, get the next one <b className="text-foreground">free</b>.
+        Every {ROUNDS_PER_GIFT} rounds, pick up a <b className="text-foreground">Pelham Hills souvenir</b>.
         You get a stamp automatically when you check in at the pro shop. Book with this
         account's email so we know it's you.
         <br />
@@ -175,6 +178,18 @@ function CouponCard({ book, onChange }: { book: CouponBook; onChange: (next: Cou
       )}
 
       {book.isMember ? (
+      {book.giftDue > 0 && (
+        <section className="flex items-center gap-3 rounded-xl border-2 border-pink-600 bg-pink-600/10 p-4">
+          <Award className="h-8 w-8 shrink-0 text-pink-700 dark:text-pink-300" />
+          <div>
+            <p className="font-bold text-pink-800 dark:text-pink-200">
+              {book.rounds} rounds - a souvenir is waiting for you!
+            </p>
+            <p className="text-xs text-muted-foreground">Pick it up at the pro shop - show your code.</p>
+          </div>
+        </section>
+      )}
+
         <section className="flex items-center gap-3 rounded-xl border border-border bg-card p-4">
           <BadgeCheck className="h-8 w-8 shrink-0 text-primary" />
           <div>
@@ -229,6 +244,32 @@ function CouponCard({ book, onChange }: { book: CouponBook; onChange: (next: Cou
             <p className="mt-1 text-center text-xs text-primary">Stamped today ✓</p>
           )}
         </section>
+          <div className="mt-4 border-t border-border pt-3">
+            <div className="flex items-center justify-between text-xs">
+              <span className="flex items-center gap-1 font-medium">
+                <Award className="h-3.5 w-3.5 text-pink-600" />
+                {ROUNDS_PER_GIFT}-round souvenir
+              </span>
+              <span className="tabular-nums text-muted-foreground">
+                {book.rounds % ROUNDS_PER_GIFT}/{ROUNDS_PER_GIFT}
+              </span>
+            </div>
+            <div
+              className="mt-1 h-2 overflow-hidden rounded-full bg-muted"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={ROUNDS_PER_GIFT}
+              aria-valuenow={book.rounds % ROUNDS_PER_GIFT}
+            >
+              <div
+                className="h-full rounded-full bg-pink-600"
+                style={{ width: `${((book.rounds % ROUNDS_PER_GIFT) / ROUNDS_PER_GIFT) * 100}%` }}
+              />
+            </div>
+            <p className="mt-1 text-center text-xs text-muted-foreground">
+              {book.roundsToGift} more round{book.roundsToGift === 1 ? '' : 's'} to your next souvenir
+            </p>
+          </div>
       )}
 
       {book.canRefer && <InviteFriends book={book} onChange={onChange} />}
@@ -245,7 +286,7 @@ function CouponCard({ book, onChange }: { book: CouponBook; onChange: (next: Cou
             ))}
           </ul>
           <p className="mt-2 text-xs text-muted-foreground">
-            {book.stamps} rounds stamped · {book.redeemed} free used
+            {book.rounds} rounds played · {book.redeemed} free used
           </p>
         </section>
       )}
