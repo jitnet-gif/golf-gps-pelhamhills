@@ -177,7 +177,6 @@ function CouponCard({ book, onChange }: { book: CouponBook; onChange: (next: Cou
         </section>
       )}
 
-      {book.isMember ? (
       {book.giftDue > 0 && (
         <section className="flex items-center gap-3 rounded-xl border-2 border-pink-600 bg-pink-600/10 p-4">
           <Award className="h-8 w-8 shrink-0 text-pink-700 dark:text-pink-300" />
@@ -190,6 +189,7 @@ function CouponCard({ book, onChange }: { book: CouponBook; onChange: (next: Cou
         </section>
       )}
 
+      {book.isMember ? (
         <section className="flex items-center gap-3 rounded-xl border border-border bg-card p-4">
           <BadgeCheck className="h-8 w-8 shrink-0 text-primary" />
           <div>
@@ -243,7 +243,6 @@ function CouponCard({ book, onChange }: { book: CouponBook; onChange: (next: Cou
           {book.stampedToday && (
             <p className="mt-1 text-center text-xs text-primary">Stamped today ✓</p>
           )}
-        </section>
           <div className="mt-4 border-t border-border pt-3">
             <div className="flex items-center justify-between text-xs">
               <span className="flex items-center gap-1 font-medium">
@@ -270,6 +269,7 @@ function CouponCard({ book, onChange }: { book: CouponBook; onChange: (next: Cou
               {book.roundsToGift} more round{book.roundsToGift === 1 ? '' : 's'} to your next souvenir
             </p>
           </div>
+        </section>
       )}
 
       {book.canRefer && <InviteFriends book={book} onChange={onChange} />}
