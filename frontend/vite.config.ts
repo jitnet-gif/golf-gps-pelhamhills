@@ -70,6 +70,12 @@ export default defineConfig({
         // visit without costing the round.
         clientsClaim: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // The admin drone guide (public/admin/drone-guide.html) is staff-only and
+        // online-only: not worth precaching onto every player's phone. With it
+        // out of the precache, the navigation fallback would answer it with the
+        // app shell instead, so it is denied there too.
+        globIgnores: ['admin/**'],
+        navigateFallbackDenylist: [/^\/admin\/[^/]+\.html$/],
         // maximumFileSizeToCacheInBytes is left at Workbox's default: the
         // narration mp3s are deliberately NOT precached. They are ~4.7 MB all
         // told, and a first visit should not spend that before the player has
