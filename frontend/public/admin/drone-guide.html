@@ -76,6 +76,12 @@ svg text { font-family: var(--mono); }
 .tips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6em 1.6em; font-size: .95em; line-height: 1.5; }
 .tips div { border-left: 2px solid var(--line); padding-left: .8em; }
 
+.where { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .8em; }
+.where > div { background: var(--raise); border-radius: 8px; padding: .8em 1em; display: grid; gap: .45em; align-content: start; }
+.where h3 { margin: 0; font-size: 1.02em; } .where .path { font-size: .82em; color: var(--amber); line-height: 1.4; margin: 0; }
+.where dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .3em .8em; font-size: .86em; line-height: 1.4; }
+.where dt { color: var(--fg); } .where dd { margin: 0; color: var(--muted); }
+
 .checks { list-style: none; margin: 0; padding: 0; display: grid; gap: .55em; }
 .checks li { display: grid; grid-template-columns: 1.6em 1fr; gap: .5em; font-size: 1em; line-height: 1.45; }
 .checks li::before { content: "✓"; font: 600 1em var(--mono); color: var(--turf); }
@@ -111,7 +117,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   .slide { padding: 1.4em 1.2em; }
   h1 { font-size: 2.2em; } h2 { font-size: 1.6em; }
   .title-grid, .verdict, .versus, .tips { grid-template-columns: minmax(0, 1fr); }
-  .trio, .steps { grid-template-columns: minmax(0, 1fr); }
+  .trio, .steps, .where { grid-template-columns: minmax(0, 1fr); }
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .bats { grid-template-columns: minmax(0, 1fr); }
 }
@@ -237,7 +243,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
           <li><b data-ko="웨이포인트 열기" data-en="Open Waypoints"></b><span data-ko="카메라 화면 왼쪽 웨이포인트 아이콘 → 지도 화면." data-en="Waypoint icon on the left of the camera view, then the map."></span></li>
           <li><b data-ko="다섯 곳 탭" data-en="Tap five spots"></b><span data-ko="티 뒤 → 티 → 60% → 그린 앞 → 그린 순서로." data-en="Behind tee, tee, 60%, short of green, green."></span></li>
           <li><b data-ko="값 넣기" data-en="Enter the values"></b><span data-ko="점마다 고도, 짐벌, 기수 방향(홀 방위), 속도 7m/s." data-en="Altitude, gimbal, heading (hole bearing), 7 m/s for each."></span></li>
-          <li><b data-ko="동작 넣기" data-en="Add actions"></b><span data-ko="①에 녹화 시작, ⑤에 녹화 중지와 사진." data-en="Start recording at ①, stop and take a photo at ⑤."></span></li>
+          <li><b data-ko="동작 넣기" data-en="Add actions"></b><span data-ko="①에 녹화 시작, ⑤에 녹화 중지." data-en="Start recording at ①, stop recording at ⑤."></span></li>
           <li><b data-ko="저장 후 ▶" data-en="Save, then ▶"></b><span data-ko="'1번 홀'로 저장. 현장에서는 불러와 시작만 누릅니다." data-en="Save as 'Hole 1'. On the course, load it and press start."></span></li>
         </ol>
         <p class="small" data-ko="고도·각도 값은 홀마다 어드민 '드론 촬영' 탭에 나와 있습니다. H와 G는 직접 날려서 한 장씩 찍습니다." data-en="Each hole's values are in the admin Drone tab. Fly H and G by hand, one photo each."></p>
@@ -245,6 +251,44 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
 
       <!-- 5 -->
       <section class="slide" data-n="5" hidden>
+        <span class="eyebrow" data-ko="DJI Fly · 어디에 넣나요" data-en="DJI Fly · Where each setting goes"></span>
+        <h2 data-ko="값마다 넣는 곳이 다릅니다" data-en="Each value has its own place"></h2>
+        <div class="where">
+          <div>
+            <h3 data-ko="앱 설정" data-en="App settings"></h3>
+            <p class="path" data-ko="카메라 화면 오른쪽 위 ··· → 안전" data-en="··· at the top right of the camera view → Safety"></p>
+            <dl>
+              <dt data-ko="최대 고도" data-en="Max Altitude"></dt><dd>120m</dd>
+              <dt data-ko="장애물 회피 동작" data-en="Obstacle Avoidance"></dt><dd data-ko="우회 또는 브레이크" data-en="Bypass or Brake"></dd>
+            </dl>
+          </div>
+          <div>
+            <h3 data-ko="점마다" data-en="Each waypoint"></h3>
+            <p class="path" data-ko="패널에서 웨이포인트 번호를 탭" data-en="Tap the waypoint number on the panel"></p>
+            <dl>
+              <dt data-ko="고도" data-en="Altitude"></dt><dd data-ko="드론 탭의 고도" data-en="Altitude in the Drone tab"></dd>
+              <dt data-ko="속도" data-en="Speed"></dt><dd>7 m/s</dd>
+              <dt data-ko="기수" data-en="Heading"></dt><dd data-ko="드론 탭의 기수" data-en="Heading in the Drone tab"></dd>
+              <dt data-ko="짐벌 기울기" data-en="Gimbal Tilt"></dt><dd data-ko="드론 탭의 짐벌" data-en="Gimbal in the Drone tab"></dd>
+              <dt data-ko="카메라 동작" data-en="Camera Action"></dt><dd data-ko="① 녹화 시작, ⑤ 녹화 중지, 나머지 없음" data-en="① start, ⑤ stop, others none"></dd>
+            </dl>
+          </div>
+          <div>
+            <h3 data-ko="경로 전체" data-en="Whole route"></h3>
+            <p class="path" data-ko="패널에서 다음(Next)을 탭" data-en="Tap Next on the panel"></p>
+            <dl>
+              <dt data-ko="전체 속도" data-en="Global Speed"></dt><dd>7 m/s</dd>
+              <dt data-ko="비행 종료" data-en="End of Flight"></dt><dd data-ko="호버" data-en="Hover"></dd>
+              <dt data-ko="신호 끊김" data-en="On Signal Lost"></dt><dd>RTH</dd>
+              <dt data-ko="시작점" data-en="Start Point"></dt><dd>①</dd>
+            </dl>
+          </div>
+        </div>
+        <p class="small" data-ko="저장: 패널 왼쪽 위 목록 아이콘 → 라이브러리, 연필로 이름 변경. GO를 누르면 업로드 후 바로 출발합니다. 고도는 이륙 지점 기준이라, 저장한 경로는 처음과 같은 높이에서 이륙해야 합니다. 메뉴 이름은 앱 버전과 언어에 따라 조금 다를 수 있습니다." data-en="To save: list icon at the top left of the panel → Library, pencil to rename. GO uploads and takes off straight away. Altitude is measured from take-off, so launch a saved route from the same height as before. Menu names may vary slightly by app version and language."></p>
+      </section>
+
+      <!-- 6 -->
+      <section class="slide" data-n="6" hidden>
         <span class="eyebrow" data-ko="두 가지 방법" data-en="Two ways in"></span>
         <h2 data-ko="직접 입력할까, 파일을 바꿔 넣을까" data-en="Type it in, or swap in a file"></h2>
         <div class="versus">
@@ -269,8 +313,8 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
         </div>
       </section>
 
-      <!-- 6 -->
-      <section class="slide" data-n="6" hidden>
+      <!-- 7 -->
+      <section class="slide" data-n="7" hidden>
         <span class="eyebrow" data-ko="프로샵에서 다 조종할 수 있나?" data-en="Can I fly it all from the pro shop?"></span>
         <h2 data-ko="전파는 닿지만, 눈이 닿지 않습니다" data-en="The signal reaches. Your eyes don't."></h2>
         <svg viewBox="0 0 800 200" role="img" aria-label="Distances compared">
@@ -302,8 +346,8 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
         </div>
       </section>
 
-      <!-- 7 -->
-      <section class="slide" data-n="7" hidden>
+      <!-- 8 -->
+      <section class="slide" data-n="8" hidden>
         <span class="eyebrow" data-ko="현장 운영" data-en="On the day"></span>
         <h2 data-ko="배터리 다섯 개, 코스 순서대로" data-en="Five batteries, in course order"></h2>
         <div class="bats">
@@ -322,8 +366,8 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
         </div>
       </section>
 
-      <!-- 8 zones -->
-      <section class="slide" data-n="8" hidden>
+      <!-- 9 zones -->
+      <section class="slide" data-n="9" hidden>
         <span class="eyebrow" data-ko="비행 구역 확인 · DJI GEO, 2026-10-29 조회" data-en="Flight zones · DJI GEO, checked 2026-10-29"></span>
         <h2 data-ko="금지 구역은 없습니다. 15·16번만 확인 한 번" data-en="No no-fly zones. One prompt on 15 and 16"></h2>
         <div class="verdict">
@@ -337,8 +381,8 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
         </div>
       </section>
 
-      <!-- 9 -->
-      <section class="slide" data-n="9" hidden>
+      <!-- 10 -->
+      <section class="slide" data-n="10" hidden>
         <span class="eyebrow" data-ko="날기 전에" data-en="Before you fly"></span>
         <h2 data-ko="이것만은 꼭 확인하세요" data-en="Check these first"></h2>
         <ul class="checks">
@@ -388,8 +432,10 @@ const NARR = [
     en: 'Each hole gets three shots. First, an overview photo from 110 metres up, behind the tee. Second, a fly-through video that starts low behind the tee and ends over the green. Third, a straight-down photo of the green from 45 metres. A full top-down of a whole hole would need more than the 120 metre limit, so we skip it here.' },
   { ko: '플라이스루 경로는 다섯 점입니다. 티 뒤 40미터, 티 위, 홀의 60퍼센트 지점, 그린 앞 35미터, 그리고 그린 한가운데입니다. 고도는 20미터에서 시작해 45미터까지 올라갔다가 30미터로 내려옵니다. 좌표를 외울 필요 없이, 지도에서 이 다섯 곳을 찍으면 됩니다.',
     en: 'The fly-through has five points. Forty metres behind the tee, over the tee, sixty percent along the hole, thirty-five metres short of the green, and the centre of the green. It climbs from 20 metres to 45, then drops to 30. No need to memorise coordinates. Just tap these five spots on the map.' },
-  { ko: 'DJI 플라이 앱에서는 이렇게 넣습니다. 드론을 연결하고, 웨이포인트 아이콘을 눌러 지도로 갑니다. 다섯 곳을 순서대로 탭하고, 점마다 고도, 짐벌, 기수 방향, 속도를 넣습니다. 첫 점에 녹화 시작, 마지막 점에 녹화 중지와 사진을 넣고, 홀 이름으로 저장하세요. 현장에서는 불러와서 시작만 누르면 됩니다.',
-    en: "Here's how to load it in DJI Fly. Connect the drone, tap the waypoint icon and open the map. Tap the five spots in order, then set altitude, gimbal, heading and speed for each. Add start recording on the first point, stop and photo on the last, and save it under the hole's name. On the course, just load it and press start." },
+  { ko: 'DJI 플라이 앱에서는 이렇게 넣습니다. 드론을 연결하고, 웨이포인트 아이콘을 눌러 지도로 갑니다. 다섯 곳을 순서대로 탭하고, 점마다 고도, 짐벌, 기수 방향, 속도를 넣습니다. 첫 점에 녹화 시작, 마지막 점에 녹화 중지를 넣고, 홀 이름으로 저장하세요. 현장에서는 불러와서 시작만 누르면 됩니다.',
+    en: "Here's how to load it in DJI Fly. Connect the drone, tap the waypoint icon and open the map. Tap the five spots in order, then set altitude, gimbal, heading and speed for each. Add start recording on the first point, stop recording on the last, and save it under the hole's name. On the course, just load it and press start." },
+  { ko: '값마다 넣는 곳이 다릅니다. 최대 고도와 장애물 회피는 화면 오른쪽 위 점 세 개를 눌러 안전 메뉴에서 설정합니다. 고도, 속도, 기수, 짐벌, 카메라 동작은 패널에서 웨이포인트 번호를 눌러 점마다 넣습니다. 다음을 누르면 비행 종료와 신호 끊김 같은 경로 전체 설정이 나옵니다. 고도는 이륙 지점 기준이니, 저장한 경로는 처음과 같은 높이에서 이륙하세요.',
+    en: "Each value has its own place. Max altitude and obstacle avoidance are under the three dots at the top right, in the Safety menu. Altitude, speed, heading, gimbal and camera action are set per point: tap the waypoint number on the panel. Tap Next for whole-route settings like end of flight and signal lost. Altitude is measured from take-off, so launch a saved route from the same height as before." },
   { ko: '방법은 두 가지입니다. 앱에서 직접 입력하는 방법은 공식적이고 안정적이라 추천합니다. 경로 파일을 바꿔 넣는 방법은 입력이 필요 없지만, 공식 방법이 아니어서 앱이 업데이트되면 안 될 수 있습니다.',
     en: "There are two ways in. Entering routes in the app is official and reliable, so that's the one I recommend. Swapping in route files saves the typing, but it's unofficial and can break when the app updates." },
   { ko: '프로샵에서 전부 조종할 수 있을까요? 전파는 사양상 20킬로미터라 코스 끝까지 닿습니다. 하지만 캐나다에서는 드론을 항상 눈으로 직접 봐야 하는데, 작은 드론은 300에서 500미터만 멀어져도 보이지 않습니다. 낮게 날면 숲이 전파도 막고요. 그래서 카트로 홀마다 가서 티 뒤에서 이륙합니다.',

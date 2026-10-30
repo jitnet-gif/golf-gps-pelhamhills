@@ -66,6 +66,15 @@ function ZoneTag({ zone }: { zone: ZoneLevel | null }) {
   return <span className={`inline-block px-1.5 py-0.5 rounded text-[11px] font-medium whitespace-nowrap ${ZONE_BADGE[zone]}`}>{ZONE_LABEL[zone]}</span>;
 }
 
+/** 이 값들은 DJI Fly 화면 이름입니다. 앱 버전과 언어에 따라 조금 다를 수 있습니다. */
+const FLY_SETTINGS: [string, string][] = [
+  ['앱 설정: 카메라 화면 오른쪽 위 ··· ▸ 안전', '최대 고도 120m, 장애물 회피 동작은 우회 또는 브레이크'],
+  ['점마다: 패널에서 웨이포인트 번호를 탭', '위 표의 고도·기수·짐벌, 속도 7m/s, 카메라 동작은 ① 녹화 시작, ⑤ 녹화 중지, 나머지 없음'],
+  ['경로 전체: 패널에서 다음(Next)을 탭', '전체 속도 7m/s, 비행 종료는 호버, 신호 끊김은 RTH, 시작점은 ①'],
+  ['저장: 패널 왼쪽 위 목록 아이콘 ▸ 라이브러리', '연필로 홀 이름을 넣습니다. GO 를 누르면 업로드 후 바로 출발합니다.'],
+  ['이륙', '고도는 이륙 지점 기준입니다. 저장한 경로는 처음과 같은 높이에서 이륙하세요.'],
+];
+
 /**
  * 드론 촬영 (DJI Mini 4 Pro)
  *
@@ -292,7 +301,7 @@ export function DroneAdmin() {
             <div className="flex items-center gap-2">
               <Presentation className="w-4 h-4 text-primary" />
               <p className="text-sm font-medium">호프 가이드</p>
-              <span className="ml-auto text-xs text-muted-foreground">ElevenLabs Hope · 9장</span>
+              <span className="ml-auto text-xs text-muted-foreground">ElevenLabs Hope · 10장</span>
             </div>
             <p className="text-xs text-muted-foreground">
               경로 넣는 법, 조종 위치, 배터리, 비행 구역, 체크리스트를 호프가 한국어·영어로 읽어 줍니다. 피치와 속도를 바꿀 수 있습니다.
@@ -403,8 +412,20 @@ function HoleCard({
       </div>
 
       <p className="text-xs text-muted-foreground">
-        H 와 G 는 직접 날려 한 장씩 찍습니다. ①~⑤ 는 DJI Fly ▸ 웨이포인트에서 지도에 같은 자리를 찍고 고도·짐벌·기수를 넣습니다 (속도 {MISSION_SPEED}m/s, ①에서 녹화 시작, ⑤에서 녹화 중지와 사진). 그린 한 장에 약 {GREEN_COVERAGE.across}×{GREEN_COVERAGE.along}m 가 담깁니다.
+        H 와 G 는 직접 날려 한 장씩 찍습니다. ①~⑤ 는 DJI Fly ▸ 웨이포인트에서 지도에 같은 자리를 찍고 고도·짐벌·기수를 넣습니다 (속도 {MISSION_SPEED}m/s, ①에서 녹화 시작, ⑤에서 녹화 중지). 그린 한 장에 약 {GREEN_COVERAGE.across}×{GREEN_COVERAGE.along}m 가 담깁니다.
       </p>
+
+      <details className="rounded-lg border border-border p-3 text-xs">
+        <summary className="cursor-pointer text-sm font-medium">DJI Fly 어디에 넣나요</summary>
+        <dl className="mt-2 flex flex-col gap-2">
+          {FLY_SETTINGS.map(([where, what]) => (
+            <div key={where}>
+              <dt className="font-medium">{where}</dt>
+              <dd className="text-muted-foreground">{what}</dd>
+            </div>
+          ))}
+        </dl>
+      </details>
 
       <div className="flex flex-wrap items-center gap-2">
         <a
