@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { CircleMarker, MapContainer, Marker, Polygon, Polyline, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { ChevronLeft, ChevronRight, ClipboardCopy, ExternalLink, Presentation, TriangleAlert } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ClipboardCopy, Download, ExternalLink, Presentation, TriangleAlert } from 'lucide-react';
 import { PELHAM_HILLS, PELHAM_HILLS_HOLES, type FairwayPoint, type Hole } from '@/data/pelhamHills';
 import { DRONE_ZONES, DRONE_ZONES_CHECKED, type ZoneLevel } from '@/data/droneZones';
 import { fetchCourseData } from '@/lib/courseData';
+import { holeKmz, kmzName } from '@/lib/droneKmz';
 import { getLang, onLangChange } from '@/lib/i18n/engine';
 import { TILE_ATTRIBUTION, TILE_MAX_ZOOM, TILE_URL_TEMPLATE } from '@/lib/tiles';
 import {
@@ -133,6 +134,15 @@ export function DroneAdmin() {
     );
   };
 
+  const downloadKmz = (p: HolePlan) => {
+    const url = URL.createObjectURL(new Blob([holeKmz(p)], { type: 'application/vnd.google-earth.kmz' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = kmzName(p);
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const step = (d: number) => {
     const n = ((selected - 1 + d + plans.length) % plans.length) + 1;
     setSelected(n);
@@ -226,6 +236,7 @@ export function DroneAdmin() {
           onPrev={() => step(-1)}
           onNext={() => step(1)}
           onCopy={() => copyCsv(plan)}
+          onKmz={() => downloadKmz(plan)}
           copied={copied}
         />
       ) : (
@@ -343,12 +354,14 @@ function HoleCard({
   onPrev,
   onNext,
   onCopy,
+  onKmz,
   copied,
 }: {
   plan: HolePlan;
   onPrev: () => void;
   onNext: () => void;
   onCopy: () => void;
+  onKmz: () => void;
   copied: string | null;
 }) {
   const h = plan.hole;
@@ -427,6 +440,10 @@ function HoleCard({
         </dl>
       </details>
 
+      <p className="text-xs text-muted-foreground">
+        KMZ 는 DJI Fly 에서 저장한 빈 경로 파일을 덮어쓰는 비공식 방법입니다. 앱에서 경로가 맞게 보이는지 확인하고, 처음에는 한 홀만 시험 비행하세요.
+      </p>
+
       <div className="flex flex-wrap items-center gap-2">
         <a
           href={gmaps(plan.route[0].at)}
@@ -442,6 +459,13 @@ function HoleCard({
           className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-border text-sm"
         >
           <ClipboardCopy className="w-4 h-4" />웨이포인트 CSV 복사
+        </button>
+        <button
+          type="button"
+          onClick={onKmz}
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-border text-sm"
+        >
+          <Download className="w-4 h-4" />KMZ 내려받기
         </button>
         {copied && (
           <span className="text-xs text-muted-foreground" aria-live="polite">

@@ -35,6 +35,12 @@ SOURCE = ROOT / "frontend" / "public" / "course" / "course-map.webp"
 OUT = ROOT / "frontend" / "public" / "course" / "course-map-geo.webp"
 HOLES_TS = ROOT / "frontend" / "src" / "data" / "pelhamHills.ts"
 
+# The printed map numbers the nines the other way round from the club (see
+# pelhamHillsBook.ts): printed hole N is the club's hole N+-9. DRAWN and NUMBERS
+# below are keyed by the printed number; club_hole() turns it into the club's.
+# The number discs are swapped on the picture too, so each hole shows its club
+# number.
+
 # Where each hole's tee and green are drawn, in pixels of the picture turned
 # north-up (x right, y down). Read off the map at the end of each hole's line.
 DRAWN = {
@@ -56,8 +62,9 @@ DRAWN = {
     17: ((1588, 770), (1513, 195)),
     18: ((1568, 100), (983, 268)),
 }
-# Hole 2 is left out: its tee and pin in the course data are 157 m apart on a
-# 335-yard hole, so they would drag the drawing out of shape.
+# Printed hole 2 (the club's 11th) is left out: the Google Earth survey
+# (course-gps/) has its tees but no pin, so its pin is still OSM's, about 60 m
+# short of the drawn green, and would drag the drawing out of shape.
 
 # Number discs, north-up pixels (refined to the disc's centre below).
 NUMBERS = {
@@ -68,6 +75,8 @@ NUMBERS = {
 }
 DISC_INSIDE = 28   # radius inside the printed outline - what gets turned
 DISC_KEEP = 36     # radius kept solid when the paper is made see-through
+DISC_SWAP = 31     # radius whose ink is traded between the two nines' discs
+INK_MAX = 110      # grey level below which a disc pixel is printed number
 PAPER_MIN = 110    # paper: every channel at least this light...
 PAPER_GREY = 24    # ...and channels this close together (no colour)
 CLOSE = 15         # see-through gaps narrower than this many pixels are filled back in
@@ -92,6 +101,11 @@ def course_points():
         n, lat, lng, tlat, tlng = int(m[1]), *map(float, m.groups()[1:])
         holes[n] = ((tlat, tlng), (lat, lng))
     return holes
+
+
+def club_hole(printed):
+    """The club's number for the printed map's hole `printed`."""
+    return printed + 9 if printed <= 9 else printed - 9
 
 
 def to_m(lat, lng):
@@ -156,6 +170,24 @@ def turn_disc(image, cx, cy, r):
     image.paste(turned, box[:2], mask)
 
 
+def swap_discs(image, a, b, r):
+    """Trade the numbers printed in two discs: blank each disc, then ink in the
+    other's dark strokes. Only the ink moves, so the two outlines - not the same
+    size - stay where they were printed."""
+    def cut(c):
+        return image.crop((c[0] - r, c[1] - r, c[0] + r + 1, c[1] + r + 1))
+    disc_a, disc_b = cut(a), cut(b)
+    inside = Image.new("L", disc_a.size, 0)
+    ImageDraw.Draw(inside).ellipse((0, 0, 2 * r, 2 * r), fill=255)
+    white = Image.new("RGB", disc_a.size, (255, 255, 255))
+    for disc, at in ((disc_b, a), (disc_a, b)):
+        ink = disc.convert("L").point(lambda v: 255 if v < INK_MAX else 0)
+        ink = Image.composite(ink, Image.new("L", disc.size, 0), inside)
+        corner = (at[0] - r, at[1] - r)
+        image.paste(white, corner, inside)
+        image.paste(disc, corner, ink)
+
+
 def bilinear(rgba, u, v):
     h, w, _ = rgba.shape
     inside = (u >= 0) & (v >= 0) & (u <= w - 1) & (v <= h - 1)
@@ -182,6 +214,10 @@ def main():
         centres[n] = (cx, cy)
         turn_disc(picture, cx, cy, DISC_INSIDE)
     turn_in_place(picture, CLUBHOUSE)
+    # Each disc then takes the other nine's number: the club's number for the
+    # hole it sits on.
+    for n in range(1, 10):
+        swap_discs(picture, centres[n], centres[n + 9], DISC_SWAP)
 
     rgba = np.dstack([np.asarray(picture), np.full(rgb.shape[:2], 255, np.uint8)]).astype(np.float32)
     # Paper is light and colourless: the white page, the scanner's grey speckle
@@ -206,7 +242,7 @@ def main():
     holes = course_points()
     geo, drawn = [], []
     for n, (tee_px, pin_px) in DRAWN.items():
-        tee, pin = holes[n]
+        tee, pin = holes[club_hole(n)]
         geo += [to_m(*tee), to_m(*pin)]
         drawn += [tee_px, pin_px]
     geo, drawn = np.array(geo, float), np.array(drawn, float)
@@ -254,7 +290,7 @@ def main():
 
     south, north = LAT0 + ymin / M_LAT, LAT0 + ymax / M_LAT
     west, east = LNG0 + xmin / M_LNG, LNG0 + xmax / M_LNG
-    labels = {n: (LAT0 + pt[1] / M_LAT, LNG0 + pt[0] / M_LNG) for n, (_, pt) in best.items()}
+    labels = {club_hole(n): (LAT0 + pt[1] / M_LAT, LNG0 + pt[0] / M_LNG) for n, (_, pt) in best.items()}
     print(f"{OUT} {out_w}x{out_h} {OUT.stat().st_size // 1024} KB")
     print("export const COURSE_MAP_OVERLAY = {")
     print("  url: '/course/course-map-geo.webp',")

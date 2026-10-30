@@ -16,7 +16,10 @@ them in two batches and a third was named by hand - so the mapping below was rea
 off the pages themselves. The other scans in that folder are the cover, the pub
 and tournament pages, the simulator page, the scorecard and a whole-course map.
 
-    hole  file (D:\\)
+The book numbers the nines the other way round from the club (see
+pelhamHillsBook.ts), so book page N is written out as the club's hole N+-9.
+
+    page  file (D:\\)
        1  pelham golf course_004.jpeg
        2  pelham golf course_005.jpeg
        3  pelham golf course_006.jpeg
@@ -89,6 +92,11 @@ LAYOUT_WIDTH = 540
 PHOTO_WIDTH = 960
 
 
+def club_hole(page: int) -> int:
+    """The club's number for the book's page `page` - the nines are swapped."""
+    return page + 9 if page <= 9 else page - 9
+
+
 def resized(image: Image.Image, width: int) -> Image.Image:
     return image.resize((width, round(width * image.height / image.width)), Image.LANCZOS)
 
@@ -114,7 +122,7 @@ def main() -> int:
         sizes.add((layout.size, photo.size))
 
         for kind, image, quality in (("layout", layout, 78), ("photo", photo, 76)):
-            out = os.path.join(OUT_DIR, f"hole-{hole}-{kind}.webp")
+            out = os.path.join(OUT_DIR, f"hole-{club_hole(hole)}-{kind}.webp")
             image.save(out, "WEBP", quality=quality, method=6)
             total += os.path.getsize(out)
 

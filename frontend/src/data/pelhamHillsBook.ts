@@ -4,10 +4,15 @@
 // scorecard spread). Every yardage column below was checked against the OUT,
 // IN and TOTAL figures printed on the scorecard and all six columns add up:
 //
-//   Blue 3534 + 3369 = 6903    White        3270 + 3093 = 6363
-//   White/Yellow     = 6002    Yellow       3002 + 2850 = 5852
-//   Yellow/Red       = 5063    Red          2439 + 2441 = 4880
-//   Par 36 + 35 = 71           Handicaps 1-18 each used exactly once
+//   Blue 3369 + 3534 = 6903    White        3093 + 3270 = 6363
+//   White/Yellow     = 6002    Yellow       2850 + 3002 = 5852
+//   Yellow/Red       = 5063    Red          2441 + 2439 = 4880
+//   Par 35 + 36 = 71           Handicaps 1-18 each used exactly once
+//
+// Filed by the club's current numbering, not the book's: the club numbers the
+// nines the other way round from the printed book (and from its course map),
+// so the book's page N is hole N+-9 here and its OUT is our IN. The pictures
+// in public/holes still show the book's printed number.
 //
 // This file is the authority for par, handicap, yardage and hole commentary.
 // Coordinates live in pelhamHills.ts (surveyed from OpenStreetMap) - the two
@@ -86,6 +91,136 @@ export const PELHAM_HILLS_TEES: {
 export const PELHAM_HILLS_BOOK: BookHole[] = [
   {
     holeNumber: 1,
+    par: 5,
+    handicap: 8,
+    yards: { blue: 530, white: 470, whiteYellow: 470, yellow: 450, yellowRed: 420, red: 420 },
+    greenDepth: 30,
+    description:
+      'A good drive makes this par 5 starting hole reachable in two. A quality second ' +
+      'shot is required since the green is protected by a gully, three bunkers and trees. ' +
+      'If you cannot get there in two, lay up to a short iron and attack the pin.',
+    teeCarries: [{ red: 170, yellow: 200, white: 220, blue: 280 }],
+    greenArrows: [],
+  },
+  {
+    holeNumber: 2,
+    par: 4,
+    handicap: 2,
+    yards: { blue: 405, white: 378, whiteYellow: 355, yellow: 355, yellowRed: 314, red: 314 },
+    greenDepth: 26,
+    description:
+      'Hitting the fairway from the tee is required with trees lurking on right and two ' +
+      'large trees and lateral hazard on the left side with the green protected by a large ' +
+      'valley. Make sure you hit enough club into the green or you can watch your ball ' +
+      'roll all the way back down.',
+    teeCarries: [{ red: 164, yellow: 205, white: 228, blue: 255 }],
+    greenArrows: [50],
+  },
+  {
+    holeNumber: 3,
+    par: 3,
+    handicap: 14,
+    yards: { blue: 207, white: 180, whiteYellow: 154, yellow: 154, yellowRed: 154, red: 140 },
+    greenDepth: 20,
+    description:
+      'A lateral hazard protects the left side on hole three. Being too aggressive and ' +
+      'hitting at the pin when it is tucked to one side or the other can bring a large ' +
+      'number into play. Hit the center of the green and leave yourself a birdie putt of ' +
+      'no longer than 20-25 feet.',
+    teeCarries: [],
+    greenArrows: [],
+  },
+  {
+    holeNumber: 4,
+    par: 4,
+    handicap: 18,
+    yards: { blue: 473, white: 440, whiteYellow: 400, yellow: 400, yellowRed: 321, red: 321 },
+    greenDepth: 25,
+    description:
+      'A short but not-easy par 5 with a narrow fairway, many trees and mounds on both ' +
+      'sides. Small green protected by a pond on the left while a lateral hazard guards ' +
+      'the right and back. A bad tee shot could bring a large number into play.',
+    teeCarries: [
+      { red: 71, yellow: 150, white: 190, blue: 223 },
+      { red: 121, yellow: 200, white: 240, blue: 273 },
+    ],
+    greenArrows: [67, 50],
+  },
+  {
+    holeNumber: 5,
+    par: 4,
+    handicap: 6,
+    yards: { blue: 400, white: 385, whiteYellow: 366, yellow: 366, yellowRed: 327, red: 327 },
+    greenDepth: 30,
+    description:
+      'Dogleg right with trees all the way down the right hand side between the fairway ' +
+      'and green. Stay to the left side of the fairway, even if you do not hit the ball ' +
+      'long enough, to go past the end of the trees. You will have a shot over the trees ' +
+      'at the green from approximately 140 to 160 yards.',
+    teeCarries: [{ red: 177, yellow: 216, white: 235, blue: 250 }],
+    greenArrows: [],
+  },
+  {
+    holeNumber: 6,
+    par: 4,
+    handicap: 10,
+    yards: { blue: 386, white: 353, whiteYellow: 353, yellow: 328, yellowRed: 328, red: 258 },
+    greenDepth: 30,
+    description:
+      'Short hole gives you a great chance for birdie here. Hit a club that will put you ' +
+      'in the fairway, length off the tee is not your number one concern here, ball ' +
+      'positioning is. There is trouble on both sides with a pond on the left and a large ' +
+      'tree and valley on the right.',
+    teeCarries: [{ red: 158, yellow: 228, white: 253, blue: 286 }],
+    greenArrows: [],
+  },
+  {
+    holeNumber: 7,
+    par: 3,
+    handicap: 12,
+    yards: { blue: 187, white: 167, whiteYellow: 155, yellow: 155, yellowRed: 122, red: 122 },
+    greenDepth: 22,
+    description:
+      'This hole plays uphill with a water hazard short and two grass bunkers in front. ' +
+      'This tough little par 3 plays a half club longer, make sure you check out the flag ' +
+      'for wind because you are protected from the wind on the tee.',
+    teeCarries: [],
+    greenArrows: [49],
+  },
+  {
+    holeNumber: 8,
+    par: 4,
+    handicap: 16,
+    yards: { blue: 396, white: 350, whiteYellow: 324, yellow: 324, yellowRed: 324, red: 295 },
+    greenDepth: 31,
+    description:
+      'This is your risk/reward hole. You can hit the driver and try to hammer the ball ' +
+      'all the way down to the green, but if you are not straight, you can be three off ' +
+      'the tee right of you in stuck beside a tree left. Or, hit a club that will keep you ' +
+      'in play 200-225 off the tee which will leave a wedge in to attack this pin and make ' +
+      'your birdie.',
+    teeCarries: [{ red: 195, yellow: 224, white: 250, blue: 296 }],
+    greenArrows: [50],
+  },
+  {
+    holeNumber: 9,
+    par: 4,
+    handicap: 4,
+    yards: { blue: 385, white: 370, whiteYellow: 370, yellow: 318, yellowRed: 244, red: 244 },
+    greenDepth: 34,
+    description:
+      'Great finishing hole. Your target is the 150 marker for your tee shot; trying to ' +
+      'cut off the corner of the dogleg brings the trees into play. For the big hitter, ' +
+      'the pond on the left is in play. Remember, the green is well protected. This is as ' +
+      'close to an island green as you can get.',
+    teeCarries: [
+      { red: 144, yellow: 218, white: 270, blue: 285 },
+      { red: 94, yellow: 168, white: 220, blue: 235 },
+    ],
+    greenArrows: [53],
+  },
+  {
+    holeNumber: 10,
     par: 4,
     handicap: 1,
     yards: { blue: 470, white: 435, whiteYellow: 370, yellow: 370, yellowRed: 243, red: 243 },
@@ -102,7 +237,7 @@ export const PELHAM_HILLS_BOOK: BookHole[] = [
     greenArrows: [43],
   },
   {
-    holeNumber: 2,
+    holeNumber: 11,
     par: 4,
     handicap: 15,
     yards: { blue: 350, white: 335, whiteYellow: 290, yellow: 290, yellowRed: 290, red: 253 },
@@ -113,7 +248,7 @@ export const PELHAM_HILLS_BOOK: BookHole[] = [
     greenArrows: [45],
   },
   {
-    holeNumber: 3,
+    holeNumber: 12,
     par: 5,
     handicap: 3,
     yards: { blue: 561, white: 529, whiteYellow: 529, yellow: 501, yellowRed: 424, red: 424 },
@@ -127,7 +262,7 @@ export const PELHAM_HILLS_BOOK: BookHole[] = [
     greenArrows: [81, 50],
   },
   {
-    holeNumber: 4,
+    holeNumber: 13,
     par: 4,
     handicap: 11,
     yards: { blue: 403, white: 361, whiteYellow: 361, yellow: 347, yellowRed: 347, red: 333 },
@@ -140,7 +275,7 @@ export const PELHAM_HILLS_BOOK: BookHole[] = [
     greenArrows: [22],
   },
   {
-    holeNumber: 5,
+    holeNumber: 14,
     par: 3,
     handicap: 13,
     yards: { blue: 228, white: 187, whiteYellow: 170, yellow: 170, yellowRed: 146, red: 146 },
@@ -154,7 +289,7 @@ export const PELHAM_HILLS_BOOK: BookHole[] = [
     greenArrows: [41],
   },
   {
-    holeNumber: 6,
+    holeNumber: 15,
     par: 5,
     handicap: 5,
     yards: { blue: 576, white: 528, whiteYellow: 478, yellow: 478, yellowRed: 384, red: 384 },
@@ -170,7 +305,7 @@ export const PELHAM_HILLS_BOOK: BookHole[] = [
     greenArrows: [50, 114],
   },
   {
-    holeNumber: 7,
+    holeNumber: 16,
     par: 3,
     handicap: 17,
     yards: { blue: 164, white: 150, whiteYellow: 150, yellow: 139, yellowRed: 139, red: 120 },
@@ -183,7 +318,7 @@ export const PELHAM_HILLS_BOOK: BookHole[] = [
     greenArrows: [27, 52],
   },
   {
-    holeNumber: 8,
+    holeNumber: 17,
     par: 4,
     handicap: 9,
     yards: { blue: 374, white: 354, whiteYellow: 340, yellow: 340, yellowRed: 295, red: 295 },
@@ -199,7 +334,7 @@ export const PELHAM_HILLS_BOOK: BookHole[] = [
     greenArrows: [50],
   },
   {
-    holeNumber: 9,
+    holeNumber: 18,
     par: 4,
     handicap: 7,
     yards: { blue: 408, white: 391, whiteYellow: 367, yellow: 367, yellowRed: 241, red: 241 },
@@ -214,164 +349,35 @@ export const PELHAM_HILLS_BOOK: BookHole[] = [
     ],
     greenArrows: [50],
   },
-  {
-    holeNumber: 10,
-    par: 5,
-    handicap: 8,
-    yards: { blue: 530, white: 470, whiteYellow: 470, yellow: 450, yellowRed: 420, red: 420 },
-    greenDepth: 30,
-    description:
-      'A good drive makes this par 5 starting hole reachable in two. A quality second ' +
-      'shot is required since the green is protected by a gully, three bunkers and trees. ' +
-      'If you cannot get there in two, lay up to a short iron and attack the pin.',
-    teeCarries: [{ red: 170, yellow: 200, white: 220, blue: 280 }],
-    greenArrows: [],
-  },
-  {
-    holeNumber: 11,
-    par: 4,
-    handicap: 2,
-    yards: { blue: 405, white: 378, whiteYellow: 355, yellow: 355, yellowRed: 314, red: 314 },
-    greenDepth: 26,
-    description:
-      'Hitting the fairway from the tee is required with trees lurking on right and two ' +
-      'large trees and lateral hazard on the left side with the green protected by a large ' +
-      'valley. Make sure you hit enough club into the green or you can watch your ball ' +
-      'roll all the way back down.',
-    teeCarries: [{ red: 164, yellow: 205, white: 228, blue: 255 }],
-    greenArrows: [50],
-  },
-  {
-    holeNumber: 12,
-    par: 3,
-    handicap: 14,
-    yards: { blue: 207, white: 180, whiteYellow: 154, yellow: 154, yellowRed: 154, red: 140 },
-    greenDepth: 20,
-    description:
-      'A lateral hazard protects the left side on hole three. Being too aggressive and ' +
-      'hitting at the pin when it is tucked to one side or the other can bring a large ' +
-      'number into play. Hit the center of the green and leave yourself a birdie putt of ' +
-      'no longer than 20-25 feet.',
-    teeCarries: [],
-    greenArrows: [],
-  },
-  {
-    holeNumber: 13,
-    par: 4,
-    handicap: 18,
-    yards: { blue: 473, white: 440, whiteYellow: 400, yellow: 400, yellowRed: 321, red: 321 },
-    greenDepth: 25,
-    description:
-      'A short but not-easy par 5 with a narrow fairway, many trees and mounds on both ' +
-      'sides. Small green protected by a pond on the left while a lateral hazard guards ' +
-      'the right and back. A bad tee shot could bring a large number into play.',
-    teeCarries: [
-      { red: 71, yellow: 150, white: 190, blue: 223 },
-      { red: 121, yellow: 200, white: 240, blue: 273 },
-    ],
-    greenArrows: [67, 50],
-  },
-  {
-    holeNumber: 14,
-    par: 4,
-    handicap: 6,
-    yards: { blue: 400, white: 385, whiteYellow: 366, yellow: 366, yellowRed: 327, red: 327 },
-    greenDepth: 30,
-    description:
-      'Dogleg right with trees all the way down the right hand side between the fairway ' +
-      'and green. Stay to the left side of the fairway, even if you do not hit the ball ' +
-      'long enough, to go past the end of the trees. You will have a shot over the trees ' +
-      'at the green from approximately 140 to 160 yards.',
-    teeCarries: [{ red: 177, yellow: 216, white: 235, blue: 250 }],
-    greenArrows: [],
-  },
-  {
-    holeNumber: 15,
-    par: 4,
-    handicap: 10,
-    yards: { blue: 386, white: 353, whiteYellow: 353, yellow: 328, yellowRed: 328, red: 258 },
-    greenDepth: 30,
-    description:
-      'Short hole gives you a great chance for birdie here. Hit a club that will put you ' +
-      'in the fairway, length off the tee is not your number one concern here, ball ' +
-      'positioning is. There is trouble on both sides with a pond on the left and a large ' +
-      'tree and valley on the right.',
-    teeCarries: [{ red: 158, yellow: 228, white: 253, blue: 286 }],
-    greenArrows: [],
-  },
-  {
-    holeNumber: 16,
-    par: 3,
-    handicap: 12,
-    yards: { blue: 187, white: 167, whiteYellow: 155, yellow: 155, yellowRed: 122, red: 122 },
-    greenDepth: 22,
-    description:
-      'This hole plays uphill with a water hazard short and two grass bunkers in front. ' +
-      'This tough little par 3 plays a half club longer, make sure you check out the flag ' +
-      'for wind because you are protected from the wind on the tee.',
-    teeCarries: [],
-    greenArrows: [49],
-  },
-  {
-    holeNumber: 17,
-    par: 4,
-    handicap: 16,
-    yards: { blue: 396, white: 350, whiteYellow: 324, yellow: 324, yellowRed: 324, red: 295 },
-    greenDepth: 31,
-    description:
-      'This is your risk/reward hole. You can hit the driver and try to hammer the ball ' +
-      'all the way down to the green, but if you are not straight, you can be three off ' +
-      'the tee right of you in stuck beside a tree left. Or, hit a club that will keep you ' +
-      'in play 200-225 off the tee which will leave a wedge in to attack this pin and make ' +
-      'your birdie.',
-    teeCarries: [{ red: 195, yellow: 224, white: 250, blue: 296 }],
-    greenArrows: [50],
-  },
-  {
-    holeNumber: 18,
-    par: 4,
-    handicap: 4,
-    yards: { blue: 385, white: 370, whiteYellow: 370, yellow: 318, yellowRed: 244, red: 244 },
-    greenDepth: 34,
-    description:
-      'Great finishing hole. Your target is the 150 marker for your tee shot; trying to ' +
-      'cut off the corner of the dogleg brings the trees into play. For the big hitter, ' +
-      'the pond on the left is in play. Remember, the green is well protected. This is as ' +
-      'close to an island green as you can get.',
-    teeCarries: [
-      { red: 144, yellow: 218, white: 270, blue: 285 },
-      { red: 94, yellow: 168, white: 220, blue: 235 },
-    ],
-    greenArrows: [53],
-  },
 ];
 
 /** Out / In / Total for one tee set, as printed. */
 export const PELHAM_HILLS_TOTALS: Record<TeeSet, { out: number; in: number; total: number }> = {
-  blue: { out: 3534, in: 3369, total: 6903 },
-  white: { out: 3270, in: 3093, total: 6363 },
-  whiteYellow: { out: 3055, in: 2947, total: 6002 },
-  yellow: { out: 3002, in: 2850, total: 5852 },
-  yellowRed: { out: 2509, in: 2554, total: 5063 },
-  red: { out: 2439, in: 2441, total: 4880 },
+  blue: { out: 3369, in: 3534, total: 6903 },
+  white: { out: 3093, in: 3270, total: 6363 },
+  whiteYellow: { out: 2947, in: 3055, total: 6002 },
+  yellow: { out: 2850, in: 3002, total: 5852 },
+  yellowRed: { out: 2554, in: 2509, total: 5063 },
+  red: { out: 2441, in: 2439, total: 4880 },
 };
 
-export const PELHAM_HILLS_PAR = { out: 36, in: 35, total: 71 } as const;
+export const PELHAM_HILLS_PAR = { out: 35, in: 36, total: 71 } as const;
 
 /**
  * Things the printed book contradicts itself about. Left as-is rather than
  * silently corrected, because the club's own card is what players compare against.
  *
- * - Hole 9: the hole page prints a red yardage of 341, the scorecard prints 241.
- *   The scorecard is used here - its 2439 front-nine red total only adds up with 241.
- * - Hole 13: the commentary calls it "a short but not-easy par 5" while both the
+ * - Hole 18 (book page 9): the hole page prints a red yardage of 341, the
+ *   scorecard prints 241. The scorecard is used here - its 2439 nine-hole red
+ *   total only adds up with 241.
+ * - Hole 4 (book page 13): the commentary calls it "a short but not-easy par 5" while both the
  *   hole page and the scorecard print Par 4 (Hcp 18). Par 4 is used.
  * - The unlabelled arrow figures near each green are recorded in `greenArrows`
  *   exactly as printed; the book supplies no legend for them.
  */
 export const PELHAM_HILLS_BOOK_NOTES = [
-  'Hole 9 red yardage: hole page 341 vs scorecard 241 - scorecard used (front-nine total checks out).',
-  'Hole 13 commentary says par 5; scorecard and hole page both say par 4 - par 4 used.',
+  'Hole 18 red yardage: hole page 341 vs scorecard 241 - scorecard used (nine-hole total checks out).',
+  'Hole 4 commentary says par 5; scorecard and hole page both say par 4 - par 4 used.',
   'greenArrows are printed without a legend and are recorded verbatim, not interpreted.',
 ] as const;
 
@@ -381,13 +387,9 @@ export const bookHole = (holeNumber: number): BookHole | undefined =>
 /**
  * Whether a hole's pin and tee coordinates are known to belong to THAT hole.
  *
- * Right now: none of them. The coordinates in pelhamHills.ts came from
- * OpenStreetMap, which had the course's front and back nines the wrong way
- * round: its hole N carried the club's hole N+-9 handicap on all 18 holes.
- * That numbering has been put right in pelhamHills.ts (and the printed course
- * map agrees with it), but the points themselves are still OSM's and have never
- * been stood on - the club's 2nd, for one, is drawn 172 yards long against a
- * 335-yard card.
+ * Right now: none of them. The coordinates in pelhamHills.ts were placed on
+ * satellite imagery in the club's Google Earth project, not stood on, and
+ * hole 11 has no pin there at all - its pin is still OpenStreetMap's.
  *
  * So the numbers are honest about their own provenance: yardages, par, handicap
  * and commentary come from the printed book and are correct; anything derived
