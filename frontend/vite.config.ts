@@ -174,9 +174,9 @@ export default defineConfig({
             urlPattern: /.*\.(?:png|jpg|jpeg|gif|webp)$/,
             handler: 'CacheFirst',
             options: {
-              // v2: the hole cards were redrawn under the same file names, and
+              // v3: the hole cards were redrawn under the same file names, and
               // CacheFirst would keep showing a phone the old ones.
-              cacheName: 'image-cache-v2',
+              cacheName: 'image-cache-v3',
               expiration: {
                 maxEntries: 200,
                 maxAgeSeconds: 7 * 24 * 60 * 60, // 7 days
