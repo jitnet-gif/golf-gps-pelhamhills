@@ -18,6 +18,7 @@ and tournament pages, the simulator page, the scorecard and a whole-course map.
 
 The book numbers the nines the other way round from the club (see
 pelhamHillsBook.ts), so book page N is written out as the club's hole N+-9.
+Run logo-hole-cards.py afterwards: it covers the book's number on each layout.
 
     page  file (D:\\)
        1  pelham golf course_004.jpeg

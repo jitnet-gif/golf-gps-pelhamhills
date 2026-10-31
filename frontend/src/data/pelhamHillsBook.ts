@@ -12,7 +12,8 @@
 // Filed by the club's current numbering, not the book's: the club numbers the
 // nines the other way round from the printed book (and from its course map),
 // so the book's page N is hole N+-9 here and its OUT is our IN. The pictures
-// in public/holes still show the book's printed number.
+// in public/holes have the book's number covered by the club logo
+// (scripts/logo-hole-cards.py).
 //
 // This file is the authority for par, handicap, yardage and hole commentary.
 // Coordinates live in pelhamHills.ts (surveyed from OpenStreetMap) - the two
