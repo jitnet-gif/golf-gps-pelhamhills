@@ -30,7 +30,7 @@ const BATTERY_SECONDS = 20 * 60;
 const HERO_BACK = 60;
 const HERO_ALT = 110;
 const GREEN_ALT = 45;
-/** 꺾임점이 낙구 지점·그린 앞과 이만큼 가까우면 점을 더 만들지 않습니다 (m). */
+/** 낙구 지점·그린 앞이 꺾임점과 이만큼 가까우면 그 점을 뺍니다 (m). 꺾임점은 항상 남습니다. */
 const BEND_GAP = 20;
 
 const rad = (d: number) => (d * Math.PI) / 180;
@@ -146,25 +146,33 @@ export function planHole(hole: Hole): HolePlan {
     ['그린 앞 35m', short * length, pointAlong(line, short), 30, -40],
     ['그린 위', length, pin, 30, -90],
   ];
-  const bends = (hole.path ?? []).flatMap((at, i): (typeof stops)[number][] => {
+  const bends = (hole.path ?? []).map((at, i): (typeof stops)[number] => {
     const along = pathLengthMetres(line.slice(0, i + 2));
-    if (stops.some(([, metres]) => Math.abs(metres - along) < BEND_GAP)) return [];
     // 고도와 짐벌은 앞뒤 점 사이에서 거리만큼 옮겨 갑니다.
-    const after = stops.findIndex(([, metres]) => metres > along);
+    const next = stops.findIndex(([, metres]) => metres > along);
+    const after = next < 1 ? stops.length - 1 : next;
     const [, fromAt, , fromAlt, fromGimbal] = stops[after - 1];
     const [, toAt, , toAlt, toGimbal] = stops[after];
     const t = (along - fromAt) / (toAt - fromAt);
-    return [[
+    return [
       `꺾이는 점 ${i + 1}`,
       along,
       at,
       Math.round(fromAlt + (toAlt - fromAlt) * t),
       Math.round(fromGimbal + (toGimbal - fromGimbal) * t),
-    ]];
+    ];
   });
+  // 낙구 지점과 그린 앞은 선 위의 점이라 빼도 경로 모양이 그대로입니다. 꺾임점 바로
+  // 옆에 점이 또 있으면 DJI Fly 에서 번호만 겹칩니다.
+  const kept = stops.filter(
+    ([, metres], i) =>
+      i === 0 || i === stops.length - 1 || !bends.some(([, along]) => Math.abs(along - metres) < BEND_GAP)
+  );
+  // 출발점은 첫 구간의 연장선에 둡니다. 영상이 티 위를 지나 그 구간을 곧게 따라갑니다.
+  const firstLeg = bearing(tee, line[1]);
   const spots: [string, FairwayPoint, number, number][] = [
-    ['티 뒤 40m (출발)', destination(tee, b + 180, 40), 20, -10],
-    ...[...stops, ...bends]
+    ['티 뒤 40m (출발)', destination(tee, firstLeg + 180, 40), 20, -10],
+    ...[...kept, ...bends]
       .sort((p, q) => p[1] - q[1])
       .map(([label, , at, altitude, gimbal]): [string, FairwayPoint, number, number] => [label, at, altitude, gimbal]),
   ];
