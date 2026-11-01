@@ -1,5 +1,5 @@
 /**
- * 플라이스루 ①~⑤ 를 DJI Fly 웨이포인트 파일(KMZ)로 만듭니다.
+ * 플라이스루 웨이포인트를 DJI Fly 웨이포인트 파일(KMZ)로 만듭니다.
  *
  * DJI Fly 에는 가져오기 버튼이 없습니다. 앱에서 저장한 빈 경로의 KMZ 를 이 파일로
  * 덮어써야 합니다(비공식). DJI 가 Mini 4 Pro 값을 공개하지 않아, 현장 검증을 밝힌
@@ -84,7 +84,7 @@ const gimbal = (id: number, pitch: number) =>
 ${PAYLOAD_INDEX}`
   );
 
-/** 점마다 짐벌, ①은 2.5초 멈춰 짐벌이 자리 잡은 뒤 녹화 시작, ⑤는 녹화 중지. */
+/** 점마다 짐벌, ①은 2.5초 멈춰 짐벌이 자리 잡은 뒤 녹화 시작, 마지막 점은 녹화 중지. */
 function actionGroup(w: Waypoint, i: number, last: number): string {
   const actions = [gimbal(0, w.gimbal)];
   if (i === 0) {

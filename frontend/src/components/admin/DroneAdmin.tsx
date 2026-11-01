@@ -2,13 +2,15 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { CircleMarker, MapContainer, Marker, Polygon, Polyline, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { ChevronLeft, ChevronRight, ClipboardCopy, Download, ExternalLink, Presentation, TriangleAlert } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ClipboardCopy, Download, ExternalLink, Pencil, Presentation, TriangleAlert } from 'lucide-react';
 import { PELHAM_HILLS, PELHAM_HILLS_HOLES, type FairwayPoint, type Hole } from '@/data/pelhamHills';
 import { DRONE_ZONES, DRONE_ZONES_CHECKED, type ZoneLevel } from '@/data/droneZones';
 import { fetchCourseData } from '@/lib/courseData';
 import { holeKmz, kmzName } from '@/lib/droneKmz';
+import { applyHoleEdits, loadHolePaths, pullHoleEdits } from '@/lib/holePaths';
 import { getLang, onLangChange } from '@/lib/i18n/engine';
 import { TILE_ATTRIBUTION, TILE_MAX_ZOOM, TILE_URL_TEMPLATE } from '@/lib/tiles';
+import { useAppStore } from '@/store/appStore';
 import {
   GREEN_COVERAGE,
   MISSION_SPEED,
@@ -70,7 +72,7 @@ function ZoneTag({ zone }: { zone: ZoneLevel | null }) {
 /** 이 값들은 DJI Fly 화면 이름입니다. 앱 버전과 언어에 따라 조금 다를 수 있습니다. */
 const FLY_SETTINGS: [string, string][] = [
   ['앱 설정: 카메라 화면 오른쪽 위 ··· ▸ 안전', '최대 고도 120m, 장애물 회피 동작은 우회 또는 브레이크'],
-  ['점마다: 패널에서 웨이포인트 번호를 탭', '위 표의 고도·기수·짐벌, 속도 7m/s, 카메라 동작은 ① 녹화 시작, ⑤ 녹화 중지, 나머지 없음'],
+  ['점마다: 패널에서 웨이포인트 번호를 탭', '위 표의 고도·기수·짐벌, 속도 7m/s, 카메라 동작은 ① 녹화 시작, 마지막 점 녹화 중지, 나머지 없음'],
   ['경로 전체: 패널에서 다음(Next)을 탭', '전체 속도 7m/s, 비행 종료는 호버, 신호 끊김은 RTH, 시작점은 ①'],
   ['저장: 패널 왼쪽 위 목록 아이콘 ▸ 라이브러리', '연필로 홀 이름을 넣습니다. GO 를 누르면 업로드 후 바로 출발합니다.'],
   ['이륙', '고도는 이륙 지점 기준입니다. 저장한 경로는 처음과 같은 높이에서 이륙하세요.'],
@@ -83,8 +85,10 @@ const FLY_SETTINGS: [string, string][] = [
  * 각 점이 DJI 비행 구역 어디에 드는지가 나옵니다. 관리자는 이 값을 DJI Fly 의
  * 웨이포인트에 옮겨 적고, 호프 가이드(나레이션 슬라이드)로 순서를 익힙니다.
  */
-export function DroneAdmin() {
-  const [holes, setHoles] = useState<Hole[]>(PELHAM_HILLS_HOLES);
+export function DroneAdmin({ onEditLine }: { onEditLine: (holeNumber: number) => void }) {
+  const [rawHoles, setRawHoles] = useState<Hole[]>(PELHAM_HILLS_HOLES);
+  const holePaths = useAppStore((s) => s.holePaths);
+  const setHolePaths = useAppStore((s) => s.setHolePaths);
   const [selected, setSelected] = useState(0);
   const [copied, setCopied] = useState<string | null>(null);
   const [showGuide, setShowGuide] = useState(false);
@@ -95,7 +99,7 @@ export function DroneAdmin() {
     const ac = new AbortController();
     fetchCourseData(undefined, ac.signal)
       .then((d) => {
-        if (!ac.signal.aborted) setHoles(d.holes);
+        if (!ac.signal.aborted) setRawHoles(d.holes);
       })
       .catch(() => {
         /* fetchCourseData가 이미 번들로 물러섭니다 */
@@ -103,6 +107,23 @@ export function DroneAdmin() {
     return () => ac.abort();
   }, []);
 
+  // 코스 지도 탭에서 고친 티·핀·꺾이는 점. 이것을 입혀야 비행 경로가 지도의 선을 따라갑니다.
+  useEffect(() => {
+    let alive = true;
+    loadHolePaths(PELHAM_HILLS.id)
+      .then((rows) => {
+        if (alive) setHolePaths(rows);
+        return pullHoleEdits(PELHAM_HILLS.id);
+      })
+      .then(({ rows }) => {
+        if (alive && rows) setHolePaths(rows);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [setHolePaths]);
+
+  const holes = useMemo(() => applyHoleEdits(rawHoles, holePaths), [rawHoles, holePaths]);
   const plans = useMemo(() => holes.map(planHole), [holes]);
   const groups = useMemo(() => batteryGroups(plans), [plans]);
   const aerodromes = useMemo(() => nearestAerodromes(plans), [plans]);
@@ -116,7 +137,7 @@ export function DroneAdmin() {
     }
     return byLevel;
   }, [plans]);
-  const total = plans.length * 7;
+  const total = plans.reduce((n, p) => n + allWaypoints(p).length, 0);
   const blocked = (hits.get(2)?.length ?? 0) + (hits.get(1)?.length ?? 0);
 
   const plan = selected ? plans.find((p) => p.hole.holeNumber === selected) ?? null : null;
@@ -157,7 +178,7 @@ export function DroneAdmin() {
           <span className="ml-auto text-xs text-muted-foreground">DJI Mini 4 Pro</span>
         </div>
         <p className="text-xs text-muted-foreground">
-          홀마다 조망 사진(H), 플라이스루 영상(①~⑤), 그린 탑다운(G)을 찍습니다. 좌표는 코스 지도 탭의 티·핀·페어웨이 선을 따라갑니다.
+          홀마다 조망 사진(H), 플라이스루 영상(①부터), 그린 탑다운(G)을 찍습니다. 좌표는 코스 지도 탭의 티·핀·페어웨이 선을 따라갑니다. 휘어진 홀은 코스 지도 탭에서 선 위에 점을 찍으면 그 점마다 웨이포인트가 하나씩 늘어납니다.
         </p>
         <nav className="flex gap-1.5 overflow-x-auto pb-1" aria-label="홀 선택">
           {[0, ...plans.map((p) => p.hole.holeNumber)].map((n) => (
@@ -237,6 +258,7 @@ export function DroneAdmin() {
           onNext={() => step(1)}
           onCopy={() => copyCsv(plan)}
           onKmz={() => downloadKmz(plan)}
+          onEditLine={() => onEditLine(plan.hole.holeNumber)}
           copied={copied}
         />
       ) : (
@@ -355,6 +377,7 @@ function HoleCard({
   onNext,
   onCopy,
   onKmz,
+  onEditLine,
   copied,
 }: {
   plan: HolePlan;
@@ -362,9 +385,11 @@ function HoleCard({
   onNext: () => void;
   onCopy: () => void;
   onKmz: () => void;
+  onEditLine: () => void;
   copied: string | null;
 }) {
   const h = plan.hole;
+  const lastPoint = String.fromCodePoint(0x2460 + plan.route.length - 1);
   const row = (w: Waypoint) => (
     <tr key={w.id} className="border-t border-border">
       <td className="py-1.5 pr-2 font-mono">{w.id}</td>
@@ -425,7 +450,7 @@ function HoleCard({
       </div>
 
       <p className="text-xs text-muted-foreground">
-        H 와 G 는 직접 날려 한 장씩 찍습니다. ①~⑤ 는 DJI Fly ▸ 웨이포인트에서 지도에 같은 자리를 찍고 고도·짐벌·기수를 넣습니다 (속도 {MISSION_SPEED}m/s, ①에서 녹화 시작, ⑤에서 녹화 중지). 그린 한 장에 약 {GREEN_COVERAGE.across}×{GREEN_COVERAGE.along}m 가 담깁니다.
+        H 와 G 는 직접 날려 한 장씩 찍습니다. ①~{lastPoint} 는 DJI Fly ▸ 웨이포인트에서 지도에 같은 자리를 찍고 고도·짐벌·기수를 넣습니다 (속도 {MISSION_SPEED}m/s, ①에서 녹화 시작, {lastPoint}에서 녹화 중지). 그린 한 장에 약 {GREEN_COVERAGE.across}×{GREEN_COVERAGE.along}m 가 담깁니다.
       </p>
 
       <details className="rounded-lg border border-border p-3 text-xs">
@@ -445,6 +470,13 @@ function HoleCard({
       </p>
 
       <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={onEditLine}
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-border text-sm"
+        >
+          <Pencil className="w-4 h-4" />선 위에 점 찍어 경로 바꾸기
+        </button>
         <a
           href={gmaps(plan.route[0].at)}
           target="_blank"

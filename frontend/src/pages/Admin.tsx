@@ -231,7 +231,14 @@ export default function Admin() {
 
       {tab === 'wallet' && <WalletAdmin />}
 
-      {tab === 'drone' && <DroneAdmin />}
+      {tab === 'drone' && (
+        <DroneAdmin
+          onEditLine={(holeNumber) => {
+            setTab('map');
+            navigate(`${MAP_PATH}?hole=${holeNumber}`, { replace: true });
+          }}
+        />
+      )}
 
       {tab === 'cctv' && <CctvAdmin />}
 
