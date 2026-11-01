@@ -218,6 +218,66 @@ function zip(files: { name: string; text: string }[]): Uint8Array<ArrayBuffer> {
 
 export const kmzName = (p: HolePlan) => `pelham-hole-${String(p.hole.holeNumber).padStart(2, '0')}.kmz`;
 
+const earthPoint = (at: [number, number], altitude = 0) => `${at[1].toFixed(8)},${at[0].toFixed(8)},${altitude}`;
+
+function earthHole(plan: HolePlan): string {
+  const n = plan.hole.holeNumber;
+  const marks = plan.route.map(
+    (w) => `        <Placemark>
+          <name>${n}-${w.id}</name>
+          <description>${w.label} · ${w.altitude}m · 짐벌 ${w.gimbal}° · 기수 ${w.heading}°</description>
+          <styleUrl>#waypoint</styleUrl>
+          <Point>
+            <altitudeMode>relativeToGround</altitudeMode>
+            <coordinates>${earthPoint(w.at, w.altitude)}</coordinates>
+          </Point>
+        </Placemark>`
+  );
+  return `    <Folder>
+      <name>${n}번 홀</name>
+      <Placemark>
+        <name>${n}번 코스 선</name>
+        <styleUrl>#course</styleUrl>
+        <LineString>
+          <tessellate>1</tessellate>
+          <coordinates>${plan.line.map((p) => earthPoint(p)).join(' ')}</coordinates>
+        </LineString>
+      </Placemark>
+      <Placemark>
+        <name>${n}번 비행 경로</name>
+        <styleUrl>#route</styleUrl>
+        <LineString>
+          <altitudeMode>relativeToGround</altitudeMode>
+          <coordinates>${plan.route.map((w) => earthPoint(w.at, w.altitude)).join(' ')}</coordinates>
+        </LineString>
+      </Placemark>
+      <Folder>
+        <name>웨이포인트</name>
+${marks.join('\n')}
+      </Folder>
+    </Folder>`;
+}
+
+/** 구글 어스에서 코스 선과 비행 경로를 겹쳐 보는 KMZ. DJI Fly 에 넣는 파일이 아닙니다. */
+export function earthKmz(plans: HolePlan[]): Uint8Array<ArrayBuffer> {
+  const doc = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Pelham Hills 드론 경로</name>
+    <Style id="course"><LineStyle><color>ffffffff</color><width>2</width></LineStyle></Style>
+    <Style id="route"><LineStyle><color>ff47b5ff</color><width>4</width></LineStyle></Style>
+    <Style id="waypoint"><IconStyle><scale>0.7</scale></IconStyle></Style>
+${plans.map(earthHole).join('\n')}
+  </Document>
+</kml>`;
+  return zip([{ name: 'doc.kml', text: doc }]);
+}
+
+export const earthKmzName = (plans: HolePlan[]) =>
+  plans.length === 1
+    ? `pelham-hole-${String(plans[0].hole.holeNumber).padStart(2, '0')}-google-earth.kmz`
+    : 'pelham-hills-google-earth.kmz';
+
 export function holeKmz(plan: HolePlan, now = Date.now()): Uint8Array<ArrayBuffer> {
   return zip([
     { name: 'template.kml', text: templateKml(plan, now) },

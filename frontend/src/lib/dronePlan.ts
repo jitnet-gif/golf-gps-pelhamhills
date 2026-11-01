@@ -6,9 +6,9 @@
  * 찍는 그린 사진(G). 좌표는 선수 화면과 같은 홀 데이터에서 매번 계산하므로,
  * 코스 지도 탭에서 티·핀을 옮기면 계획도 따라 옮겨 갑니다.
  *
- * 페어웨이 꺾임점(path)이 있는 홀은 낙구 지점과 그린 앞을 그 선 위에 놓고, 꺾임점
- * 마다 웨이포인트를 하나씩 끼워 넣습니다 - 직선으로 두면 도그렉 홀에서 숲 위로
- * 지나갑니다. 꺾임점이 없는 홀은 ①~⑤ 그대로입니다.
+ * 자동 경로는 ①~⑤ 다섯 점이고, 페어웨이 꺾임점(path)이 있는 홀은 ③(낙구 지점)과
+ * ④(그린 앞)를 그 선 위에 놓습니다. 드론 탭 지도에서 웨이포인트를 고친 홀은 저장한
+ * 점을 그대로 씁니다(lib/droneRoutes) - 코스 지도의 선과는 따로 움직입니다.
  *
  * 홀 전체 탑다운은 계획에 없습니다. 120m 안에 홀이 다 들어오려면 홀이 약 127m
  * 이하여야 하는데, 가장 짧은 16번도 129m 입니다.
@@ -30,8 +30,6 @@ const BATTERY_SECONDS = 20 * 60;
 const HERO_BACK = 60;
 const HERO_ALT = 110;
 const GREEN_ALT = 45;
-/** 낙구 지점·그린 앞이 꺾임점과 이만큼 가까우면 그 점을 뺍니다 (m). 꺾임점은 항상 남습니다. */
-const BEND_GAP = 20;
 
 const rad = (d: number) => (d * Math.PI) / 180;
 const deg = (r: number) => (r * 180) / Math.PI;
@@ -120,8 +118,10 @@ export interface HolePlan {
   hero: Waypoint;
   /** 조망 사진의 화각 (부채꼴) */
   heroView: FairwayPoint[];
-  /** 플라이스루 ①부터. 꺾임점이 있는 홀은 ⑤보다 많습니다. */
+  /** 플라이스루 ①부터. 드론 탭에서 고친 홀은 ⑤보다 많거나 적을 수 있습니다. */
   route: Waypoint[];
+  /** 드론 탭에서 고친 경로인가 */
+  edited: boolean;
   green: Waypoint;
   greenView: FairwayPoint[];
   routeMetres: number;
@@ -130,56 +130,49 @@ export interface HolePlan {
   seconds: number;
 }
 
-export function planHole(hole: Hole): HolePlan {
+/** 비행 경로의 한 점에서 저장하는 값. 번호·기수·구역은 순서와 좌표에서 나옵니다. */
+export interface RouteSpot {
+  label: string;
+  at: FairwayPoint;
+  altitude: number;
+  gimbal: number;
+}
+
+/** 두 점 사이에 새로 찍은 점. 고도와 짐벌은 앞뒤 점 사이에서 거리만큼 옮겨 갑니다. */
+export function spotBetween(a: RouteSpot, b: RouteSpot, at: FairwayPoint): RouteSpot {
+  const before = dist(a.at, at);
+  const whole = before + dist(at, b.at);
+  const t = whole > 0 ? before / whole : 0;
+  return {
+    label: '추가 점',
+    at,
+    altitude: Math.round(a.altitude + (b.altitude - a.altitude) * t),
+    gimbal: Math.round(a.gimbal + (b.gimbal - a.gimbal) * t),
+  };
+}
+
+export function planHole(hole: Hole, custom?: RouteSpot[]): HolePlan {
   const tee: FairwayPoint = [hole.teeLatitude, hole.teeLongitude];
   const pin: FairwayPoint = [hole.latitude, hole.longitude];
   const line = [tee, ...(hole.path ?? []), pin];
   const length = pathLengthMetres(line);
   const b = bearing(tee, pin);
 
-  const landing = hole.par === 3 ? 0.5 : Math.min(230 / length, 0.6);
-  const short = Math.max(0, 1 - 35 / length);
-  // [지점, 티에서 선을 따라 간 거리, 위치, 고도, 짐벌]
-  const stops: [string, number, FairwayPoint, number, number][] = [
-    ['티 위', 0, tee, 35, -20],
-    [hole.par === 3 ? '홀 중간' : '낙구 지점', landing * length, pointAlong(line, landing), 45, -25],
-    ['그린 앞 35m', short * length, pointAlong(line, short), 30, -40],
-    ['그린 위', length, pin, 30, -90],
+  const landing = pointAlong(line, hole.par === 3 ? 0.5 : Math.min(230 / length, 0.6));
+  const short = pointAlong(line, Math.max(0, 1 - 35 / length));
+  const auto: RouteSpot[] = [
+    { label: '티 뒤 40m (출발)', at: destination(tee, b + 180, 40), altitude: 20, gimbal: -10 },
+    { label: '티 위', at: tee, altitude: 35, gimbal: -20 },
+    { label: hole.par === 3 ? '홀 중간' : '낙구 지점', at: landing, altitude: 45, gimbal: -25 },
+    { label: '그린 앞 35m', at: short, altitude: 30, gimbal: -40 },
+    { label: '그린 위', at: pin, altitude: 30, gimbal: -90 },
   ];
-  const bends = (hole.path ?? []).map((at, i): (typeof stops)[number] => {
-    const along = pathLengthMetres(line.slice(0, i + 2));
-    // 고도와 짐벌은 앞뒤 점 사이에서 거리만큼 옮겨 갑니다.
-    const next = stops.findIndex(([, metres]) => metres > along);
-    const after = next < 1 ? stops.length - 1 : next;
-    const [, fromAt, , fromAlt, fromGimbal] = stops[after - 1];
-    const [, toAt, , toAlt, toGimbal] = stops[after];
-    const t = (along - fromAt) / (toAt - fromAt);
-    return [
-      `꺾이는 점 ${i + 1}`,
-      along,
-      at,
-      Math.round(fromAlt + (toAlt - fromAlt) * t),
-      Math.round(fromGimbal + (toGimbal - fromGimbal) * t),
-    ];
-  });
-  // 낙구 지점과 그린 앞은 선 위의 점이라 빼도 경로 모양이 그대로입니다. 꺾임점 바로
-  // 옆에 점이 또 있으면 DJI Fly 에서 번호만 겹칩니다.
-  const kept = stops.filter(
-    ([, metres], i) =>
-      i === 0 || i === stops.length - 1 || !bends.some(([, along]) => Math.abs(along - metres) < BEND_GAP)
-  );
-  // 출발점은 첫 구간의 연장선에 둡니다. 영상이 티 위를 지나 그 구간을 곧게 따라갑니다.
-  const firstLeg = bearing(tee, line[1]);
-  const spots: [string, FairwayPoint, number, number][] = [
-    ['티 뒤 40m (출발)', destination(tee, firstLeg + 180, 40), 20, -10],
-    ...[...kept, ...bends]
-      .sort((p, q) => p[1] - q[1])
-      .map(([label, , at, altitude, gimbal]): [string, FairwayPoint, number, number] => [label, at, altitude, gimbal]),
-  ];
-  const route: Waypoint[] = spots.map(([label, at, altitude, gimbal], i) => {
+  const edited = !!custom && custom.length >= 2;
+  const spots = edited ? custom : auto;
+  const route: Waypoint[] = spots.map(({ label, at, altitude, gimbal }, i) => {
     // 기수는 다음 점을 봅니다. 마지막 점은 들어온 방향 그대로.
-    const next = spots[i + 1]?.[1];
-    const prev = spots[i - 1]?.[1];
+    const next = spots[i + 1]?.at;
+    const prev = spots[i - 1]?.at;
     const heading = next ? bearing(at, next) : prev ? bearing(prev, at) : b;
     return { id: String(i + 1), label, at, altitude, gimbal, heading: Math.round(heading), zone: zoneLevelAt(at) };
   });
@@ -223,7 +216,7 @@ export function planHole(hole: Hole): HolePlan {
   );
 
   const seconds = 60 + (2 * HERO_ALT) / 5 + 40 + routeSeconds + 60;
-  return { hole, line, length, bearing: b, hero, heroView, route, green, greenView, routeMetres, routeSeconds, seconds };
+  return { hole, line, length, bearing: b, hero, heroView, route, edited, green, greenView, routeMetres, routeSeconds, seconds };
 }
 
 /** 그린 탑다운 한 장에 담기는 땅 (가로 × 세로, m). */
