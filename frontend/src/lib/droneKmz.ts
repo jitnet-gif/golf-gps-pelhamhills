@@ -6,7 +6,7 @@
  * GeoFly-QGIS 의 프로필(드론 67, 페이로드 53, 네임스페이스 1.0.6)을 따릅니다.
  *
  * 기수는 followWayline 입니다 - dronePlan 의 기수도 다음 점을 보므로 같습니다.
- * 고도는 이륙 지점 기준이라 ① 근처 지면에서 이륙해야 계획대로 납니다.
+ * 고도는 이륙 지점 기준이라 ① 티에서 이륙해야 계획대로 납니다.
  */
 
 import { MISSION_SPEED, type CoursePlan, type HolePlan, type Waypoint } from '@/lib/dronePlan';
@@ -84,11 +84,11 @@ const gimbal = (id: number, pitch: number) =>
 ${PAYLOAD_INDEX}`
   );
 
-/** 점마다 짐벌, ①은 2.5초 멈춰 짐벌이 자리 잡은 뒤 녹화 시작, 마지막 점은 녹화 중지. 전경은 녹화하지 않습니다. */
+/** 점마다 짐벌, ①은 2.5초 멈춰 짐벌이 자리 잡은 뒤 녹화 시작, 마지막 점은 녹화 중지. 전경은 녹화하지 않고 5초 멈춥니다. */
 function actionGroup(w: Waypoint, i: number, last: number, film: boolean): string {
   const actions = [gimbal(0, w.gimbal)];
   if (i === 0) {
-    actions.push(action(1, 'hover', '              <wpml:hoverTime>2.5</wpml:hoverTime>'));
+    actions.push(action(1, 'hover', `              <wpml:hoverTime>${film ? 2.5 : 5}</wpml:hoverTime>`));
     if (film) actions.push(action(2, 'startRecord', PAYLOAD_INDEX));
   }
   if (film && i === last) actions.push(action(1, 'stopRecord', PAYLOAD_INDEX));

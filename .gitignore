@@ -64,3 +64,4 @@ tiles_preview.jpg
 __pycache__/
 *.pyc
 desktop.ini
+.env*

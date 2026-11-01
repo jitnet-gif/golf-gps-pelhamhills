@@ -117,12 +117,17 @@ function MapClicks({ onClick }: { onClick?: (p: FairwayPoint) => void }) {
 
 function ZoneTag({ zone }: { zone: ZoneLevel | null }) {
   if (zone == null) return <span className="text-xs text-muted-foreground">-</span>;
-  return <span className={`inline-block px-1.5 py-0.5 rounded text-[11px] font-medium whitespace-nowrap ${ZONE_BADGE[zone]}`}>{ZONE_LABEL[zone]}</span>;
+  return (
+    <>
+      <span className={`inline-block px-1.5 py-0.5 rounded text-[11px] font-medium whitespace-nowrap ${ZONE_BADGE[zone]}`}>{ZONE_LABEL[zone]}</span>
+      {zone === 3 && <span className="ml-1 text-xs font-medium whitespace-nowrap">가지 않음</span>}
+    </>
+  );
 }
 
 /** 이 값들은 DJI Fly 화면 이름입니다. 앱 버전과 언어에 따라 조금 다를 수 있습니다. */
 const FLY_SETTINGS: [string, string][] = [
-  ['앱 설정: 카메라 화면 오른쪽 위 ··· ▸ 안전', '최대 고도 120m, 장애물 회피 동작은 우회 또는 브레이크'],
+  ['앱 설정: 카메라 화면 오른쪽 위 ··· ▸ 안전', '최대 고도 90m, 장애물 회피 동작은 우회 또는 브레이크'],
   ['점마다: 패널에서 웨이포인트 번호를 탭', '위 표의 고도·기수·짐벌, 속도 7m/s, 카메라 동작은 ① 녹화 시작, 마지막 점 녹화 중지, 나머지 없음'],
   ['경로 전체: 패널에서 다음(Next)을 탭', '전체 속도 7m/s, 비행 종료는 호버, 신호 끊김은 RTH, 시작점은 ①'],
   ['저장: 패널 왼쪽 위 목록 아이콘 ▸ 라이브러리', '연필로 홀 이름을 넣습니다. GO 를 누르면 업로드 후 바로 출발합니다.'],
@@ -597,7 +602,7 @@ export function DroneAdmin() {
               })}
             </ul>
             <p className="text-xs text-muted-foreground">
-              강화 경고 구역은 들어갈 때 DJI Fly 에서 확인을 눌러야 합니다 - 웨이포인트 비행이 거기서 멈출 수 있으니 이륙 전에 눌러 두세요. 경고 구역은 메시지만 뜹니다.
+              강화 경고 구역의 점은 가지 않습니다. 경로 파일에는 들어 있으니 현장에서 그 점 앞에서 멈추세요. 경고 구역은 메시지만 뜹니다.
             </p>
             <ul className="text-xs text-muted-foreground flex flex-col gap-0.5">
               {aerodromes.map((a) => (
@@ -630,7 +635,7 @@ export function DroneAdmin() {
               ))}
             </div>
             <p className="text-xs text-muted-foreground">
-              한 개에 20분까지(표준 배터리 34분 중 바람·이동 여유를 뺌). 프로 샵에서 조종하지 않습니다 - 캐나다는 드론을 눈으로 직접 봐야 하므로, 카트로 홀마다 가서 티 뒤 40m(①)에서 이륙합니다.
+              한 개에 20분까지(표준 배터리 34분 중 바람·이동 여유를 뺌). 프로 샵에서 조종하지 않습니다 - 캐나다는 드론을 눈으로 직접 봐야 하므로, 카트로 홀마다 가서 티(①)에서 이륙합니다.
             </p>
           </section>
 
@@ -728,7 +733,7 @@ function HoleCard({
 
       {warned.length > 0 && (
         <p className="text-sm rounded-md px-3 py-2 bg-orange-500/10 text-orange-800 dark:text-orange-200">
-          {warned.map((w) => w.id).join('·')} 이(가) {ZONE_LABEL[warned[0].zone!]}에 듭니다. 이륙 전에 DJI Fly 에서 확인을 눌러 두세요.
+          {warned.map((w) => w.id).join('·')} 이(가) {ZONE_LABEL[warned[0].zone!]}에 듭니다. 이 점들은 가지 않습니다. 경로 파일에는 들어 있으니 현장에서 그 앞에서 멈추세요.
         </p>
       )}
 

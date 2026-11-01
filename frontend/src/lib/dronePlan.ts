@@ -1,21 +1,21 @@
 /**
  * 드론 촬영 계획 (DJI Mini 4 Pro, 2026-10-29)
  *
- * 홀마다 세 가지를 찍습니다: 티 뒤 110m 에서 홀 전체를 보는 조망 사진(H),
- * 티 뒤에서 그린 위까지 날아가는 플라이스루 영상(①~⑤), 핀 위 45m 에서 수직으로
+ * 홀마다 세 가지를 찍습니다: 티 뒤 90m 에서 홀 전체를 보는 조망 사진(H),
+ * 티에서 플래그 위까지 날아가는 플라이스루 영상(①~④), 핀 위 45m 에서 수직으로
  * 찍는 그린 사진(G). 좌표는 선수 화면과 같은 홀 데이터에서 매번 계산하므로,
  * 코스 지도 탭에서 티·핀을 옮기면 계획도 따라 옮겨 갑니다.
  *
- * 자동 경로는 ①~⑤ 다섯 점이고, 페어웨이 꺾임점(path)이 있는 홀은 ③(낙구 지점)과
- * ④(그린 앞)를 그 선 위에 놓습니다. 드론 탭 지도에서 웨이포인트를 고친 홀은 저장한
+ * 자동 경로는 ①~④ 네 점이고(25m 이하), 페어웨이 꺾임점(path)이 있는 홀은 ②(낙구 지점)와
+ * ③(그린 앞)을 그 선 위에 놓습니다. 드론 탭 지도에서 웨이포인트를 고친 홀은 저장한
  * 점을 그대로 씁니다(lib/droneRoutes) - 코스 지도의 선과는 따로 움직입니다.
  *
- * 홀 전체 탑다운은 계획에 없습니다. 120m 안에 홀이 다 들어오려면 홀이 약 127m
+ * 홀 전체 탑다운은 계획에 없습니다. 90m 안에 홀이 다 들어오려면 홀이 약 95m
  * 이하여야 하는데, 가장 짧은 16번도 129m 입니다.
  *
  * 코스 전경(C)은 18홀에 한 번 찍는 180° 파노라마입니다. 코스가 약 800×870m 라 사진
  * 한 장(가로 70°)에 담으려면 코스 밖 270m 까지 나가야 해서, 코스 모서리의 티·핀 위
- * 120m 에서 찍습니다 - 조종자가 바로 아래에 서므로 드론이 눈에서 벗어나지 않습니다.
+ * 90m 에서 찍습니다 - 조종자가 바로 아래에 서므로 드론이 눈에서 벗어나지 않습니다.
  */
 
 import type { FairwayPoint, Hole } from '@/data/pelhamHills';
@@ -26,14 +26,16 @@ import { pathLengthMetres, pointAlong } from '@/lib/holePaths';
 /** 24mm 상당, 4:3 센서 대각 82.1° → 가로 69.75° × 세로 55.2°. */
 const FOV_LONG = 69.75;
 const FOV_SHORT = 55.2;
-export const MAX_ALTITUDE = 120;
+export const MAX_ALTITUDE = 90;
 export const MISSION_SPEED = 7;
 /** 표준 배터리 34분 중 바람·이동·여유를 빼고 한 개에 쓰는 시간. */
 const BATTERY_SECONDS = 20 * 60;
 
 const HERO_BACK = 60;
-const HERO_ALT = 110;
+const HERO_ALT = MAX_ALTITUDE;
 const GREEN_ALT = 45;
+/** 티 뒤에서 이륙하던 5점 경로의 첫 점. 이 이름으로 시작하는 저장 경로는 티에서 시작하도록 바꿔 읽습니다. */
+const OLD_START = '티 뒤 40m (출발)';
 
 const rad = (d: number) => (d * Math.PI) / 180;
 const deg = (r: number) => (r * 180) / Math.PI;
@@ -164,15 +166,23 @@ export function planHole(hole: Hole, custom?: RouteSpot[]): HolePlan {
 
   const landing = pointAlong(line, hole.par === 3 ? 0.5 : Math.min(230 / length, 0.6));
   const short = pointAlong(line, Math.max(0, 1 - 35 / length));
-  const auto: RouteSpot[] = [
-    { label: '티 뒤 40m (출발)', at: destination(tee, b + 180, 40), altitude: 20, gimbal: -10 },
-    { label: '티 위', at: tee, altitude: 35, gimbal: -20 },
-    { label: hole.par === 3 ? '홀 중간' : '낙구 지점', at: landing, altitude: 45, gimbal: -25 },
-    { label: '그린 앞 35m', at: short, altitude: 30, gimbal: -40 },
-    { label: '그린 위', at: pin, altitude: 30, gimbal: -90 },
+  const midLabel = hole.par === 3 ? '홀 중간' : '낙구 지점';
+  const flight = (mid: FairwayPoint | undefined, near: FairwayPoint, flag: FairwayPoint): RouteSpot[] => [
+    { label: '티 (이륙 자리)', at: tee, altitude: 15, gimbal: -45 },
+    ...(mid ? [{ label: midLabel, at: mid, altitude: 25, gimbal: -25 }] : []),
+    { label: '그린 앞 35m', at: near, altitude: 25, gimbal: -40 },
+    { label: '그린 위', at: flag, altitude: 25, gimbal: -90 },
   ];
+  const auto = flight(landing, short, pin);
   const edited = !!custom && custom.length >= 2;
-  const spots = edited ? custom : auto;
+  // 예전 저장 경로는 끌어다 놓은 점이 많아 '티 위'가 티가 아닙니다. 티는 코스의 것을 쓰고
+  // 손으로 옮긴 낙구·그린 앞·그린 자리만 살립니다. 파 3 은 낙구 점을 지웠으면 없는 그대로 둡니다.
+  const savedAt = (name: string) => custom?.find((s) => s.label === name)?.at;
+  const spots = !edited
+    ? auto
+    : custom[0].label === OLD_START
+      ? flight(savedAt(midLabel) ?? (hole.par === 3 ? undefined : landing), savedAt('그린 앞 35m') ?? short, savedAt('그린 위') ?? pin)
+      : custom;
   const route: Waypoint[] = spots.map(({ label, at, altitude, gimbal }, i) => {
     // 기수는 다음 점을 봅니다. 마지막 점은 들어온 방향 그대로.
     const next = spots[i + 1]?.at;
