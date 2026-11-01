@@ -7,6 +7,7 @@ import { haversineMetres } from '@/lib/geo';
 import {
   hasCalloutVoice,
   playCallout,
+  stopCallout,
   unlockCalloutVoice,
   type CalloutParts,
 } from '@/lib/calloutVoice';
@@ -24,6 +25,12 @@ const CHANGE_YARDS = 10;
  * rough, trees, bunker - is a shot worth a number.
  */
 const PUTTING_YARDS = 15;
+/**
+ * A second tap on the map's button this soon after the first turns the sound
+ * off. Later than this it is a new shot from a new spot, and the player wants
+ * the number again rather than silence.
+ */
+const SECOND_TAP_MS = 15000;
 
 /**
  * On unless this phone has turned it off. The club asked for the yardage to be
@@ -91,8 +98,13 @@ interface FairwayDistanceProps {
    * tee: show that walk instead of the pin, which starts at the tee.
    */
   toTee?: GuidanceReading | null;
-  /** Filled with "say it now", for the speak button on the map. */
+  /**
+   * Filled with the speak button on the map: a tap says the distance, a second
+   * tap turns the sound off, and a tap while it is off turns it back on.
+   */
   sayRef?: React.MutableRefObject<(() => void) | null>;
+  /** Told whether the sound is on, so that button can show it. */
+  onSoundChange?: (on: boolean) => void;
   className?: string;
 }
 
@@ -116,12 +128,13 @@ export const FairwayDistance: React.FC<FairwayDistanceProps> = ({
   onBeforeSpeak,
   toTee = null,
   sayRef,
+  onSoundChange,
   className = '',
 }) => {
   const reading = useFairwayDistance(hole);
   const gps = useAppStore((s) => s.gpsPosition);
   const gpsProblem = useAppStore((s) => s.gpsProblem);
-  const { speak, unlock, isSupported } = useTTS('en-US');
+  const { speak, stop, unlock, isSupported } = useTTS('en-US');
   const [auto, setAuto] = useState(loadAuto);
   const text = calloutText(reading);
 
@@ -133,6 +146,11 @@ export const FairwayDistance: React.FC<FairwayDistanceProps> = ({
   const anchor = useRef<{ lat: number; lon: number; since: number } | null>(null);
   const armed = useRef(false);
   const lastSpoken = useRef<{ hole: number; yards: number } | null>(null);
+  // Until when the map button's next tap means "sound off".
+  const secondTapUntil = useRef(0);
+  // Pausing a clip that is still starting fails it, and a failed clip falls back
+  // to the speech engine - which must not then speak over the sound-off tap.
+  const silenced = useRef(false);
 
   useEffect(() => {
     if (!gps) return;
@@ -157,11 +175,12 @@ export const FairwayDistance: React.FC<FairwayDistanceProps> = ({
    */
   const say = useCallback(
     (words: string, parts?: CalloutParts | null) => {
+      silenced.current = false;
       onBeforeSpeak?.();
       const spoken = parts ?? null;
       if (spoken && hasCalloutVoice()) {
         void playCallout(spoken).then((played) => {
-          if (!played) speak(words, { lang: 'en-US', id: 'fairway-distance' });
+          if (!played && !silenced.current) speak(words, { lang: 'en-US', id: 'fairway-distance' });
         });
         return;
       }
@@ -169,6 +188,10 @@ export const FairwayDistance: React.FC<FairwayDistanceProps> = ({
     },
     [onBeforeSpeak, speak]
   );
+
+  useEffect(() => {
+    onSoundChange?.(auto);
+  }, [auto, onSoundChange]);
 
   // The map's speak button says whatever this readout would.
   const spoken = toTee
@@ -178,14 +201,42 @@ export const FairwayDistance: React.FC<FairwayDistanceProps> = ({
     : text;
   useEffect(() => {
     if (!sayRef) return;
+    const canSay = (isSupported || hasCalloutVoice()) && spoken;
     const parts = toTee ? null : calloutParts(reading);
-    sayRef.current = (isSupported || hasCalloutVoice()) && spoken ? () => say(spoken, parts) : null;
+    sayRef.current = () => {
+      if (auto && Date.now() < secondTapUntil.current) {
+        secondTapUntil.current = 0;
+        silenced.current = true;
+        stopCallout();
+        stop();
+        setAuto(false);
+        saveAuto(false);
+        return;
+      }
+      secondTapUntil.current = Date.now() + SECOND_TAP_MS;
+      if (!auto) {
+        setAuto(true);
+        saveAuto(true);
+        // What is said below stands in for a callout the player just heard.
+        if (reading.along !== null) {
+          lastSpoken.current = { hole: hole.holeNumber, yards: Math.round(reading.along) };
+          armed.current = false;
+        }
+      }
+      if (canSay) {
+        say(spoken, parts);
+      } else if (!auto) {
+        // Nothing to say yet, but the tap still has to pay for what comes later.
+        unlock();
+        void unlockCalloutVoice();
+      }
+    };
     return () => {
       sayRef.current = null;
     };
     // `reading` changes with every fix; the button says whatever it reads now.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sayRef, isSupported, spoken, say, reading, toTee]);
+  }, [sayRef, isSupported, spoken, say, reading, toTee, auto, hole.holeNumber, stop, unlock]);
 
   useEffect(() => {
     if (!auto || !(isSupported || hasCalloutVoice())) return;
@@ -206,9 +257,10 @@ export const FairwayDistance: React.FC<FairwayDistanceProps> = ({
       if (last && last.hole === hole.holeNumber && Math.abs(last.yards - yards) < CHANGE_YARDS) return;
       lastSpoken.current = { hole: hole.holeNumber, yards };
       const parts = calloutParts(r);
+      silenced.current = false;
       if (parts && hasCalloutVoice()) {
         void playCallout(parts).then((played) => {
-          if (!played) speak(words, { lang: 'en-US', id: 'fairway-distance' });
+          if (!played && !silenced.current) speak(words, { lang: 'en-US', id: 'fairway-distance' });
         });
         return;
       }

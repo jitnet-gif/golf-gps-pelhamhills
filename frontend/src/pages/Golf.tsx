@@ -36,7 +36,7 @@ import {
   RoundStartGate,
   HoleAd,
 } from '@/components';
-import { Menu, X, TrendingUp, PenLine, FlaskConical, Square, Map as MapIcon, Flag, ClipboardList, Volume2, Car, UtensilsCrossed } from 'lucide-react';
+import { Menu, X, TrendingUp, PenLine, FlaskConical, Square, Map as MapIcon, Flag, ClipboardList, Volume2, VolumeX, Car, UtensilsCrossed } from 'lucide-react';
 import { PELHAM_HILLS, PELHAM_HILLS_HOLES, type FairwayPoint, type Hole } from '@/data/pelhamHills';
 import { fetchCourseData, type CourseData } from '@/lib/courseData';
 import { REPORT_INTERVAL_MS, reportPosition } from '@/lib/playerMonitor';
@@ -252,6 +252,7 @@ export default function Golf() {
   // button (FairwayDistance fills it).
   const [sheetOpen, setSheetOpen] = useState(false);
   const sayDistance = useRef<(() => void) | null>(null);
+  const [yardageSound, setYardageSound] = useState(true);
   const [wideScreen, setWideScreen] = useState(() => window.matchMedia(WIDE_QUERY).matches);
   useEffect(() => {
     const query = window.matchMedia(WIDE_QUERY);
@@ -1158,11 +1159,11 @@ export default function Golf() {
                           <button
                             type="button"
                             onClick={() => sayDistance.current?.()}
-                            aria-label="Say the distance"
+                            aria-label={yardageSound ? 'Say the distance' : 'Yardage sound is off. Turn it on'}
                             className="flex h-12 items-center gap-2 rounded-full bg-slate-900/95 px-4 text-sm font-semibold text-white shadow-lg"
                           >
-                            <Volume2 className="h-5 w-5" />
-                            Yardage
+                            {yardageSound ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5" />}
+                            {yardageSound ? 'Yardage' : 'Sound off'}
                           </button>
                           {/* Done with the hole: pick where the cart goes next. The tap
                               also buys the browser's permission for the turn-by-turn voice. */}
@@ -1228,6 +1229,7 @@ export default function Golf() {
                             onBeforeSpeak={narration.stop}
                             toTee={walking ? guidance.reading : null}
                             sayRef={sayDistance}
+                            onSoundChange={setYardageSound}
                           />
                         }
                       >
