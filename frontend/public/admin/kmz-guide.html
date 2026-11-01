@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<!-- 어드민 '드론 촬영' 탭의 KMZ 호프 가이드. drone-guide.html 의 화면과 플레이어를 그대로 씁니다. -->
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font-size:14px}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>드론 KMZ 넣기</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: one 16:9 flight-display slide at a time, with Hope's narration bar underneath. Single dark look on purpose. */
+:root {
+  --bg: #0A130F; --surface: #111F18; --raise: #17291F; --line: #24392D;
+  --fg: #E7EFE9; --muted: #98AE9F;
+  --amber: #FFB547; --sky: #5FD4FF; --turf: #7CF29A; --alert: #FF8F6B;
+  --sans: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font-family: var(--sans); }
+.wrap { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 16px 32px; max-width: 1240px; margin: 0 auto; display: grid; gap: 12px; }
+.frame { container-type: inline-size; }
+.stage { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; font-size: clamp(13px, 1.3cqw, 20px); }
+@container (min-width: 760px) { .stage { aspect-ratio: 16 / 9; } }
+.slide { display: grid; gap: 1.1em; align-content: start; padding: 2.4em 2.8em; height: 100%; box-sizing: border-box; overflow: auto; }
+.slide[hidden] { display: none !important; }
+.slide { animation: rise .35s ease-out; }
+@keyframes rise { from { transform: translateY(6px); opacity: .6; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .slide { animation: none; } }
+.eyebrow { font: 600 .78em var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--amber); }
+h1 { font-size: 3.1em; line-height: 1.12; margin: 0; letter-spacing: -0.02em; text-wrap: balance; }
+h2 { font-size: 2.05em; line-height: 1.2; margin: 0; letter-spacing: -0.015em; text-wrap: balance; }
+.lede { font-size: 1.15em; color: var(--muted); margin: 0; max-width: 46ch; line-height: 1.55; }
+.small { font-size: .88em; color: var(--muted); margin: 0; line-height: 1.5; }
+.mono { font-family: var(--mono); }
+.amber { color: var(--amber); } .sky { color: var(--sky); } .turf { color: var(--turf); } .alert { color: var(--alert); }
+svg text { font-family: var(--mono); }
+
+.title-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 2em; align-items: center; height: 100%; }
+.title-grid img { width: 100%; max-width: 100%; border-radius: 10px; border: 1px solid var(--line); display: block; }
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .6em; }
+.stat { border-top: 2px solid var(--amber); padding-top: .45em; }
+.stat b { display: block; font: 600 1.7em var(--mono); }
+.stat span { font-size: .8em; color: var(--muted); }
+
+.trio { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .8em; }
+.shot { background: var(--raise); border-radius: 8px; padding: .8em 1em; display: grid; gap: .25em; }
+.shot b { font-size: 1.02em; }
+.shot .k { font: 600 .8em var(--mono); }
+.shot p { margin: 0; font-size: .86em; color: var(--muted); line-height: 1.45; }
+
+.steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .8em; counter-reset: s; }
+.steps li { counter-increment: s; background: var(--raise); border-radius: 8px; padding: .8em 1em; display: grid; gap: .3em; align-content: start; }
+.steps li::before { content: counter(s); font: 600 1.5em var(--mono); color: var(--amber); }
+.steps b { font-size: 1.02em; } .steps span { font-size: .86em; color: var(--muted); line-height: 1.45; }
+
+.versus { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1em; }
+.way { border: 1px solid var(--line); border-radius: 10px; padding: 1em 1.2em; display: grid; gap: .5em; align-content: start; }
+.way.pick { border-color: var(--turf); }
+.way h3 { margin: 0; font-size: 1.25em; }
+.pill { justify-self: start; font: 600 .74em var(--mono); letter-spacing: .08em; padding: .25em .6em; border-radius: 99px; background: var(--raise); }
+.way ul { margin: 0; padding-left: 1.1em; display: grid; gap: .35em; font-size: .92em; line-height: 1.45; }
+.plus::marker { color: var(--turf); } .minus::marker { color: var(--alert); }
+
+.verdict { display: grid; grid-template-columns: 1.3fr 1fr; gap: 1.6em; align-items: center; }
+.big { font-size: 1.7em; font-weight: 700; line-height: 1.3; margin: 0; text-wrap: balance; }
+.facts { display: grid; gap: .6em; font-size: .92em; line-height: 1.45; }
+.facts div { display: grid; grid-template-columns: 2.2em 1fr; gap: .4em; }
+.facts div > span:first-child { font: 600 1em var(--mono); }
+
+.bats { display: grid; grid-template-columns: 18fr 17fr 18fr 18fr 9fr; gap: .4em; }
+.bat { background: var(--raise); border-radius: 6px; padding: .55em .6em; border-bottom: 3px solid var(--amber); min-width: 0; }
+.bat b { display: block; font: 600 .95em var(--mono); } .bat span { font: .8em var(--mono); color: var(--muted); }
+.tips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6em 1.6em; font-size: .95em; line-height: 1.5; }
+.tips div { border-left: 2px solid var(--line); padding-left: .8em; }
+
+.path { display: flex; flex-wrap: wrap; gap: .35em .5em; align-items: center; font: 500 1em var(--mono); }
+.path span { background: var(--raise); border-radius: 6px; padding: .3em .6em; }
+.path i { color: var(--muted); font-style: normal; }
+.path .end { color: var(--bg); background: var(--amber); font-weight: 600; }
+.tree { display: grid; gap: .5em; align-content: start; font: 1em var(--mono); background: var(--raise); border-radius: 8px; padding: 1em 1.2em; min-width: 0; }
+.tree div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1em; overflow-wrap: anywhere; }
+.tree em { font: .82em var(--sans); color: var(--muted); font-style: normal; }
+.tree .hit { color: var(--amber); font-weight: 600; } .tree .hit em { color: var(--amber); }
+.tree .sub { padding-left: 1.4em; color: var(--turf); } .tree .sub em { color: var(--turf); }
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8em; }
+.swap { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 1em; align-items: center; }
+.swap .file { background: var(--raise); border-radius: 8px; padding: .9em 1em; display: grid; gap: .3em; min-width: 0; }
+.swap .file code { font: .86em var(--mono); overflow-wrap: anywhere; color: var(--amber); }
+.swap .file span { font-size: .84em; color: var(--muted); }
+.swap b.arrow { font: 600 1.6em var(--mono); color: var(--turf); }
+
+.checks { list-style: none; margin: 0; padding: 0; display: grid; gap: .55em; }
+.checks li { display: grid; grid-template-columns: 1.6em 1fr; gap: .5em; font-size: 1em; line-height: 1.45; }
+.checks li::before { content: "✓"; font: 600 1em var(--mono); color: var(--turf); }
+.checks li.hot::before { content: "!"; color: var(--alert); }
+
+/* narration bar */
+.bar { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 10px; }
+.hope { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.avatar { flex: none; width: 40px; height: 40px; border-radius: 50%; background: var(--raise); border: 2px solid var(--amber); display: grid; place-items: center; font: 600 15px var(--mono); color: var(--amber); }
+.avatar.talking { animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(255,181,71,.18); } }
+@media (prefers-reduced-motion: reduce) { .avatar.talking { animation: none; } }
+.who { display: grid; min-width: 0; }
+.who b { font-size: 14px; } .who span { font-size: 12px; color: var(--muted); }
+.caption { font-size: 15px; line-height: 1.55; min-height: 2.6em; margin: 0; color: var(--fg); }
+.caption mark { background: rgba(255,181,71,.22); color: var(--fg); border-radius: 3px; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+.group { display: flex; align-items: center; gap: 6px; }
+button { font: 500 13px var(--sans); color: var(--fg); background: var(--raise); border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+button:hover { border-color: var(--amber); }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+button.primary { background: var(--amber); color: var(--bg); border-color: var(--amber); font-weight: 700; min-width: 92px; }
+.seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.count { font: 500 13px var(--mono); color: var(--muted); min-width: 44px; text-align: center; }
+label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+input[type=range] { width: 110px; accent-color: var(--amber); }
+output { font: 500 12px var(--mono); color: var(--fg); min-width: 32px; }
+select { font: 13px var(--sans); background: var(--raise); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; max-width: 220px; }
+.hint { font-size: 12px; color: var(--muted); margin: 0; }
+kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+
+@container (max-width: 759px) {
+  .slide { padding: 1.4em 1.2em; }
+  h1 { font-size: 2.2em; } h2 { font-size: 1.6em; }
+  .title-grid, .verdict, .versus, .tips, .pair, .swap { grid-template-columns: minmax(0, 1fr); }
+  .trio, .steps { grid-template-columns: minmax(0, 1fr); }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bats { grid-template-columns: minmax(0, 1fr); }
+}
+.fl { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1.7em; }
+.fn { position: relative; background: var(--raise); border-radius: 8px; padding: .8em .9em; display: grid; gap: .3em; align-content: start; }
+.fn b { font-size: 1.02em; line-height: 1.3; } .fn .k { font: 600 .74em var(--mono); }
+.fn p { margin: 0; font-size: .84em; color: var(--muted); line-height: 1.4; }
+.fn:not(:last-child)::after { content: "→"; position: absolute; right: -1.35em; top: 50%; transform: translateY(-50%); color: var(--amber); font: 600 1.1em var(--mono); }
+.scr { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 8px; background: #000; border-radius: 8px; max-width: 22em; width: 100%; }
+.scr span { aspect-ratio: 16 / 10; background: var(--raise); border-radius: 2px; }
+.scr .on { background: var(--turf); } .scr .off { background: var(--alert); }
+.steps.five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.way p { margin: 0; }
+.fl { margin-top: 2.4em; }
+.fn { padding: 1.5em 1.1em; gap: .7em; min-height: 15em; }
+.fn b { font-size: 1.3em; } .fn p { font-size: 1em; line-height: 1.5; }
+.steps.five { margin-top: 2.4em; }
+.steps.five li { min-height: 13em; }
+.steps.five b { font-size: 1.2em; line-height: 1.35; } .steps.five span { font-size: 1em; }
+@container (max-width: 759px) {
+  .fl, .steps.five { grid-template-columns: minmax(0, 1fr); margin-top: 0; }
+  .fn, .steps.five li { min-height: 0; }
+  .fn:not(:last-child)::after { content: "↓"; right: 50%; top: auto; bottom: -1.5em; transform: none; }
+}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <div class="frame">
+    <div class="stage" id="stage" aria-live="polite">
+      <!-- 1 -->
+      <section class="slide" data-n="1">
+        <span class="eyebrow">Pelham Hills · DJI RC 2 · Mini 4 Pro</span>
+        <h1 data-ko="경로 파일을 조종기에 넣기" data-en="Putting route files on the controller"></h1>
+        <p class="lede" data-ko="홀마다 저장한 빈 경로를, 미리 만든 KMZ로 바꿔 넣습니다." data-en="Save an empty route for each hole, then swap in the ready-made KMZ."></p>
+        <div class="stats">
+          <div class="stat"><b>18</b><span data-ko="홀별 KMZ" data-en="hole KMZ files"></span></div>
+          <div class="stat"><b>5</b><span data-ko="홀당 웨이포인트" data-en="waypoints per hole"></span></div>
+          <div class="stat"><b>1</b><span data-ko="폴더당 KMZ" data-en="KMZ per folder"></span></div>
+          <div class="stat"><b>3</b><span data-ko="저장 · 교체 · 확인" data-en="save · swap · check"></span></div>
+        </div>
+      </section>
+
+      <!-- 2 -->
+      <section class="slide" data-n="2" hidden>
+        <span class="eyebrow" data-ko="왜 바꿔 넣나요" data-en="Why swap a file"></span>
+        <h2 data-ko="DJI Fly에는 가져오기 버튼이 없습니다" data-en="DJI Fly has no import button"></h2>
+        <ol class="steps">
+          <li><b data-ko="앱이 빈 경로를 만듭니다" data-en="The app makes an empty route"></b><span data-ko="저장하면 긴 이름의 폴더와 KMZ가 생깁니다." data-en="Saving creates a long-named folder and KMZ."></span></li>
+          <li><b data-ko="파일 이름을 맞춥니다" data-en="Match the file name"></b><span data-ko="우리 KMZ를 앱이 만든 이름으로 바꿉니다." data-en="Rename our KMZ to the name the app made."></span></li>
+          <li><b data-ko="덮어씁니다" data-en="Overwrite it"></b><span data-ko="앱은 같은 경로로 알고 새 내용을 엽니다." data-en="The app opens the new content as the same route."></span></li>
+        </ol>
+        <div class="facts">
+          <div><span class="turf">PC</span><span data-ko="Windows 탐색기로 RC 2의 폴더를 열 수 있었습니다. Mac은 Android File Transfer가 필요합니다." data-en="Windows File Explorer opened the RC 2 folders. A Mac needs Android File Transfer."></span></div>
+          <div><span class="turf">USB</span><span data-ko="데이터 전송용 케이블을 쓰세요. 충전 전용 케이블로는 조종기가 보이지 않습니다." data-en="Use a data cable. The controller won't appear over a charge-only cable."></span></div>
+          <div><span class="alert">!</span><span data-ko="DJI가 지원하는 방법이 아닙니다. 앱이 업데이트되면 달라질 수 있습니다." data-en="DJI doesn't support this method, and app updates can change it."></span></div>
+        </div>
+      </section>
+
+      <!-- 3 -->
+      <section class="slide" data-n="3" hidden>
+        <span class="eyebrow" data-ko="1단계 · 조종기" data-en="Step 1 · Controller"></span>
+        <h2 data-ko="빈 경로를 먼저 저장합니다" data-en="Save an empty route first"></h2>
+        <ol class="steps">
+          <li><b data-ko="웨이포인트 열기" data-en="Open Waypoints"></b><span data-ko="왼쪽 지그재그 아이콘을 누릅니다." data-en="Tap the zigzag icon on the left."></span></li>
+          <li><b data-ko="지도를 두 번 탭" data-en="Tap the map twice"></b><span data-ko="점 1, 2가 생기면 됩니다. 위치는 상관없습니다." data-en="Points 1 and 2 appear. The location doesn't matter."></span></li>
+          <li><b data-ko="저장 후 종료" data-en="Save and Exit"></b><span data-ko="지그재그 아이콘을 다시 누르고 저장합니다." data-en="Tap the zigzag icon again and save."></span></li>
+          <li><b data-ko="이름 바꾸기" data-en="Rename it"></b><span data-ko="목록 아이콘에서 연필로 '1번 홀'을 넣습니다." data-en="In the list icon, use the pencil to enter 'Hole 1'."></span></li>
+          <li><b data-ko="앱 완전히 닫기" data-en="Close the app fully"></b><span data-ko="앱이 켜져 있으면 파일이 아직 안 보일 수 있습니다." data-en="The file may not show while the app is open."></span></li>
+          <li><b data-ko="GO는 누르지 않기" data-en="Don't press GO"></b><span data-ko="이 빈 경로로는 날지 않습니다." data-en="This empty route is not for flying."></span></li>
+        </ol>
+      </section>
+
+      <!-- 4 -->
+      <section class="slide" data-n="4" hidden>
+        <span class="eyebrow" data-ko="2단계 · 컴퓨터" data-en="Step 2 · Computer"></span>
+        <h2 data-ko="긴 이름의 폴더를 찾습니다" data-en="Find the long-named folder"></h2>
+        <div class="path"><span>Android</span><i>›</i><span>data</span><i>›</i><span>dji.go.v5</span><i>›</i><span>files</span><i>›</i><span class="end">waypoint</span></div>
+        <div class="tree">
+          <div><span>capability</span><em data-ko="건드리지 않음" data-en="Leave alone"></em></div>
+          <div class="hit"><span>EF7D9767-5D06-4E5F-8EA9-4306A737D14D</span><em data-ko="빈 경로" data-en="Empty route"></em></div>
+          <div class="sub"><span>EF7D9767-5D06-4E5F-8EA9-4306A737D14D.kmz</span><em data-ko="교체할 파일" data-en="File to replace"></em></div>
+          <div><span>map_preview</span><em data-ko="건드리지 않음" data-en="Leave alone"></em></div>
+        </div>
+        <p class="small" data-ko="위 이름은 이번에 찾은 1번 홀용 예시입니다. 경로마다 이름이 다르니, 수정한 날짜가 가장 최근인 폴더를 고르세요." data-en="That name is the one found for Hole 1. Each route has its own name, so pick the folder with the newest date."></p>
+      </section>
+
+      <!-- 5 -->
+      <section class="slide" data-n="5" hidden>
+        <span class="eyebrow" data-ko="3단계 · 교체" data-en="Step 3 · Swap"></span>
+        <h2 data-ko="이름을 바꿔 덮어씁니다" data-en="Rename, then overwrite"></h2>
+        <div class="swap">
+          <div class="file"><span data-ko="내려받은 파일 (복사본)" data-en="Downloaded file (a copy)"></span><code>pelham-hole-01.kmz</code></div>
+          <b class="arrow">→</b>
+          <div class="file"><span data-ko="앱이 만든 이름으로" data-en="To the app's name"></span><code>EF7D9767-5D06-4E5F-8EA9-4306A737D14D.kmz</code></div>
+        </div>
+        <ol class="steps">
+          <li><b data-ko="원본 백업" data-en="Back up the original"></b><span data-ko="앱이 만든 KMZ를 바탕화면에 복사합니다." data-en="Copy the app's KMZ to the desktop."></span></li>
+          <li><b data-ko="확장자 켜기" data-en="Show extensions"></b><span data-ko="보기 → 표시 → 파일 확장명. .kmz.kmz를 막습니다." data-en="View → Show → File name extensions, to avoid .kmz.kmz."></span></li>
+          <li><b data-ko="폴더에 덮어쓰기" data-en="Overwrite in the folder"></b><span data-ko="폴더 이름은 그대로 두고, KMZ는 한 개만 남깁니다." data-en="Keep the folder name. Leave only one KMZ inside."></span></li>
+        </ol>
+      </section>
+
+      <!-- 6 -->
+      <section class="slide" data-n="6" hidden>
+        <span class="eyebrow" data-ko="4단계 · 확인" data-en="Step 4 · Check"></span>
+        <h2 data-ko="한 홀을 확인하고 나머지를 진행합니다" data-en="Check one hole before doing the rest"></h2>
+        <div class="pair">
+          <div class="facts">
+            <div><span class="turf">✓</span><span data-ko="점이 5개 보임" data-en="Five points appear"></span></div>
+            <div><span class="turf">✓</span><span data-ko="지도에서 클럽 1번 홀 위에 있음" data-en="They sit on the club's Hole 1"></span></div>
+            <div><span class="turf">✓</span><span data-ko="① 고도 20m, 속도 7m/s" data-en="① altitude 20m, speed 7 m/s"></span></div>
+          </div>
+          <div class="facts">
+            <div><span class="alert">!</span><span data-ko="점이 2개 그대로이거나 오류가 나면 백업 KMZ를 보내 주세요." data-en="If it still shows two points or an error, send the backup KMZ."></span></div>
+            <div><span class="alert">!</span><span data-ko="아직 실제 앱과 드론에서 시험하지 않은 파일입니다." data-en="These files haven't been tested in the app or on the drone yet."></span></div>
+            <div><span class="alert">!</span><span data-ko="고도는 이륙 지점 기준입니다. ① 근처 지면에서 이륙하세요." data-en="Altitude is from take-off. Launch from the ground near ①."></span></div>
+          </div>
+        </div>
+        <p class="small" data-ko="성공하면 홀마다 빈 경로를 하나씩 만들어 같은 방법으로 넣습니다. 첫 비행은 사람이 없는 야외에서 한 홀만 시험하세요." data-en="Once it works, make one empty route per hole and repeat. Test one hole first, outdoors with nobody around."></p>
+      </section>
+    </div>
+  </div>
+
+  <div class="bar">
+    <div class="hope">
+      <div class="avatar" id="avatar" aria-hidden="true">H</div>
+      <div class="who"><b data-ko="나레이터 호프" data-en="Narrator Hope"></b><span data-ko="ElevenLabs Hope Natural" data-en="ElevenLabs Hope Natural"></span></div>
+    </div>
+    <p class="caption" id="caption"></p>
+    <div class="controls">
+      <div class="group">
+        <button id="prev" type="button" aria-label="Previous slide">◀</button>
+        <span class="count" id="count">1 / 8</span>
+        <button id="next" type="button" aria-label="Next slide">▶</button>
+      </div>
+      <button class="primary" id="play" type="button"></button>
+      <label><input type="checkbox" id="auto" checked> <span data-ko="자동 넘김" data-en="Auto-advance"></span></label>
+      <div class="group seg" role="group" aria-label="Language">
+        <button type="button" id="lang-ko" data-lang="ko">한국어</button>
+        <button type="button" id="lang-en" data-lang="en">English</button>
+      </div>
+      <label for="pitch"><span data-ko="피치" data-en="Pitch"></span><input type="range" id="pitch" min="0.7" max="1.4" step="0.01"><output id="pitch-out"></output></label>
+      <label for="rate"><span data-ko="속도" data-en="Speed"></span><input type="range" id="rate" min="0.5" max="2" step="0.05"><output id="rate-out"></output></label>
+      <button type="button" id="reset" data-ko="기본값" data-en="Reset"></button>
+    </div>
+    <p class="hint" id="hint"></p>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+<script>
+const NARR = [
+  { ko: '안녕하세요, 호프입니다. 오늘은 미리 만든 경로 파일을 DJI RC 2 조종기에 넣는 방법을 안내해 드릴게요. 순서는 저장, 교체, 확인입니다.',
+    en: "Hi, I'm Hope. Let's put the ready-made route files on the DJI RC 2 controller. There are three parts: save, swap and check." },
+  { ko: 'DJI 플라이에는 파일을 가져오는 버튼이 없습니다. 그래서 앱에서 빈 경로를 만들고, 그 파일을 우리 파일로 바꿔 넣습니다. 컴퓨터와 데이터 전송용 케이블이 필요합니다. DJI가 지원하는 방법은 아니어서, 앱이 업데이트되면 달라질 수 있습니다.',
+    en: "DJI Fly has no import button. So we make an empty route in the app, then swap its file for ours. You'll need a computer and a data cable. DJI doesn't support this method, so an app update could change it." },
+  { ko: '먼저 조종기에서 빈 경로를 저장합니다. 웨이포인트를 열고 지도를 두 번 탭해 점 두 개를 만드세요. 위치는 상관없습니다. 지그재그 아이콘을 다시 눌러 저장하고, 목록에서 이름을 1번 홀로 바꿉니다. 그다음 앱을 완전히 닫으세요. 이 경로로는 날지 않으니 고는 누르지 않습니다.',
+    en: "First, save an empty route on the controller. Open Waypoints and tap the map twice to make two points. The location doesn't matter. Tap the zigzag icon again to save, then rename it Hole 1 in the list. Close the app fully. This route isn't for flying, so don't press GO." },
+  { ko: '조종기를 컴퓨터에 연결하고, 안드로이드, 데이터, 디제이아이 고 파이브, 파일즈, 웨이포인트 폴더로 들어갑니다. 캐퍼빌리티와 맵 프리뷰 폴더는 그대로 두세요. 긴 이름의 폴더가 방금 저장한 빈 경로입니다. 여러 개라면 날짜가 가장 최근인 폴더를 고르면 됩니다.',
+    en: "Connect the controller to the computer and open Android, data, dji dot go dot v5, files, then waypoint. Leave the capability and map preview folders alone. The long-named folder is the route you just saved. If there are several, pick the newest one." },
+  { ko: '긴 이름의 폴더 안에 있는 KMZ를 바탕화면에 먼저 백업합니다. 그리고 내려받은 펠햄 홀 영일 파일을 복사해서, 앱이 만든 파일과 똑같은 이름으로 바꾸세요. 그 파일을 폴더 안에 넣고 덮어쓰기를 선택합니다. 폴더 이름은 바꾸지 말고, 안에 KMZ가 한 개만 남아야 합니다.',
+    en: "Back up the KMZ in the long-named folder to your desktop first. Then copy the downloaded pelham hole zero one file and rename it to exactly match the app's file. Put it in the folder and choose to overwrite. Don't rename the folder, and leave only one KMZ inside." },
+  { ko: '앱을 열고 목록에서 경로를 엽니다. 점이 다섯 개 보이고, 클럽 1번 홀 위에 있고, 첫 점의 고도가 20미터면 성공입니다. 점이 그대로 두 개이거나 오류가 나면 백업 파일을 보내 주세요. 이 파일은 아직 실제로 시험하지 않았습니다. 성공하면 홀마다 같은 방법으로 넣고, 첫 비행은 사람이 없는 곳에서 한 홀만 시험하세요. 안전한 비행 되세요!',
+    en: "Open the app and load the route from the list. It worked if you see five points over the club's Hole 1, and the first point is at 20 metres. If it still shows two points or an error, send the backup file. These files haven't been tested on the real app yet. Once it works, repeat for each hole, and test one hole first, somewhere with nobody around. Have a safe flight!" },
+];
+
+// Hope's clips, baked with ElevenLabs (Hope natural, voice tnSpp4vdxKPjI9w0GnoV, eleven_multilingual_v2).
+const UI = {
+  play: { ko: '▶ 재생', en: '▶ Play' },
+  pause: { ko: '❚❚ 멈춤', en: '❚❚ Pause' },
+  hint: { ko: '키보드: ← → 슬라이드 · 스페이스 재생/멈춤 · 한/영 키 또는 L 언어 전환', en: 'Keys: ← → slides · Space play/pause · Han/Eng key or L switches language' },
+  noPitch: { ko: '피치 조절 모듈을 불러오지 못해 속도만 바꿀 수 있습니다.', en: "The pitch module didn't load, so only speed can change." },
+};
+
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('hope.' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('hope.' + k, JSON.stringify(v)); } catch (e) {} },
+};
+
+const slides = [...document.querySelectorAll('.slide')];
+const $ = id => document.getElementById(id);
+const pitch = $('pitch'), rate = $('rate');
+const asked = new URLSearchParams(location.search).get('lang');
+let lang = asked === 'ko' || asked === 'en' ? asked : store.get('lang', 'ko');
+let idx = 0, playing = false, token = 0;
+pitch.value = store.get('pitch2', 1);
+rate.value = store.get('rate2', 1);
+
+// 클립은 public/audio/kmz/ 에 있습니다.
+const clipUrl = (l, i) => `/audio/kmz/slide-${i + 1}-${l}.mp3`;
+
+// Speed: the browser time-stretches and keeps the pitch. Pitch: a separate shifter, so the two move independently.
+const audio = new Audio();
+audio.preload = 'auto';
+audio.preservesPitch = audio.webkitPreservesPitch = audio.mozPreservesPitch = true;
+let graph = null;
+function ensureGraph() {
+  if (graph || !window.Tone) return;
+  try {
+    const src = Tone.getContext().rawContext.createMediaElementSource(audio);
+    const shift = new Tone.PitchShift({ pitch: 0, windowSize: 0.08 }).toDestination();
+    Tone.connect(src, shift);
+    graph = { src, shift };
+  } catch (e) { graph = null; }
+}
+function applyPitch() {
+  if (!graph) return;
+  const p = +pitch.value;
+  graph.shift.pitch = 12 * Math.log2(p);
+  graph.shift.wet.value = Math.abs(p - 1) < 0.005 ? 0 : 1;
+}
+function applyRate() { audio.defaultPlaybackRate = audio.playbackRate = +rate.value; }
+
+function sentences(text) { return text.match(/[^.!?]+[.!?]?/g).map(s => s.trim()).filter(Boolean); }
+function renderCaption(active = -1) {
+  const parts = sentences(NARR[idx][lang]);
+  $('caption').innerHTML = parts.map((s, i) => i === active ? `<mark>${s}</mark>` : s).join(' ');
+}
+audio.ontimeupdate = () => {
+  if (!playing || !audio.duration) return;
+  const parts = sentences(NARR[idx][lang]), total = parts.reduce((a, s) => a + s.length, 0);
+  const at = audio.currentTime / audio.duration * total;
+  let sum = 0, k = 0;
+  for (; k < parts.length - 1; k++) { sum += parts[k].length; if (sum > at) break; }
+  renderCaption(k);
+};
+
+function applyLang() {
+  document.documentElement.lang = lang;
+  document.querySelectorAll('[data-ko]').forEach(e => { e.innerHTML = e.dataset[lang]; });
+  $('lang-ko').setAttribute('aria-pressed', String(lang === 'ko'));
+  $('lang-en').setAttribute('aria-pressed', String(lang === 'en'));
+  $('play').textContent = UI[playing ? 'pause' : 'play'][lang];
+  $('hint').textContent = window.Tone ? UI.hint[lang] : UI.noPitch[lang];
+  renderCaption();
+}
+
+function show(i) {
+  idx = (i + slides.length) % slides.length;
+  slides.forEach((s, k) => { s.hidden = k !== idx; });
+  $('count').textContent = `${idx + 1} / ${slides.length}`;
+  try { history.replaceState(null, '', '#s' + (idx + 1)); } catch (e) {}
+  renderCaption();
+}
+
+function playSlide() {
+  const my = ++token;
+  audio.src = clipUrl(lang, idx);
+  applyRate();
+  audio.play().then(() => { if (my === token) $('avatar').classList.add('talking'); })
+    .catch(() => { if (my === token) stop(); });
+}
+audio.onended = () => {
+  $('avatar').classList.remove('talking');
+  if (!playing) return;
+  const my = token;
+  if ($('auto').checked && idx < slides.length - 1) {
+    show(idx + 1);
+    setTimeout(() => { if (playing && my === token) playSlide(); }, 450);
+  } else stop();
+};
+
+function stop() {
+  token++; playing = false;
+  audio.pause();
+  $('avatar').classList.remove('talking');
+  $('play').textContent = UI.play[lang];
+  renderCaption();
+}
+
+async function toggle() {
+  if (playing) { stop(); return; }
+  playing = true;
+  $('play').textContent = UI.pause[lang];
+  if (window.Tone) { try { await Tone.start(); ensureGraph(); applyPitch(); } catch (e) {} }
+  playSlide();
+}
+
+function setLang(l) {
+  if (l === lang) return;
+  lang = l; store.set('lang', l);
+  applyLang();
+  if (playing) playSlide();
+}
+function go(d) { show(idx + d); if (playing) playSlide(); }
+
+$('prev').onclick = () => go(-1);
+$('next').onclick = () => go(1);
+$('play').onclick = toggle;
+$('lang-ko').onclick = () => setLang('ko');
+$('lang-en').onclick = () => setLang('en');
+function syncOut() { $('pitch-out').textContent = (+pitch.value).toFixed(2); $('rate-out').textContent = (+rate.value).toFixed(2) + '×'; }
+pitch.oninput = () => { syncOut(); applyPitch(); store.set('pitch2', +pitch.value); };
+rate.oninput = () => { syncOut(); applyRate(); store.set('rate2', +rate.value); };
+$('reset').onclick = () => { pitch.value = 1; rate.value = 1; pitch.oninput(); rate.oninput(); };
+if (!window.Tone) pitch.disabled = true;
+
+addEventListener('keydown', e => {
+  if (e.target.closest('select, input')) return;
+  if (e.key === 'ArrowRight') { e.preventDefault(); go(1); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); go(-1); }
+  else if (e.key === ' ' && !e.target.closest('button')) { e.preventDefault(); toggle(); }
+  else if (e.key === 'HangulMode' || e.key === 'Lang1' || e.code === 'Lang1' || e.code === 'Lang2' || e.code === 'KeyL' || /^[lLㅣ]$/.test(e.key)) { setLang(lang === 'ko' ? 'en' : 'ko'); }
+});
+
+syncOut();
+const m = /^#s([1-9])$/.exec(location.hash);
+show(m ? +m[1] - 1 : 0);
+applyLang();
+</script>
+
+</body>
+</html>

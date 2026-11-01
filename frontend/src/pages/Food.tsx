@@ -249,9 +249,37 @@ export default function Food() {
     }
   };
 
-  const slots = useMemo(() => pickupSlots(new Date(), settings), [settings]);
+  // The hours are the pro shop's to change from /admin, and a player may keep
+  // this screen open for nine holes. So the settings are read again every
+  // minute and whenever the phone comes back to the page, and the clock ticks
+  // so a pickup time that has gone by drops off the list.
+  const [now, setNow] = useState(() => new Date());
   useEffect(() => {
-    if (!pickup && slots.length) setPickup(slots[0].toISOString());
+    let alive = true;
+    const refresh = () => {
+      setNow(new Date());
+      void fetchOrderSettings().then((shopSettings) => {
+        if (alive) setSettings(shopSettings);
+      });
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    const timer = window.setInterval(refresh, 60_000);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
+
+  const slots = useMemo(() => pickupSlots(now, settings), [now, settings]);
+  useEffect(() => {
+    // A time the shop no longer offers - passed, or outside new hours - would
+    // only come back from the database as a refusal.
+    if (pickup && slots.some((slot) => slot.toISOString() === pickup)) return;
+    setPickup(slots.length ? slots[0].toISOString() : '');
   }, [slots, pickup]);
 
   const lines: OrderLine[] = useMemo(
@@ -658,7 +686,8 @@ export default function Food() {
               </button>
             )}
             <p className="mt-2 text-xs text-muted-foreground">
-              The kitchen needs {settings.leadMinutes} minutes. Times go in {settings.slotMinutes} minute steps.
+              Orders are taken from {settings.open} to {settings.close}. The kitchen needs{' '}
+              {settings.leadMinutes} minutes. Times go in {settings.slotMinutes} minute steps.
             </p>
 
             <div className="mt-4 flex flex-col gap-3">

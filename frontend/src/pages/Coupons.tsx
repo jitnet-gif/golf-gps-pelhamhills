@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'wouter';
-import { Award, BadgeCheck, Car, ChevronLeft, Gift, Loader2, RefreshCw, Share2, Ticket, Users, WifiOff, X } from 'lucide-react';
+import { Award, BadgeCheck, Car, ChevronLeft, ChevronRight, Gift, IdCard, Loader2, RefreshCw, Share2, Ticket, Users, WifiOff, X } from 'lucide-react';
 import { AccountForm } from '@/components/AccountPanel';
 import { useAppStore } from '@/store/appStore';
 import { startAuth } from '@/lib/auth';
@@ -16,6 +16,7 @@ import {
 } from '@/lib/couponBook';
 import { code128Svg } from '@/lib/barcode';
 import { discountLabel, fetchMyWallet, money, WalletError, type Wallet, type WalletItem } from '@/lib/wallet';
+import { fetchMyProfile, membershipLabel, type MemberCard, type MyProfile } from '@/lib/membership';
 
 const ENTRY_LABEL: Record<CouponEntry['kind'], string> = {
   stamp: 'Round stamped',
@@ -45,6 +46,8 @@ export default function Coupons() {
   const [book, setBook] = useState<CouponBook | null>(null);
   // 0121 을 아직 안 돌렸으면 null 로 두고 지갑 칸을 숨깁니다 - 쿠폰북은 그대로 보입니다.
   const [wallet, setWallet] = useState<Wallet | null>(null);
+  // 0031 을 아직 안 돌렸으면 null 로 두고 멤버십 카드와 가입 안내를 숨깁니다.
+  const [profile, setProfile] = useState<MyProfile | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -58,9 +61,10 @@ export default function Coupons() {
     const walletLoad = fetchMyWallet().then(setWallet, (failure) => {
       if (failure instanceof WalletError && failure.problem === 'missingTable') setWallet(null);
     });
+    const profileLoad = fetchMyProfile().then(setProfile, () => setProfile(null));
     try {
       setBook(await fetchMyCouponBook());
-      await walletLoad;
+      await Promise.all([walletLoad, profileLoad]);
     } catch (failure) {
       setError(
         failure instanceof CouponError && failure.problem === 'network'
@@ -77,6 +81,7 @@ export default function Coupons() {
     else {
       setBook(null);
       setWallet(null);
+      setProfile(null);
     }
   }, [account, load]);
 
@@ -107,7 +112,8 @@ export default function Coupons() {
         the pro shop. Play {STAMPS_PER_FREE} rounds, get the next one <b className="text-foreground">free</b>.
         Every {ROUNDS_PER_GIFT} rounds, pick up a <b className="text-foreground">Pelham Hills souvenir</b>.
         You get a stamp automatically when you check in at the pro shop. Book with this
-        account's email so we know it's you.
+        account's email, or link your QR under <Link href="/me" className="underline">My QR</Link>,
+        so we know it's you.
         <br />
         <span className="text-xs">Members play on their membership and don't collect stamps.</span>
       </p>
@@ -118,6 +124,12 @@ export default function Coupons() {
         <section className="rounded-xl border border-border bg-card p-4">
           <p className="mb-3 text-sm">Sign in to keep your stamps in your account.</p>
           <AccountForm />
+          <p className="mt-3 text-center text-xs text-muted-foreground">
+            New here?{' '}
+            <Link href="/join" className="underline">
+              Sign up as a member or guest
+            </Link>
+          </p>
         </section>
       ) : !book ? (
         error ? (
@@ -130,11 +142,85 @@ export default function Coupons() {
         )
       ) : (
         <>
+          {profile?.card && <MembershipCard card={profile.card} />}
+          {profile && !profile.card && (!profile.kind || (profile.kind === 'member' && !profile.isMember)) && (
+            <Link
+              href="/join"
+              className="flex items-center gap-3 rounded-xl border-2 border-primary bg-card p-4"
+            >
+              <IdCard className="h-8 w-8 shrink-0 text-primary" />
+              <span className="min-w-0 flex-1">
+                <span className="block font-bold">
+                  {profile.kind === 'member' ? 'Add your new membership card' : 'Finish signing up'}
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  {profile.kind === 'member'
+                    ? 'Your last card has ended.'
+                    : profile.isMember
+                      ? 'Add your membership card to this phone.'
+                      : 'Add a membership card, or tell us your name for the coupon book.'}
+                </span>
+              </span>
+              <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
+            </Link>
+          )}
           {wallet && <WalletCards wallet={wallet} />}
           <CouponCard book={book} onChange={setBook} />
         </>
       )}
     </main>
+  );
+}
+
+/** 멤버십 카드 (0031). 완납한 회원권이면 눌러서 바코드를 띄웁니다 - 계산서 베이 줄에서 찍습니다(pelhamhills 0151). */
+function MembershipCard({ card }: { card: MemberCard }) {
+  const [open, setOpen] = useState(false);
+  const code = card.memberCode;
+  const face = (
+    <>
+      <span className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide opacity-90">
+        <IdCard className="h-4 w-4" />
+        Membership card · {card.season}
+      </span>
+      <span className="text-2xl font-black">{card.memberName}</span>
+      <span className="text-xs opacity-90">
+        {membershipLabel(card.membershipType)}
+        {card.memberNumber ? ` · Member #${card.memberNumber}` : ''}
+        {card.expiresOn ? ` · Until ${dayOf(card.expiresOn)}` : ''}
+      </span>
+      {card.simHoursLeft > 0 && card.simExpiresOn && (
+        <span className="text-xs opacity-90">
+          {card.simHoursLeft} free simulator hour{card.simHoursLeft === 1 ? '' : 's'} left · Use by{' '}
+          {dayOf(card.simExpiresOn)}
+        </span>
+      )}
+      <span className="mt-1 font-mono text-[11px] opacity-80">
+        {code ? `${code} · Tap to show barcode` : 'Your barcode comes once your membership is paid in full.'}
+      </span>
+    </>
+  );
+  const look = 'flex w-full flex-col gap-0.5 rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 p-4 text-left text-white shadow-sm';
+
+  return (
+    <>
+      {code ? (
+        <button type="button" onClick={() => setOpen(true)} className={look}>
+          {face}
+        </button>
+      ) : (
+        <section aria-label="Membership card" className={look}>
+          {face}
+        </section>
+      )}
+      {open && code && (
+        <BarcodeSheet
+          title={`Membership card · ${card.memberName}`}
+          barcode={code}
+          note="Show this at the pro shop to use your free simulator hours."
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
   );
 }
 
@@ -436,7 +522,22 @@ function WalletCards({ wallet }: { wallet: Wallet }) {
           </ul>
         </details>
       )}
-      {shown && <BarcodeSheet item={shown} onClose={() => setShown(null)} />}
+      {shown && (
+        <BarcodeSheet
+          title={
+            shown.type === 'gift'
+              ? `Gift card · ${money(shown.balance)} left`
+              : `${shown.name} · ${discountLabel(shown.discountKind, shown.value)}`
+          }
+          barcode={shown.barcode}
+          note={
+            shown.type === 'gift'
+              ? 'Anyone with this barcode can spend the card - keep it to yourself.'
+              : undefined
+          }
+          onClose={() => setShown(null)}
+        />
+      )}
     </>
   );
 }
@@ -469,7 +570,17 @@ function WalletCard({ item, onOpen }: { item: WalletItem; onOpen: () => void }) 
 }
 
 /** 프로 샵 스캐너용 - 흰 바탕에 바코드를 화면 폭 가득. */
-function BarcodeSheet({ item, onClose }: { item: WalletItem; onClose: () => void }) {
+function BarcodeSheet({
+  title,
+  barcode,
+  note,
+  onClose,
+}: {
+  title: string;
+  barcode: string;
+  note?: string;
+  onClose: () => void;
+}) {
   useEffect(() => {
     const close = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
@@ -482,24 +593,20 @@ function BarcodeSheet({ item, onClose }: { item: WalletItem; onClose: () => void
     <div
       role="dialog"
       aria-modal="true"
-      aria-label={`Barcode ${item.barcode}`}
+      aria-label={`Barcode ${barcode}`}
       className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-white p-6 text-black"
       onClick={onClose}
     >
-      <p className="text-lg font-bold">
-        {item.type === 'gift'
-          ? `Gift card · ${money(item.balance)} left`
-          : `${item.name} · ${discountLabel(item.discountKind, item.value)}`}
-      </p>
+      <p className="text-lg font-bold">{title}</p>
       <div
         className="h-32 w-full max-w-md [&>svg]:h-full [&>svg]:w-full"
-        // 막대만 그린 SVG 문자열(lib/barcode). 바코드 값은 서버가 만든 GIFT-/CPN- 코드뿐입니다.
-        dangerouslySetInnerHTML={{ __html: code128Svg(item.barcode) }}
+        // 막대만 그린 SVG 문자열(lib/barcode). 바코드 값은 서버가 만든 GIFT-/CPN-/MEM- 코드뿐입니다.
+        dangerouslySetInnerHTML={{ __html: code128Svg(barcode) }}
       />
-      <p className="font-mono text-xl tracking-widest">{item.barcode}</p>
+      <p className="font-mono text-xl tracking-widest">{barcode}</p>
       <p className="text-center text-sm text-gray-600">
         Show this at the pro shop. Turn your screen brightness up if the scanner misses.
-        {item.type === 'gift' ? ' Anyone with this barcode can spend the card - keep it to yourself.' : ''}
+        {note ? ` ${note}` : ''}
       </p>
       <button
         type="button"

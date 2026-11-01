@@ -6,6 +6,9 @@ import Book from './pages/Book';
 import Food from './pages/Food';
 import Counter from './pages/Counter';
 import Coupons from './pages/Coupons';
+import Checkin from './pages/Checkin';
+import MyQr from './pages/MyQr';
+import Join from './pages/Join';
 import { UpdateNotice } from './components';
 import { useOfflineMode } from './hooks';
 
@@ -28,11 +31,17 @@ export default function App() {
         <Route path="/book" component={Book} />
         <Route path="/food" component={Food} />
         <Route path="/coupons" component={Coupons} />
+        {/* 카운터 NFC 스티커가 여는 주소(0024). */}
+        <Route path="/checkin" component={Checkin} />
+        {/* 프로 샵이 준 손님 QR 이 여는 주소(pelhamhills 0084). */}
+        <Route path="/me" component={MyQr} />
+        {/* 회원 카드·비회원 쿠폰북 가입(0031). */}
+        <Route path="/join" component={Join} />
         <Route path="/golf/:courseId" component={Golf} />
         {/* 운영자용. 플레이어에게는 링크로 노출하지 않습니다 - 주소를 아는
             사람만 들어오고, 실제 차단은 화면이 아니라 서버의 X-Admin-Key가
             합니다. 예외는 관리자 키를 넣은 탭에만 보이는 '지도 수정' 링크와
-            클럽 어드민 사이드바의 Course Map 메뉴(/admin/map)입니다.
+            클럽 어드민 사이드바의 Course Map(/admin/map), CCTV(/admin/cctv) 메뉴입니다.
             :section? 하나로 받아야 /admin <-> /admin/map 을 오갈 때 화면이
             다시 마운트되지 않습니다. */}
         <Route path="/admin/:section?" component={Admin} />

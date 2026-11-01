@@ -18,7 +18,7 @@ import {
   VolumeX,
   X,
 } from 'lucide-react';
-import { AdminAccountGate, OrderCallBanner, OrderReceipt, StaffNotices } from '@/components/admin';
+import { AdminAccountGate, CheckinDesk, CouponDesk, OrderCallBanner, OrderReceipt, StaffNotices } from '@/components/admin';
 import { useAppStore } from '@/store/appStore';
 import { startAuth } from '@/lib/auth';
 import {
@@ -160,6 +160,16 @@ export default function Counter() {
             했으면 보입니다. */}
         <SignedIn>
           <StaffNotices />
+        </SignedIn>
+
+        {/* 쿠폰북 도장도 같은 이유로 관리자 문 밖입니다. 계산하는 직원이
+            찍고, 직원이 아니면 스스로 사라집니다(0023). */}
+        <SignedIn>
+          <CheckinDesk />
+        </SignedIn>
+
+        <SignedIn>
+          <CouponDesk />
         </SignedIn>
 
         <AdminAccountGate>

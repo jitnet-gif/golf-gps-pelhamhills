@@ -245,6 +245,35 @@ export class GolfGpsDB extends Dexie {
           await table.put({ ...rest, holeNumber: to, id: `${row.courseId}:${to}` } satisfies HolePath);
         }
       });
+    // v7: the club numbers its nines the other way round from the yardage book
+    // after all - its Google Earth survey is numbered as OSM was - so v6 is
+    // undone. Everything here was drawn or stood on under the old number, and
+    // belongs to the ground, which now carries the other nine's number. Lines
+    // move (2 -> 11, 11 -> 2), dropping any tee and pin they named: those were
+    // OSM's points renumbered, and the survey replaced them. Pin surveys move
+    // whole - a point someone stood on is still the best there is.
+    this.version(7)
+      .stores({})
+      .upgrade(async (tx) => {
+        const other = (n: number) => (n > 9 ? n - 9 : n + 9);
+
+        const paths = tx.table('holePaths');
+        const lines: HolePath[] = await paths.where('courseId').equals('pelham-hills').toArray();
+        for (const row of lines) await paths.delete(row.id);
+        for (const row of lines) {
+          const { syncedAt: _dropped, tee: _tee, pin: _pin, length: _length, ...rest } = row;
+          const to = other(row.holeNumber);
+          await paths.put({ ...rest, holeNumber: to, id: `${row.courseId}:${to}` } satisfies HolePath);
+        }
+
+        const surveys = tx.table('pinSurveys');
+        const points: PinSurvey[] = await surveys.where('courseId').equals('pelham-hills').toArray();
+        for (const row of points) await surveys.delete(row.id);
+        for (const row of points) {
+          const to = other(row.holeNumber);
+          await surveys.put({ ...row, holeNumber: to, id: `${row.courseId}:${to}` } satisfies PinSurvey);
+        }
+      });
   }
 }
 

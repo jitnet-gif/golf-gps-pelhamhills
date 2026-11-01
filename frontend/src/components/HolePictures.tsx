@@ -17,6 +17,11 @@ interface HolePicturesProps {
  * the course has been downloaded. Space is held at the pictures' own aspect
  * ratio so the column does not jump as they arrive.
  *
+ * Both are capped by the screen's height, so the whole card shows at once in the
+ * hole sheet (whose details get 55vh): drawn at the sheet's width the layout ran
+ * ~600 px tall and was cut off below the bar's bottom edge. The photo strip is
+ * cropped to its middle, the drawing is shrunk whole with white either side.
+ *
  * Give it `key={holeNumber}` - a failure on one hole must not hide the next.
  */
 export const HolePictures: React.FC<HolePicturesProps> = ({ holeNumber, className = '' }) => {
@@ -41,7 +46,7 @@ export const HolePictures: React.FC<HolePicturesProps> = ({ holeNumber, classNam
             width={HOLE_PHOTO_SIZE.width}
             height={HOLE_PHOTO_SIZE.height}
             onError={() => setPhotoFailed(true)}
-            className="block w-full h-auto"
+            className="block w-full h-auto max-h-[11vh] object-cover"
             style={{ aspectRatio: `${HOLE_PHOTO_SIZE.width} / ${HOLE_PHOTO_SIZE.height}` }}
           />
         )}
@@ -52,7 +57,7 @@ export const HolePictures: React.FC<HolePicturesProps> = ({ holeNumber, classNam
             width={HOLE_LAYOUT_SIZE.width}
             height={HOLE_LAYOUT_SIZE.height}
             onError={() => setLayoutFailed(true)}
-            className="block w-full h-auto"
+            className="block w-full h-auto max-h-[26vh] object-contain"
             style={{ aspectRatio: `${HOLE_LAYOUT_SIZE.width} / ${HOLE_LAYOUT_SIZE.height}` }}
           />
         )}

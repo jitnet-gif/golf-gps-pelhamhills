@@ -1,5 +1,6 @@
 import React, { useState, type FormEvent } from 'react';
-import { LogOut, UserRound } from 'lucide-react';
+import { Link } from 'wouter';
+import { LogOut, QrCode, UserRound } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { signIn, signOut, signUp, type AuthProblem } from '@/lib/auth';
 
@@ -204,6 +205,13 @@ export const AccountBar: React.FC<{ className?: string }> = ({ className = '' })
           {state}
         </p>
       </div>
+      <Link
+        href="/me"
+        className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-muted px-2 py-1.5 text-xs font-medium hover:bg-accent"
+      >
+        <QrCode className="h-3.5 w-3.5" />
+        My QR
+      </Link>
       <button
         type="button"
         onClick={() => void signOut()}

@@ -164,6 +164,20 @@ export function MenuAdmin() {
   };
 
   const saveHours = async () => {
+    // The database takes whatever is saved here and refuses every order that
+    // falls outside it, so a backwards window would quietly shut the shop.
+    if (!settings.open || !settings.close || settings.close <= settings.open) {
+      setSettingsNote('닫는 시간은 여는 시간보다 늦어야 합니다.');
+      return;
+    }
+    if (!(settings.leadMinutes >= 0 && settings.leadMinutes <= 180)) {
+      setSettingsNote('준비 시간은 0~180분 사이로 넣어 주세요.');
+      return;
+    }
+    if (!(settings.slotMinutes >= 5 && settings.slotMinutes <= 60)) {
+      setSettingsNote('시간 간격은 5~60분 사이로 넣어 주세요.');
+      return;
+    }
     setBusy(true);
     setSettingsNote('');
     const failed = await saveOrderSettings(settings);
@@ -177,7 +191,8 @@ export function MenuAdmin() {
         <div>
           <h2 className="text-base font-semibold">주문 받는 시간</h2>
           <p className="text-sm text-muted-foreground">
-            선수는 이 시간 안에서만, 준비 시간이 지난 뒤부터 10분 단위로 픽업 시간을 고릅니다.
+            선수는 이 시간 안에서만, 준비 시간이 지난 뒤부터 {settings.slotMinutes}분 단위로 픽업 시간을 고릅니다.
+            저장하면 열려 있는 주문 화면에도 1분 안에 반영됩니다.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

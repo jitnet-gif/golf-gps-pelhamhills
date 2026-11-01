@@ -621,7 +621,7 @@ export function FairwayPathEditor() {
           className={viewButton(view === 'hole')}
         >
           <Pencil className="w-4 h-4" />
-          {hole.holeNumber}번 홀 편집
+          {`${hole.holeNumber}번 홀 편집`}
         </button>
       </div>
 
@@ -645,7 +645,7 @@ export function FairwayPathEditor() {
           >
             {holes.map((h) => (
               <option key={h.holeNumber} value={h.holeNumber}>
-                {h.holeNumber}번 홀 · Par {bookHole(h.holeNumber)?.par ?? h.par}
+                {`${h.holeNumber}번 홀 · Par ${bookHole(h.holeNumber)?.par ?? h.par}`}
                 {holePaths.has(h.holeNumber) ? ' · 수정함' : ''}
               </option>
             ))}
@@ -884,12 +884,12 @@ export function FairwayPathEditor() {
       {view === 'hole' ? (
         <>
           <p className="text-sm">
-            꺾이는 점 {waypoints.length}개 (최대 {MAX_BENDS}개) · 선 길이 {lineYards}야드
-            <span className="text-muted-foreground"> (직선 {yards(pathLengthMetres([tee, pin]))}야드)</span>
+            {`꺾이는 점 ${waypoints.length}개 (최대 ${MAX_BENDS}개) · 선 길이 ${lineYards}야드`}
+            <span className="text-muted-foreground"> {`(직선 ${yards(pathLengthMetres([tee, pin]))}야드)`}</span>
           </p>
           {book && (
             <p className={`text-xs ${farFromCard ? 'text-amber-600 dark:text-amber-500' : 'text-muted-foreground'}`}>
-              클럽 카드: Par {book.par} · 핸디캡 {book.handicap} · White {book.yards.white}야드
+              {`클럽 카드: Par ${book.par} · 핸디캡 ${book.handicap} · White ${book.yards.white}야드`}
               {farFromCard && ' - 선 길이와 차이가 큽니다. 이 위치가 정말 이 번호의 홀인지 확인하세요.'}
             </p>
           )}
@@ -989,7 +989,7 @@ export function FairwayPathEditor() {
                   .filter((h) => h.holeNumber !== hole.holeNumber)
                   .map((h) => (
                     <option key={h.holeNumber} value={h.holeNumber}>
-                      {h.holeNumber}번 홀
+                      {`${h.holeNumber}번 홀`}
                     </option>
                   ))}
               </select>
@@ -1051,7 +1051,7 @@ export function FairwayPathEditor() {
 
       <div className="rounded-lg border border-border p-3 flex flex-col gap-2">
         <p className="text-xs text-muted-foreground">
-          백업: 수정한 선과 번호를 코드로 복사해 둘 수 있습니다 ({holePaths.size}/{holes.length}홀).
+          {`백업: 수정한 선과 번호를 코드로 복사해 둘 수 있습니다 (${holePaths.size}/${holes.length}홀).`}
         </p>
         <button
           type="button"

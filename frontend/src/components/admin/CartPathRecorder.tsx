@@ -230,16 +230,16 @@ export function CartPathRecorder() {
       <p className="text-sm tabular-nums" role="status" aria-live="polite">
         {recording ? (
           <>
-            <span className="font-semibold text-red-600">● 녹화 중</span> · {yards(length)}야드 · 점 {track.points.length}개
+            <span className="font-semibold text-red-600">● 녹화 중</span> {`· ${yards(length)}야드 · 점 ${track.points.length}개`}
             {accuracy !== null && <> · GPS ±{Math.round(accuracy)}m</>}
             {accuracy !== null && accuracy > RECORD_MAX_ACCURACY_METRES && (
               <span className="text-amber-700 dark:text-amber-400"> (흐려서 건너뜀)</span>
             )}
           </>
         ) : track.points.length ? (
-          <>녹화한 길 {yards(length)}야드 · 저장하면 점 {simplified.length}개로 줄여 올립니다.</>
+          <>{`녹화한 길 ${yards(length)}야드 · 저장하면 점 ${simplified.length}개로 줄여 올립니다.`}</>
         ) : (
-          <>저장된 길 {saved.length}줄 · OpenStreetMap 길 {OSM_CART_PATHS.length}줄</>
+          <>{`저장된 길 ${saved.length}줄 · OpenStreetMap 길 ${OSM_CART_PATHS.length}줄`}</>
         )}
         {skippedVague > 0 && !recording && track.points.length > 0 && <> · 흐린 위치 {skippedVague}번 건너뜀</>}
       </p>
@@ -308,7 +308,7 @@ export function CartPathRecorder() {
           {saved.map((path) => (
             <li key={path.id} className="flex items-center gap-3 px-3 py-2 text-sm">
               <span className="min-w-0 flex-1 truncate">
-                {formatDateTime(path.createdAt)} · {yards(path.metres)}야드 · 점 {path.points.length}개
+                {`${formatDateTime(path.createdAt)} · ${yards(path.metres)}야드 · 점 ${path.points.length}개`}
               </span>
               <button
                 type="button"

@@ -540,6 +540,7 @@
  "무효": "Void",
  "멈춤": "Paused",
  "드론 촬영": "Drone Shoot",
+ "KMZ 넣는 법 (호프 가이드)": "How to load a KMZ (Hope guide)",
  "KMZ 내려받기": "Download KMZ",
  "KMZ 는 DJI Fly 에서 저장한 빈 경로 파일을 덮어쓰는 비공식 방법입니다. 앱에서 경로가 맞게 보이는지 확인하고, 처음에는 한 홀만 시험 비행하세요.": "KMZ overwrites an empty route saved in DJI Fly, which is unofficial. Check the route looks right in the app, and test one hole first.",
  "DJI Fly 어디에 넣나요": "Where it goes in DJI Fly",

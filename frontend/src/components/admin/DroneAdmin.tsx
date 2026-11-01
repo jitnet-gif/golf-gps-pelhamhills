@@ -763,6 +763,15 @@ function HoleCard({
         KMZ 는 DJI Fly 에서 저장한 빈 경로 파일을 덮어쓰는 비공식 방법입니다. 앱에서 경로가 맞게 보이는지 확인하고, 처음에는 한 홀만 시험 비행하세요.
       </p>
 
+      <a
+        href={`/admin/kmz-guide.html?lang=${getLang()}`}
+        target="_blank"
+        rel="noopener"
+        className="inline-flex items-center gap-1.5 text-sm underline underline-offset-2"
+      >
+        <Presentation className="w-4 h-4" />KMZ 넣는 법 (호프 가이드)
+      </a>
+
       <div className="flex flex-wrap items-center gap-2">
         <a
           href={gmaps(plan.route[0].at)}
