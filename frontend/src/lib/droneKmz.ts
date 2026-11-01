@@ -33,7 +33,7 @@ const PAYLOAD = `
         <wpml:payloadPositionIndex>0</wpml:payloadPositionIndex>
       </wpml:payloadInfo>`;
 
-function templateKml(plan: HolePlan, now: number): string {
+function templateKml(height: number, now: number): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:wpml="${NS}">
   <Document>
@@ -44,7 +44,7 @@ function templateKml(plan: HolePlan, now: number): string {
     <Folder>
       <wpml:templateType>waypoint</wpml:templateType>
       <wpml:templateId>0</wpml:templateId>
-      <wpml:globalHeight>${plan.route[0].altitude.toFixed(2)}</wpml:globalHeight>
+      <wpml:globalHeight>${height.toFixed(2)}</wpml:globalHeight>
       <wpml:executeHeightMode>relativeToStartPoint</wpml:executeHeightMode>
       <wpml:waylineCoordinateSysParam>
         <wpml:coordinateMode>WGS84</wpml:coordinateMode>
@@ -84,14 +84,14 @@ const gimbal = (id: number, pitch: number) =>
 ${PAYLOAD_INDEX}`
   );
 
-/** 점마다 짐벌, ①은 2.5초 멈춰 짐벌이 자리 잡은 뒤 녹화 시작, 마지막 점은 녹화 중지. */
-function actionGroup(w: Waypoint, i: number, last: number): string {
+/** 점마다 짐벌, ①은 2.5초 멈춰 짐벌이 자리 잡은 뒤 녹화 시작, 마지막 점은 녹화 중지. 전경은 녹화하지 않습니다. */
+function actionGroup(w: Waypoint, i: number, last: number, film: boolean): string {
   const actions = [gimbal(0, w.gimbal)];
   if (i === 0) {
     actions.push(action(1, 'hover', '              <wpml:hoverTime>2.5</wpml:hoverTime>'));
-    actions.push(action(2, 'startRecord', PAYLOAD_INDEX));
+    if (film) actions.push(action(2, 'startRecord', PAYLOAD_INDEX));
   }
-  if (i === last) actions.push(action(1, 'stopRecord', PAYLOAD_INDEX));
+  if (film && i === last) actions.push(action(1, 'stopRecord', PAYLOAD_INDEX));
   return `        <wpml:actionGroup>
           <wpml:actionGroupId>${i}</wpml:actionGroupId>
           <wpml:actionGroupStartIndex>${i}</wpml:actionGroupStartIndex>
@@ -104,9 +104,9 @@ ${actions.join('\n')}
         </wpml:actionGroup>`;
 }
 
-function waylinesWpml(plan: HolePlan): string {
-  const last = plan.route.length - 1;
-  const marks = plan.route.map(
+function waylinesWpml(route: Waypoint[], film: boolean): string {
+  const last = route.length - 1;
+  const marks = route.map(
     (w, i) => `      <Placemark>
         <wpml:index>${i}</wpml:index>
         <Point>
@@ -122,7 +122,7 @@ function waylinesWpml(plan: HolePlan): string {
           <wpml:waypointTurnMode>coordinateTurn</wpml:waypointTurnMode>
           <wpml:waypointTurnDampingDist>0.2</wpml:waypointTurnDampingDist>
         </wpml:waypointTurnParam>
-${actionGroup(w, i, last)}
+${actionGroup(w, i, last, film)}
       </Placemark>`
   );
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -291,7 +291,17 @@ export const earthKmzName = (plans: HolePlan[]) =>
 
 export function holeKmz(plan: HolePlan, now = Date.now()): Uint8Array<ArrayBuffer> {
   return zip([
-    { name: 'template.kml', text: templateKml(plan, now) },
-    { name: 'waylines.wpml', text: waylinesWpml(plan) },
+    { name: 'template.kml', text: templateKml(plan.route[0].altitude, now) },
+    { name: 'waylines.wpml', text: waylinesWpml(plan.route, true) },
+  ]);
+}
+
+export const courseKmzName = 'pelham-course-panorama.kmz';
+
+/** 전경 자리로 올라가 기수와 짐벌을 맞추고 멈춥니다(finishAction noAction). 파노라마는 조종자가 찍습니다. */
+export function courseKmz(course: CoursePlan, now = Date.now()): Uint8Array<ArrayBuffer> {
+  return zip([
+    { name: 'template.kml', text: templateKml(course.shot.altitude, now) },
+    { name: 'waylines.wpml', text: waylinesWpml(course.route, false) },
   ]);
 }

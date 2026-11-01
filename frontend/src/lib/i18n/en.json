@@ -595,7 +595,8 @@
  "복사하지 못했습니다. 아래 표를 보고 옮겨 적으세요.": "Couldn't copy. Copy the values from the table below.",
  "아직 카메라가 연결되지 않았습니다. 녹화기 정보를 받으면 여기에 실시간 그리드가 들어옵니다.": "No cameras are connected yet. The live grid goes here once we have the recorder details.",
  "연결 구조, 모니터 상태, 화질, 진행 순서, 준비물을 호프가 한국어·영어로 읽어 줍니다. 피치와 속도를 바꿀 수 있고, 한/영 키로 언어를 바꿉니다.": "Hope reads the connection path, monitor status, quality, steps and what we need, in Korean or English. Pitch and speed are adjustable, and the Han/Eng key switches language.",
- "호프 CCTV 가이드": "Hope CCTV guide",
+ "호프 CCTV 가이드": "Hope CCTV guide"
+,
  "코스 지도 수정 계정": "Course map editor",
  "코스 지도 수정 계정 로그인": "Course map editor sign-in",
  "코스 지도는 지정된 계정으로만 고칠 수 있습니다.": "Only the designated account can edit the course map.",
@@ -607,6 +608,8 @@
  "이 기기에만 저장했습니다. 이 계정은 코스 지도 수정 계정으로 지정되지 않아 서버에 올릴 수 없습니다.": "Saved on this device only. This account is not the course map editor, so it cannot upload to the server.",
  "코스 전경 (C)": "Course panorama (C)",
  "코스 전경": "Course panorama",
+ "전경 DJI Fly KMZ": "Panorama DJI Fly KMZ",
+ "전경 DJI Fly KMZ 를 쓰면 이 자리 위로 올라가 기수와 짐벌을 맞추고 멈춥니다. 파노라마는 직접 찍습니다.": "The panorama DJI Fly KMZ climbs above this spot, sets the heading and gimbal, and stops. You shoot the panorama yourself.",
  "코스 전경 ({0}번 티 위)": "Course panorama (above hole {0} tee)",
  "코스 전경 ({0}번 그린 위)": "Course panorama (above hole {0} green)",
  "{0} · {1}m · 기수 {2}° · 짐벌 {3}°": "{0} · {1}m · heading {2}° · gimbal {3}°",

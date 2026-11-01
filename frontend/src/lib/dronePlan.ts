@@ -249,6 +249,8 @@ export const allWaypoints = (p: HolePlan): Waypoint[] => [p.hero, ...p.route, p.
 export interface CoursePlan {
   /** 코스 전경 파노라마를 찍는 자리 */
   shot: Waypoint;
+  /** DJI Fly 경로. 점이 둘은 있어야 해서 기수 쪽으로 10m 더 갑니다 - followWayline 이라 그대로 기수가 맞습니다. */
+  route: Waypoint[];
   /** 파노라마에 찍히는 땅 (반원) */
   view: FairwayPoint[];
   /** 18홀이 이 자리에서 차지하는 각도 */
@@ -292,16 +294,18 @@ export function planCourse(plans: HolePlan[]): CoursePlan {
 
   const far = Math.max(...points.map((p) => dist(best.at, p)));
   const arc = Array.from({ length: 19 }, (_, i) => destination(best.at, best.heading - 90 + i * 10, far));
+  const shot: Waypoint = {
+    id: 'C',
+    label: `코스 전경 (${best.name} 위)`,
+    at: best.at,
+    altitude: MAX_ALTITUDE,
+    gimbal: -Math.round(deg(Math.atan(MAX_ALTITUDE / (far / 2)))),
+    heading: Math.round(best.heading),
+    zone: zoneLevelAt(best.at),
+  };
   return {
-    shot: {
-      id: 'C',
-      label: `코스 전경 (${best.name} 위)`,
-      at: best.at,
-      altitude: MAX_ALTITUDE,
-      gimbal: -Math.round(deg(Math.atan(MAX_ALTITUDE / (far / 2)))),
-      heading: Math.round(best.heading),
-      zone: zoneLevelAt(best.at),
-    },
+    shot,
+    route: [shot, { ...shot, at: destination(best.at, shot.heading, 10) }],
     view: [best.at, ...arc],
     span: Math.round(best.span),
     seconds: 60 + (2 * MAX_ALTITUDE) / 5 + 40,

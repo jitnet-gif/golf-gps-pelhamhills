@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight, ClipboardCopy, Download, ExternalLink, Prese
 import { PELHAM_HILLS, PELHAM_HILLS_HOLES, type FairwayPoint, type Hole } from '@/data/pelhamHills';
 import { DRONE_ZONES, DRONE_ZONES_CHECKED, type ZoneLevel } from '@/data/droneZones';
 import { fetchCourseData } from '@/lib/courseData';
-import { earthKmz, earthKmzName, holeKmz, kmzName } from '@/lib/droneKmz';
+import { courseKmz, courseKmzName, earthKmz, earthKmzName, holeKmz, kmzName } from '@/lib/droneKmz';
 import { cachedDroneRoutes, droneRoutesPending, fetchDroneRoutes, readDroneRoutes, saveDroneRoutes, type DroneRoutes } from '@/lib/droneRoutes';
 import { applyHoleEdits, loadHolePaths, mapEditorStatus, nearestSegment, pullHoleEdits, type ServerProblem } from '@/lib/holePaths';
 import { getLang, onLangChange } from '@/lib/i18n/engine';
@@ -533,6 +533,9 @@ export function DroneAdmin() {
             <p className="text-xs text-muted-foreground">
               {`18홀이 이 자리에서 ${course.span}° 안에 듭니다. 사진 한 장(가로 70°)으로는 다 담기지 않아 파노라마로 찍습니다. 이 자리에서 이륙해 곧장 올라가, 기수와 짐벌로 구도를 본 뒤 사진 ▸ 파노라마 ▸ 180° 로 한 번 찍습니다. 배터리 계획 시간과 따로입니다.`}
             </p>
+            <p className="text-xs text-muted-foreground">
+              전경 DJI Fly KMZ 를 쓰면 이 자리 위로 올라가 기수와 짐벌을 맞추고 멈춥니다. 파노라마는 직접 찍습니다.
+            </p>
             <a
               href={gmaps(course.shot.at)}
               target="_blank"
@@ -541,12 +544,19 @@ export function DroneAdmin() {
             >
               <ExternalLink className="w-4 h-4" />이륙 지점 지도
             </a>
+            <button
+              type="button"
+              onClick={() => saveKmz(courseKmz(course), courseKmzName)}
+              className="self-start inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-border text-sm"
+            >
+              <Download className="w-4 h-4" />전경 DJI Fly KMZ
+            </button>
           </section>
 
           <section aria-label="KMZ 내보내기" className="rounded-lg border border-border p-3 flex flex-col gap-2">
             <p className="text-sm font-medium">KMZ 내보내기</p>
             <p className="text-xs text-muted-foreground">
-              18홀의 코스 선과 비행 경로를 구글 어스에서 봅니다. DJI Fly 에 넣는 KMZ 는 홀을 골라 한 홀씩 내려받습니다.
+              18홀의 코스 선과 비행 경로를 구글 어스에서 봅니다. DJI Fly 에 넣는 KMZ 는 홀을 골라 한 홀씩, 전경은 위 카드에서 내려받습니다.
             </p>
             <button
               type="button"
