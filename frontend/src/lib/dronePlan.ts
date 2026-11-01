@@ -12,6 +12,10 @@
  *
  * 홀 전체 탑다운은 계획에 없습니다. 120m 안에 홀이 다 들어오려면 홀이 약 127m
  * 이하여야 하는데, 가장 짧은 16번도 129m 입니다.
+ *
+ * 코스 전경(C)은 18홀에 한 번 찍는 180° 파노라마입니다. 코스가 약 800×870m 라 사진
+ * 한 장(가로 70°)에 담으려면 코스 밖 270m 까지 나가야 해서, 코스 모서리의 티·핀 위
+ * 120m 에서 찍습니다 - 조종자가 바로 아래에 서므로 드론이 눈에서 벗어나지 않습니다.
  */
 
 import type { FairwayPoint, Hole } from '@/data/pelhamHills';
@@ -241,6 +245,68 @@ export function batteryGroups(plans: HolePlan[]): { holes: number[]; seconds: nu
 }
 
 export const allWaypoints = (p: HolePlan): Waypoint[] => [p.hero, ...p.route, p.green];
+
+export interface CoursePlan {
+  /** 코스 전경 파노라마를 찍는 자리 */
+  shot: Waypoint;
+  /** 파노라마에 찍히는 땅 (반원) */
+  view: FairwayPoint[];
+  /** 18홀이 이 자리에서 차지하는 각도 */
+  span: number;
+  seconds: number;
+}
+
+/** at 에서 볼 때 코스 점들이 차지하는 각도와 그 가운데 방향. 가장 넓은 빈틈의 반대쪽입니다. */
+function courseSpread(at: FairwayPoint, points: FairwayPoint[]) {
+  const bearings = points
+    .filter((p) => dist(at, p) > 30)
+    .map((p) => bearing(at, p))
+    .sort((a, b) => a - b);
+  let gap = 0;
+  let start = 0;
+  bearings.forEach((b, i) => {
+    const next = i + 1 < bearings.length ? bearings[i + 1] : bearings[0] + 360;
+    if (next - b > gap) {
+      gap = next - b;
+      start = next;
+    }
+  });
+  const span = 360 - gap;
+  return { span, heading: (start + span / 2) % 360 };
+}
+
+/**
+ * 코스 전경을 찍을 자리. 티·핀 가운데 18홀이 가장 좁은 각도에 드는 곳을 고릅니다.
+ * 강화 경고 구역 안의 자리는 파노라마 도중 멈출 수 있어, 다른 자리가 없을 때만 씁니다.
+ */
+export function planCourse(plans: HolePlan[]): CoursePlan {
+  const points = plans.flatMap((p) => p.line);
+  const spots = plans.flatMap((p) => [
+    { at: p.line[0], name: `${p.hole.holeNumber}번 티` },
+    { at: p.line[p.line.length - 1], name: `${p.hole.holeNumber}번 그린` },
+  ]);
+  const clear = spots.filter((s) => (zoneLevelAt(s.at) ?? 0) === 0);
+  const best = (clear.length ? clear : spots)
+    .map((s) => ({ ...s, ...courseSpread(s.at, points) }))
+    .reduce((a, b) => (b.span < a.span ? b : a));
+
+  const far = Math.max(...points.map((p) => dist(best.at, p)));
+  const arc = Array.from({ length: 19 }, (_, i) => destination(best.at, best.heading - 90 + i * 10, far));
+  return {
+    shot: {
+      id: 'C',
+      label: `코스 전경 (${best.name} 위)`,
+      at: best.at,
+      altitude: MAX_ALTITUDE,
+      gimbal: -Math.round(deg(Math.atan(MAX_ALTITUDE / (far / 2)))),
+      heading: Math.round(best.heading),
+      zone: zoneLevelAt(best.at),
+    },
+    view: [best.at, ...arc],
+    span: Math.round(best.span),
+    seconds: 60 + (2 * MAX_ALTITUDE) / 5 + 40,
+  };
+}
 
 /** 가장 가까운 비행장과 그 웨이포인트. */
 export function nearestAerodromes(plans: HolePlan[]) {

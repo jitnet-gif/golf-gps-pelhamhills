@@ -4,7 +4,8 @@
 //
 // One `drone_routes` row in `app_settings` (migration 0007), so the route planned
 // at a desk is on the phone at the tee. The copy on this device is written first
-// and stays pending until an admin account has uploaded it.
+// and stays pending until the course map editor account (migration 0030) has
+// uploaded it; every other account only reads.
 
 import type { FairwayPoint } from '@/data/pelhamHills';
 import type { RouteSpot } from './dronePlan';
@@ -67,25 +68,30 @@ const remember = (routes: DroneRoutes, pending: boolean) => {
   }
 };
 
-/** The shared routes, or null when the server could not say. An edit still pending here is kept. */
-export const fetchDroneRoutes = async (): Promise<DroneRoutes | null> => {
-  if (!supabase || droneRoutesPending()) return null;
+/** What the server holds, leaving this device's copy alone. Null when the server could not say. */
+export const readDroneRoutes = async (): Promise<DroneRoutes | null> => {
+  if (!supabase) return null;
   try {
     const { data, error } = await supabase
       .from('app_settings')
       .select('value')
       .eq('key', ROUTES_KEY)
       .maybeSingle();
-    if (error) return null;
-    const routes = asRoutes(data?.value);
-    remember(routes, false);
-    return routes;
+    return error ? null : asRoutes(data?.value);
   } catch {
     return null;
   }
 };
 
-/** Keep the routes on this device, then upload them. Needs a signed-in admin to reach the server. */
+/** The shared routes, or null when the server could not say. An edit still pending here is kept. */
+export const fetchDroneRoutes = async (): Promise<DroneRoutes | null> => {
+  if (droneRoutesPending()) return null;
+  const routes = await readDroneRoutes();
+  if (routes) remember(routes, false);
+  return routes;
+};
+
+/** Keep the routes on this device, then upload them. Needs the course map editor to reach the server. */
 export const saveDroneRoutes = async (routes: DroneRoutes): Promise<ServerProblem | null> => {
   remember(routes, true);
   if (!supabase) return 'unavailable';

@@ -9,7 +9,7 @@
  * 고도는 이륙 지점 기준이라 ① 근처 지면에서 이륙해야 계획대로 납니다.
  */
 
-import { MISSION_SPEED, type HolePlan, type Waypoint } from '@/lib/dronePlan';
+import { MISSION_SPEED, type CoursePlan, type HolePlan, type Waypoint } from '@/lib/dronePlan';
 
 const NS = 'http://www.dji.com/wpmz/1.0.6';
 
@@ -258,8 +258,19 @@ ${marks.join('\n')}
     </Folder>`;
 }
 
+const earthCourse = ({ shot }: CoursePlan) => `    <Placemark>
+      <name>${shot.id} 코스 전경</name>
+      <description>${shot.label} · ${shot.altitude}m · 기수 ${shot.heading}° · 파노라마 180°</description>
+      <styleUrl>#waypoint</styleUrl>
+      <Point>
+        <altitudeMode>relativeToGround</altitudeMode>
+        <coordinates>${earthPoint(shot.at, shot.altitude)}</coordinates>
+      </Point>
+    </Placemark>
+`;
+
 /** 구글 어스에서 코스 선과 비행 경로를 겹쳐 보는 KMZ. DJI Fly 에 넣는 파일이 아닙니다. */
-export function earthKmz(plans: HolePlan[]): Uint8Array<ArrayBuffer> {
+export function earthKmz(plans: HolePlan[], course?: CoursePlan): Uint8Array<ArrayBuffer> {
   const doc = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
@@ -267,7 +278,7 @@ export function earthKmz(plans: HolePlan[]): Uint8Array<ArrayBuffer> {
     <Style id="course"><LineStyle><color>ffffffff</color><width>2</width></LineStyle></Style>
     <Style id="route"><LineStyle><color>ff47b5ff</color><width>4</width></LineStyle></Style>
     <Style id="waypoint"><IconStyle><scale>0.7</scale></IconStyle></Style>
-${plans.map(earthHole).join('\n')}
+${course ? earthCourse(course) : ''}${plans.map(earthHole).join('\n')}
   </Document>
 </kml>`;
   return zip([{ name: 'doc.kml', text: doc }]);

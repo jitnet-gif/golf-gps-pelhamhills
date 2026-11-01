@@ -594,5 +594,21 @@
  "복사하지 못했습니다. 아래 표를 보고 옮겨 적으세요.": "Couldn't copy. Copy the values from the table below.",
  "아직 카메라가 연결되지 않았습니다. 녹화기 정보를 받으면 여기에 실시간 그리드가 들어옵니다.": "No cameras are connected yet. The live grid goes here once we have the recorder details.",
  "연결 구조, 모니터 상태, 화질, 진행 순서, 준비물을 호프가 한국어·영어로 읽어 줍니다. 피치와 속도를 바꿀 수 있고, 한/영 키로 언어를 바꿉니다.": "Hope reads the connection path, monitor status, quality, steps and what we need, in Korean or English. Pitch and speed are adjustable, and the Han/Eng key switches language.",
- "호프 CCTV 가이드": "Hope CCTV guide"
+ "호프 CCTV 가이드": "Hope CCTV guide",
+ "코스 지도 수정 계정": "Course map editor",
+ "코스 지도 수정 계정 로그인": "Course map editor sign-in",
+ "코스 지도는 지정된 계정으로만 고칠 수 있습니다.": "Only the designated account can edit the course map.",
+ "배너와 알림은 관리자로 지정된 회원 계정으로만 바꿀 수 있습니다. 스코어 탭과 같은 계정입니다.": "Only a member account designated as admin can change banners and alerts. It is the same account as the Scores tab.",
+ "이 계정은 코스 지도 수정 계정으로 지정되지 않았습니다. 코스 지도 수정 계정으로 다시 로그인해 주세요.": "This account is not the course map editor. Sign in again with the course map editor account.",
+ "이 계정은 코스 지도 수정 계정으로 지정되지 않아 서버에 올릴 수 없습니다 (0030 SQL).": "This account is not the course map editor, so it cannot upload to the server (0030 SQL).",
+ "홀마다 조망 사진(H), 플라이스루 영상(①부터), 그린 탑다운(G)을 찍습니다. 경로는 코스 지도 수정 계정으로만 고칠 수 있습니다. 로그인은 코스 지도 탭에서 합니다.": "Each hole gets an overview photo (H), a fly-through video (from ①) and a green top-down (G). Only the course map editor account can change routes. Sign in on the Course Map tab.",
+ "이 기기에만 저장했습니다. 코스 지도 탭에서 코스 지도 수정 계정으로 로그인하면 다른 기기에도 보입니다.": "Saved on this device only. Sign in with the course map editor account on the Course Map tab to show it on other devices.",
+ "이 기기에만 저장했습니다. 이 계정은 코스 지도 수정 계정으로 지정되지 않아 서버에 올릴 수 없습니다.": "Saved on this device only. This account is not the course map editor, so it cannot upload to the server.",
+ "코스 전경 (C)": "Course panorama (C)",
+ "코스 전경": "Course panorama",
+ "코스 전경 ({0}번 티 위)": "Course panorama (above hole {0} tee)",
+ "코스 전경 ({0}번 그린 위)": "Course panorama (above hole {0} green)",
+ "{0} · {1}m · 기수 {2}° · 짐벌 {3}°": "{0} · {1}m · heading {2}° · gimbal {3}°",
+ "18홀이 이 자리에서 {0}° 안에 듭니다. 사진 한 장(가로 70°)으로는 다 담기지 않아 파노라마로 찍습니다. 이 자리에서 이륙해 곧장 올라가, 기수와 짐벌로 구도를 본 뒤 사진 ▸ 파노라마 ▸ 180° 로 한 번 찍습니다. 배터리 계획 시간과 따로입니다.": "All 18 holes fit within {0}° from this spot. One photo (70° wide) can't hold them all, so shoot a panorama. Take off here and climb straight up, check the framing with the heading and gimbal, then shoot once with Photo ▸ Pano ▸ 180°. This is not included in the battery plan times.",
+ "주황 선 = 비행 경로, 흰 점선 = 코스 선(참고용), 하늘색 = 카메라에 찍히는 땅, 빨간 점선 = 강화 경고 구역, 하늘색 점 = 공항·헬기장, C = 코스 전경": "Orange line = flight route, white dashes = course line (reference), sky blue = ground in the camera view, red dashes = enhanced warning zone, sky blue dot = airport or heliport, C = course panorama"
 }

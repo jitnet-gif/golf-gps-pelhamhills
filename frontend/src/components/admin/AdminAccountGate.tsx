@@ -3,6 +3,7 @@ import { LogOut, RefreshCw, ShieldCheck } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { signOut, startAuth } from '@/lib/auth';
 import { adminStatus } from '@/lib/adminApi';
+import { mapEditorStatus } from '@/lib/holePaths';
 import { AccountForm } from '@/components/AccountPanel';
 
 /**
@@ -12,9 +13,19 @@ import { AccountForm } from '@/components/AccountPanel';
  * 먼저 거릅니다. 관리자가 아닌 계정에 배너 목록을 그대로 보여 주면 지금 노출
  * 중인 배너만 보여서 "나머지 배너가 사라졌다"로 읽힙니다.
  *
- * 스코어·코스 지도 탭과 같은 계정입니다. 한 번 로그인하면 모든 탭이 따릅니다.
+ * 스코어 탭과 같은 계정입니다. 한 번 로그인하면 모든 탭이 따릅니다.
+ *
+ * mapEditor 를 주면 관리자가 아니라 코스 지도 수정 계정(0030)을 봅니다.
  */
-export function AdminAccountGate({ children }: { children: ReactNode }) {
+export function AdminAccountGate({
+  children,
+  mapEditor = false,
+}: {
+  children: ReactNode;
+  mapEditor?: boolean;
+}) {
+  const readStatus = mapEditor ? mapEditorStatus : adminStatus;
+  const role = mapEditor ? '코스 지도 수정 계정' : '관리자';
   const account = useAppStore((s) => s.account);
   const accountReady = useAppStore((s) => s.accountReady);
   const [status, setStatus] = useState<'admin' | 'notAdmin' | 'error' | null>(null);
@@ -25,30 +36,31 @@ export function AdminAccountGate({ children }: { children: ReactNode }) {
 
   const check = useCallback(async () => {
     setStatus(null);
-    setStatus(await adminStatus());
-  }, []);
+    setStatus(await readStatus());
+  }, [readStatus]);
 
   useEffect(() => {
     setStatus(null);
     if (!account) return;
     let alive = true;
-    adminStatus().then((next) => {
+    readStatus().then((next) => {
       if (alive) setStatus(next);
     });
     return () => {
       alive = false;
     };
-  }, [account]);
+  }, [account, readStatus]);
 
   if (!accountReady) return <p className="text-sm text-muted-foreground">불러오는 중...</p>;
 
   if (!account) {
     return (
       <section aria-label="관리자 로그인" className="max-w-sm rounded-lg border border-border bg-card p-4">
-        <h2 className="mb-1 text-base font-semibold">관리자 로그인</h2>
+        <h2 className="mb-1 text-base font-semibold">{`${role} 로그인`}</h2>
         <p className="mb-3 text-sm text-muted-foreground">
-          배너와 알림은 관리자로 지정된 회원 계정으로만 바꿀 수 있습니다. 스코어·코스 지도
-          탭과 같은 계정입니다.
+          {mapEditor
+            ? '코스 지도는 지정된 계정으로만 고칠 수 있습니다.'
+            : '배너와 알림은 관리자로 지정된 회원 계정으로만 바꿀 수 있습니다. 스코어 탭과 같은 계정입니다.'}
         </p>
         <AccountForm locale="ko" />
       </section>
@@ -81,7 +93,7 @@ export function AdminAccountGate({ children }: { children: ReactNode }) {
 
   if (status === 'notAdmin') {
     return accountStrip(
-      '이 계정은 관리자로 지정되지 않았습니다. 관리자 계정으로 다시 로그인해 주세요.',
+      `이 계정은 ${role}으로 지정되지 않았습니다. ${role}으로 다시 로그인해 주세요.`,
       'error',
     );
   }
@@ -104,7 +116,7 @@ export function AdminAccountGate({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex flex-col gap-4">
-      {accountStrip('관리자', 'ok')}
+      {accountStrip(role, 'ok')}
       {children}
     </div>
   );

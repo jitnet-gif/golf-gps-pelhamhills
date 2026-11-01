@@ -1,7 +1,6 @@
 import { db, type HolePath } from '@/db';
 import { haversineMetres } from '@/lib/geo';
 import { supabase } from '@/lib/supabase';
-import { isScorecardAdmin } from '@/lib/scorecardSync';
 import type { FairwayPoint, Hole } from '@/data/pelhamHills';
 
 export type { HolePath };
@@ -21,8 +20,9 @@ export type { HolePath };
  * the device agrees with it instead of moving the hole a second time.
  *
  * An edit is written on this device first and then uploaded to `hole_edits`
- * (migration 0007) by a signed-in admin; every player's map reads that shared
- * copy and keeps it for offline play. See pullHoleEdits / pushHoleEdits below.
+ * (migration 0007) by the map editor's account (migration 0030); every player's
+ * map reads that shared copy and keeps it for offline play. See pullHoleEdits /
+ * pushHoleEdits below.
  */
 
 export type HoleEdit = Pick<HolePath, 'waypoints' | 'tee' | 'pin' | 'length'>;
@@ -292,6 +292,18 @@ export const pushHoleEdits = async (
   }
 };
 
+/** Is this the account named in map_editors (migration 0030)? The server decides. */
+export const mapEditorStatus = async (): Promise<'admin' | 'notAdmin' | 'error'> => {
+  if (!supabase) return 'error';
+  try {
+    const { data, error } = await supabase.rpc('is_map_editor');
+    if (error) return 'error';
+    return data === true ? 'admin' : 'notAdmin';
+  } catch {
+    return 'error';
+  }
+};
+
 /**
  * Remove holes' shared edits - the whole course's when `holeNumbers` is left
  * out. Callers drop their local rows only after this succeeds, so a delete
@@ -308,7 +320,7 @@ export const deleteServerHoleEdits = async (
     } = await supabase.auth.getSession();
     if (!session) return 'signedOut';
     // Row security turns a non-admin's delete into "0 rows", not an error.
-    if (!(await isScorecardAdmin())) return 'notAdmin';
+    if ((await mapEditorStatus()) !== 'admin') return 'notAdmin';
 
     let query = supabase.from('hole_edits').delete().eq('course_id', courseId);
     if (holeNumbers) query = query.in('hole_number', holeNumbers);

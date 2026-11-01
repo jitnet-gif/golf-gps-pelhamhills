@@ -236,11 +236,13 @@ export default function Admin() {
       {tab === 'cctv' && <CctvAdmin />}
 
       {tab === 'map' && (
-        <div className="flex flex-col gap-4">
-          <FullMapStylePicker />
-          <FairwayPathEditor />
-          <CartPathRecorder />
-        </div>
+        <AdminAccountGate mapEditor>
+          <div className="flex flex-col gap-4">
+            <FullMapStylePicker />
+            <FairwayPathEditor />
+            <CartPathRecorder />
+          </div>
+        </AdminAccountGate>
       )}
     </main>
   );

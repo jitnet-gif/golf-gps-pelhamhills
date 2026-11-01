@@ -7,8 +7,8 @@ import { PELHAM_HILLS, PELHAM_HILLS_HOLES, type FairwayPoint, type Hole } from '
 import { DRONE_ZONES, DRONE_ZONES_CHECKED, type ZoneLevel } from '@/data/droneZones';
 import { fetchCourseData } from '@/lib/courseData';
 import { earthKmz, earthKmzName, holeKmz, kmzName } from '@/lib/droneKmz';
-import { cachedDroneRoutes, droneRoutesPending, fetchDroneRoutes, saveDroneRoutes, type DroneRoutes } from '@/lib/droneRoutes';
-import { applyHoleEdits, loadHolePaths, nearestSegment, pullHoleEdits, type ServerProblem } from '@/lib/holePaths';
+import { cachedDroneRoutes, droneRoutesPending, fetchDroneRoutes, readDroneRoutes, saveDroneRoutes, type DroneRoutes } from '@/lib/droneRoutes';
+import { applyHoleEdits, loadHolePaths, mapEditorStatus, nearestSegment, pullHoleEdits, type ServerProblem } from '@/lib/holePaths';
 import { getLang, onLangChange } from '@/lib/i18n/engine';
 import { TILE_ATTRIBUTION, TILE_MAX_ZOOM, TILE_URL_TEMPLATE } from '@/lib/tiles';
 import { useAppStore } from '@/store/appStore';
@@ -20,6 +20,7 @@ import {
   batteryGroups,
   mmss,
   nearestAerodromes,
+  planCourse,
   planHole,
   spotBetween,
   waypointCsv,
@@ -39,8 +40,8 @@ const MAX_POINTS = 10;
 
 const SERVER_MESSAGE: Record<ServerProblem, string> = {
   unavailable: '이 빌드에는 서버 연결이 없어 이 기기에만 저장됩니다.',
-  signedOut: '이 기기에만 저장했습니다. 코스 지도 탭의 모든 폰에 반영 칸에서 관리자 계정으로 로그인하면 다른 기기에도 보입니다.',
-  notAdmin: '이 기기에만 저장했습니다. 이 계정은 관리자로 지정되지 않아 서버에 올릴 수 없습니다.',
+  signedOut: '이 기기에만 저장했습니다. 코스 지도 탭에서 코스 지도 수정 계정으로 로그인하면 다른 기기에도 보입니다.',
+  notAdmin: '이 기기에만 저장했습니다. 이 계정은 코스 지도 수정 계정으로 지정되지 않아 서버에 올릴 수 없습니다.',
   missingTable: '이 기기에만 저장했습니다. 서버에 app_settings 표가 없습니다 (0007_hole_edits.sql).',
   network: '이 기기에만 저장했습니다. 인터넷이 연결된 뒤 이 탭을 다시 열면 올립니다.',
   other: '이 기기에만 저장했습니다. 서버에 올리지 못했습니다.',
@@ -56,15 +57,15 @@ const ZONE_BADGE: Record<ZoneLevel, string> = {
 const badges = new Map<string, L.DivIcon>();
 
 /** 같은 모양은 같은 아이콘을 줍니다. 새 아이콘이 오면 Leaflet 이 마커를 다시 그려 끌던 점을 놓칩니다. */
-const badge = (id: string, color: string, ring: boolean) => {
-  const key = `${id}|${color}|${ring}`;
+const badge = (id: string, color: string, ring: boolean, beside = false) => {
+  const key = `${id}|${color}|${ring}|${beside}`;
   let icon = badges.get(key);
   if (!icon) {
     icon = L.divIcon({
       className: '',
       html: `<div style="width:24px;height:24px;border-radius:9999px;display:flex;align-items:center;justify-content:center;font:700 12px/1 ui-monospace,monospace;color:#0b120d;background:${color};border:2px solid ${ring ? ALERT : '#0b120d'};box-shadow:0 1px 3px rgba(0,0,0,.5)">${id}</div>`,
       iconSize: [24, 24],
-      iconAnchor: [12, 12],
+      iconAnchor: beside ? [-12, 12] : [12, 12],
     });
     badges.set(key, icon);
   }
@@ -138,8 +139,13 @@ const FLY_SETTINGS: [string, string][] = [
  * 홀을 고르면 지도에서 웨이포인트를 고칩니다. 조작은 코스 지도와 같지만 데이터는
  * 따로입니다 - 여기서 고친 경로는 선수 지도를 바꾸지 않고, 코스 지도의 선을 고쳐도
  * 저장한 경로는 움직이지 않습니다(lib/droneRoutes).
+ *
+ * 고치는 것은 코스 지도 수정 계정(0030)만 합니다. 다른 계정은 계획을 보고 내려받기만
+ * 합니다 - 현장에서 경로를 읽는 일은 누구나 해야 하기 때문입니다.
  */
 export function DroneAdmin() {
+  const account = useAppStore((s) => s.account);
+  const [canEdit, setCanEdit] = useState(false);
   const [rawHoles, setRawHoles] = useState<Hole[]>(PELHAM_HILLS_HOLES);
   const holePaths = useAppStore((s) => s.holePaths);
   const setHolePaths = useAppStore((s) => s.setHolePaths);
@@ -186,35 +192,46 @@ export function DroneAdmin() {
     };
   }, [setHolePaths]);
 
-  // 올리지 못한 수정은 서버 사본에 덮이지 않게 두고, 다시 열 때 올립니다.
+  // 올리지 못한 수정은 서버 사본에 덮이지 않게 두고, 수정 계정으로 열 때 올립니다.
+  // 다른 계정은 그 수정을 지우지 않고 서버 경로를 봅니다 - 올라가지 못한 경로로 날면 안 됩니다.
   useEffect(() => {
     let alive = true;
-    if (droneRoutesPending()) {
-      void saveDroneRoutes(cachedDroneRoutes()).then((problem) => {
-        if (alive) setRouteProblem(problem);
-      });
-    } else {
-      void fetchDroneRoutes().then((shared) => {
-        if (alive && shared) setRoutes(shared);
-      });
-    }
+    const showShared = (shared: DroneRoutes | null) => {
+      if (alive && shared) setRoutes(shared);
+    };
+    setCanEdit(false);
+    setRouteProblem(null);
+    void mapEditorStatus().then((status) => {
+      if (!alive) return;
+      const editor = status === 'admin';
+      setCanEdit(editor);
+      if (!droneRoutesPending()) void fetchDroneRoutes().then(showShared);
+      else if (!editor) void readDroneRoutes().then(showShared);
+      else {
+        void saveDroneRoutes(cachedDroneRoutes()).then((problem) => {
+          if (alive) setRouteProblem(problem);
+        });
+      }
+    });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [account]);
 
   useEffect(() => {
     setPicked(null);
     setPreview(null);
     setNotice(null);
-  }, [selected]);
+  }, [selected, canEdit]);
 
   const holes = useMemo(() => applyHoleEdits(rawHoles, holePaths), [rawHoles, holePaths]);
   const plans = useMemo(() => holes.map((h) => planHole(h, routes[h.holeNumber])), [holes, routes]);
   const groups = useMemo(() => batteryGroups(plans), [plans]);
   const aerodromes = useMemo(() => nearestAerodromes(plans), [plans]);
+  const course = useMemo(() => planCourse(plans), [plans]);
   const hits = useMemo(() => {
     const byLevel = new Map<ZoneLevel, { hole: number; id: string }[]>();
+    if (course.shot.zone != null) byLevel.set(course.shot.zone, [{ hole: 0, id: course.shot.id }]);
     for (const p of plans) {
       for (const w of allWaypoints(p)) {
         if (w.zone == null) continue;
@@ -222,8 +239,8 @@ export function DroneAdmin() {
       }
     }
     return byLevel;
-  }, [plans]);
-  const total = plans.reduce((n, p) => n + allWaypoints(p).length, 0);
+  }, [plans, course]);
+  const total = plans.reduce((n, p) => n + allWaypoints(p).length, 1);
   const blocked = (hits.get(2)?.length ?? 0) + (hits.get(1)?.length ?? 0);
 
   const plan = selected ? plans.find((p) => p.hole.holeNumber === selected) ?? null : null;
@@ -238,6 +255,7 @@ export function DroneAdmin() {
   const full = spots.length >= MAX_POINTS;
 
   const keep = (next: DroneRoutes) => {
+    if (!canEdit) return;
     setRoutes(next);
     setPreview(null);
     void saveDroneRoutes(next).then(setRouteProblem);
@@ -308,7 +326,7 @@ export function DroneAdmin() {
     URL.revokeObjectURL(url);
   };
   const downloadKmz = (p: HolePlan) => saveKmz(holeKmz(p), kmzName(p));
-  const downloadEarth = (list: HolePlan[]) => saveKmz(earthKmz(list), earthKmzName(list));
+  const downloadEarth = (list: HolePlan[]) => saveKmz(earthKmz(list, list.length > 1 ? course : undefined), earthKmzName(list));
 
   const step = (d: number) => {
     const n = ((selected - 1 + d + plans.length) % plans.length) + 1;
@@ -324,7 +342,9 @@ export function DroneAdmin() {
           <span className="ml-auto text-xs text-muted-foreground">DJI Mini 4 Pro</span>
         </div>
         <p className="text-xs text-muted-foreground">
-          홀마다 조망 사진(H), 플라이스루 영상(①부터), 그린 탑다운(G)을 찍습니다. 홀을 고르면 지도에서 웨이포인트를 고칠 수 있습니다. 코스 지도와 조작은 같지만 따로 저장되어 선수 지도에는 영향이 없습니다.
+          {canEdit
+            ? '홀마다 조망 사진(H), 플라이스루 영상(①부터), 그린 탑다운(G)을 찍습니다. 홀을 고르면 지도에서 웨이포인트를 고칠 수 있습니다. 코스 지도와 조작은 같지만 따로 저장되어 선수 지도에는 영향이 없습니다.'
+            : '홀마다 조망 사진(H), 플라이스루 영상(①부터), 그린 탑다운(G)을 찍습니다. 경로는 코스 지도 수정 계정으로만 고칠 수 있습니다. 로그인은 코스 지도 탭에서 합니다.'}
         </p>
         <nav className="flex gap-1.5 overflow-x-auto pb-1" aria-label="홀 선택">
           {[0, ...plans.map((p) => p.hole.holeNumber)].map((n) => (
@@ -346,7 +366,7 @@ export function DroneAdmin() {
         </nav>
       </section>
 
-      {plan && (
+      {plan && canEdit && (
         <p className="text-xs text-muted-foreground">
           지도를 누르면 가장 가까운 구간에 점이 생깁니다 ({MAX_POINTS}개까지). 번호 점을 끌어 옮기고, 선 중간의 흰 점을 끌거나 누르면 그 자리에 점이 하나 더 생깁니다. 점을 두 번 누르거나(폰은 길게 누르기), 눌러서 고른 뒤 삭제 버튼을 누르면 지워집니다.
         </p>
@@ -377,7 +397,7 @@ export function DroneAdmin() {
         >
           <TileLayer url={TILE_URL_TEMPLATE} attribution={TILE_ATTRIBUTION} maxZoom={TILE_MAX_ZOOM} />
           <FitTo target={selected} points={bounds} />
-          <MapClicks onClick={plan ? addPoint : undefined} />
+          <MapClicks onClick={plan && canEdit ? addPoint : undefined} />
           {enhanced.map((z, i) => (
             <Polygon
               key={i}
@@ -392,6 +412,13 @@ export function DroneAdmin() {
               pathOptions={{ color: '#ffffff', weight: plan ? 1.5 : 2.5, opacity: plan && p !== plan ? 0.35 : 0.85, dashArray: plan === p ? '3 4' : undefined }}
             />
           ))}
+          {!plan && (
+            <>
+              <Polygon positions={course.view} interactive={false} pathOptions={{ color: CAMERA, weight: 1.5, dashArray: '6 4', fillOpacity: 0.08 }} />
+              {/* 티 위의 자리라 홀 번호 옆에 둡니다 - 겹치면 번호를 누를 수 없습니다. */}
+              <Marker position={course.shot.at} icon={badge('C', CAMERA, course.shot.zone === 3 || course.shot.zone === 1 || course.shot.zone === 2, true)} interactive={false} />
+            </>
+          )}
           {!plan &&
             plans.map((p) => (
               <Marker
@@ -407,7 +434,8 @@ export function DroneAdmin() {
               <Polygon positions={plan.greenView} pathOptions={{ color: CAMERA, weight: 1.5, fillOpacity: 0.15 }} />
               <Polyline positions={preview ?? line} interactive={false} pathOptions={{ color: ROUTE, weight: 4 }} />
               <Marker position={plan.hero.at} icon={badge('H', CAMERA, plan.hero.zone === 3 || plan.hero.zone === 1 || plan.hero.zone === 2)} interactive={false} />
-              {!full &&
+              {canEdit &&
+                !full &&
                 line.slice(0, -1).map((a, i) => {
                   const b = line[i + 1];
                   const mid: FairwayPoint = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
@@ -434,19 +462,23 @@ export function DroneAdmin() {
                   key={`wp-${i}`}
                   position={w.at}
                   icon={badge(w.id, picked === i ? PICKED : ROUTE, w.zone === 3 || w.zone === 1 || w.zone === 2)}
-                  draggable
+                  draggable={canEdit}
                   zIndexOffset={1000}
-                  eventHandlers={{
-                    click: () => setPicked(i),
-                    dblclick: () => removeAt(i),
-                    contextmenu: () => removeAt(i),
-                    drag: (e) => setPreview(line.map((p, k) => (k === i ? pointOf(e) : p))),
-                    dragend: (e) => {
-                      lastDrop.current = Date.now();
-                      commit(spots.map((s, k) => (k === i ? { ...s, at: pointOf(e) } : s)));
-                      setPicked(i);
-                    },
-                  }}
+                  eventHandlers={
+                    canEdit
+                      ? {
+                          click: () => setPicked(i),
+                          dblclick: () => removeAt(i),
+                          contextmenu: () => removeAt(i),
+                          drag: (e) => setPreview(line.map((p, k) => (k === i ? pointOf(e) : p))),
+                          dragend: (e) => {
+                            lastDrop.current = Date.now();
+                            commit(spots.map((s, k) => (k === i ? { ...s, at: pointOf(e) } : s)));
+                            setPicked(i);
+                          },
+                        }
+                      : {}
+                  }
                 />
               ))}
             </>
@@ -457,21 +489,23 @@ export function DroneAdmin() {
         </MapContainer>
       </div>
       <p className="text-xs text-muted-foreground -mt-2">
-        주황 선 = 비행 경로, 흰 점선 = 코스 선(참고용), 하늘색 = 카메라에 찍히는 땅, 빨간 점선 = 강화 경고 구역, 하늘색 점 = 공항·헬기장
+        주황 선 = 비행 경로, 흰 점선 = 코스 선(참고용), 하늘색 = 카메라에 찍히는 땅, 빨간 점선 = 강화 경고 구역, 하늘색 점 = 공항·헬기장, C = 코스 전경
       </p>
       {plan && (
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm">
             {plan.edited ? '고친 경로' : '자동 경로'} · 웨이포인트 {plan.route.length}개
           </span>
-          <button
-            type="button"
-            onClick={resetRoute}
-            disabled={!plan.edited}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-border text-sm disabled:opacity-40"
-          >
-            <RotateCcw className="w-4 h-4" />자동 경로로
-          </button>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={resetRoute}
+              disabled={!plan.edited}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-border text-sm disabled:opacity-40"
+            >
+              <RotateCcw className="w-4 h-4" />자동 경로로
+            </button>
+          )}
           {routeProblem && <p className="w-full text-xs text-amber-700 dark:text-amber-400">{SERVER_MESSAGE[routeProblem]}</p>}
         </div>
       )}
@@ -488,6 +522,27 @@ export function DroneAdmin() {
         />
       ) : (
         <>
+          <section aria-label="코스 전경" className="rounded-lg border border-border p-3 flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-medium">코스 전경 (C)</p>
+              <ZoneTag zone={course.shot.zone} />
+              <span className="ml-auto text-xs text-muted-foreground tabular-nums">{mmss(course.seconds)}</span>
+            </div>
+            <p className="text-sm">{`${course.shot.label} · ${course.shot.altitude}m · 기수 ${course.shot.heading}° · 짐벌 ${course.shot.gimbal}°`}</p>
+            <p className="font-mono text-xs">{latLng(course.shot.at)}</p>
+            <p className="text-xs text-muted-foreground">
+              {`18홀이 이 자리에서 ${course.span}° 안에 듭니다. 사진 한 장(가로 70°)으로는 다 담기지 않아 파노라마로 찍습니다. 이 자리에서 이륙해 곧장 올라가, 기수와 짐벌로 구도를 본 뒤 사진 ▸ 파노라마 ▸ 180° 로 한 번 찍습니다. 배터리 계획 시간과 따로입니다.`}
+            </p>
+            <a
+              href={gmaps(course.shot.at)}
+              target="_blank"
+              rel="noopener"
+              className="self-start inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-border text-sm"
+            >
+              <ExternalLink className="w-4 h-4" />이륙 지점 지도
+            </a>
+          </section>
+
           <section aria-label="KMZ 내보내기" className="rounded-lg border border-border p-3 flex flex-col gap-2">
             <p className="text-sm font-medium">KMZ 내보내기</p>
             <p className="text-xs text-muted-foreground">
@@ -523,7 +578,7 @@ export function DroneAdmin() {
                     {level === 3 && list.length > 0 && (
                       <span className="text-muted-foreground">
                         {[...new Set(list.map((h) => h.hole))]
-                          .map((n) => `${n}번 ${list.filter((h) => h.hole === n).map((h) => h.id).join('·')}`)
+                          .map((n) => (n ? `${n}번 ${list.filter((h) => h.hole === n).map((h) => h.id).join('·')}` : '코스 전경'))
                           .join(', ')}
                       </span>
                     )}

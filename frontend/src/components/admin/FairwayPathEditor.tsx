@@ -140,7 +140,7 @@ const yards = (metres: number) => Math.round(metres * METRES_TO_YARDS);
 const SERVER_MESSAGE: Record<ServerProblem, string> = {
   unavailable: '이 빌드에는 서버 연결이 없어 이 기기에만 저장됩니다.',
   signedOut: '관리자 계정으로 로그인하면 서버에 올려 모든 폰에 보이게 합니다.',
-  notAdmin: '이 계정은 관리자로 지정되지 않아 서버에 올릴 수 없습니다 (0006 SQL 맨 아래 관리자 지정).',
+  notAdmin: '이 계정은 코스 지도 수정 계정으로 지정되지 않아 서버에 올릴 수 없습니다 (0030 SQL).',
   missingTable: '서버에 hole_edits 표가 없습니다. 0007_hole_edits.sql 을 SQL Editor 에서 실행해 주세요.',
   network: '인터넷 연결이 없어 서버에 올리지 못했습니다. 연결되면 지금 올리기를 누르세요.',
   other: '서버에 올리지 못했습니다. 잠시 후 지금 올리기를 눌러 주세요.',
