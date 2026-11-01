@@ -82,9 +82,9 @@ export const RoundStartGate: React.FC<RoundStartGateProps> = ({ courseName, unlo
             round rather than after it. */}
         <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
           While you play, the pro shop can see your cart on the course map - so
-          they know where to bring an order and how the field is moving. Where
-          you are is kept only while you are out there, and dropped a few hours
-          after you finish.
+          they know exactly where to find you if there is a safety concern, or
+          to swap your cart if its battery runs out. Where you are is kept only
+          while you are out there, and dropped a few hours after you finish.
         </p>
       </div>
     </div>
