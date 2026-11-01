@@ -1,9 +1,8 @@
 /**
  * 드론 촬영 계획 (DJI Mini 4 Pro, 2026-10-29)
  *
- * 홀마다 세 가지를 찍습니다: 티 위 90m 에서 홀 전체를 보는 조망 사진(H),
- * 티에서 플래그 위까지 날아가는 플라이스루 영상(①~④), 핀 위 45m 에서 수직으로
- * 찍는 그린 사진(G). 좌표는 선수 화면과 같은 홀 데이터에서 매번 계산하므로,
+ * 홀마다 두 가지를 찍습니다: 티에서 플래그 위까지 날아가는 플라이스루 영상(①~④),
+ * 핀 위 45m 에서 수직으로 찍는 그린 사진(G). 좌표는 선수 화면과 같은 홀 데이터에서 매번 계산하므로,
  * 코스 지도 탭에서 티·핀을 옮기면 계획도 따라 옮겨 갑니다.
  *
  * 자동 경로는 DJI_Fly_KMZ 폴더(2026-10-30)의 점입니다: 티에서 핀까지 직선 위의 티·낙구·그린
@@ -27,13 +26,12 @@ import { pathLengthMetres, pointAlong } from '@/lib/holePaths';
 const FOV_LONG = 69.75;
 const FOV_SHORT = 55.2;
 export const MAX_ALTITUDE = 90;
-/** 플라이스루 높이 제한. 조망(H)과 코스 전경(C)은 MAX_ALTITUDE 입니다. */
+/** 플라이스루 높이 제한. 코스 전경(C)은 MAX_ALTITUDE 입니다. */
 const ROUTE_MAX_ALTITUDE = 25;
 export const MISSION_SPEED = 7;
 /** 표준 배터리 34분 중 바람·이동·여유를 빼고 한 개에 쓰는 시간. */
 const BATTERY_SECONDS = 20 * 60;
 
-const HERO_ALT = MAX_ALTITUDE;
 const GREEN_ALT = 45;
 /** 티 뒤에서 이륙하던 5점 경로의 첫 점. 이 이름으로 시작하는 저장 경로는 티에서 시작하도록 바꿔 읽습니다. */
 const OLD_START = '티 뒤 40m (출발)';
@@ -106,7 +104,7 @@ export function zoneLevelAt(p: FairwayPoint): ZoneLevel | null {
 // ---------------------------------------------------------------------------
 
 export interface Waypoint {
-  /** 'H', '1'…, 'G' */
+  /** '1'…, 'G' */
   id: string;
   label: string;
   at: FairwayPoint;
@@ -122,9 +120,6 @@ export interface HolePlan {
   line: FairwayPoint[];
   length: number;
   bearing: number;
-  hero: Waypoint;
-  /** 조망 사진의 화각 (부채꼴) */
-  heroView: FairwayPoint[];
   /** 플라이스루 ①부터. 드론 탭에서 고친 홀은 ⑤보다 많거나 적을 수 있습니다. */
   route: Waypoint[];
   /** 드론 탭에서 고친 경로인가 */
@@ -133,7 +128,7 @@ export interface HolePlan {
   greenView: FairwayPoint[];
   routeMetres: number;
   routeSeconds: number;
-  /** 이착륙·조망·그린까지 합한 이 홀의 비행 시간 */
+  /** 이착륙·그린까지 합한 이 홀의 비행 시간 */
   seconds: number;
 }
 
@@ -207,21 +202,6 @@ export function planHole(hole: Hole, custom?: RouteSpot[]): HolePlan {
   }
   const routeSeconds = routeMetres / MISSION_SPEED + route.length * 3;
 
-  // 조망: 티 바로 위에서 찍습니다. 티까지 담으면 긴 홀은 그린이 잘려서, 그린을 화면 위쪽에 맞춥니다.
-  const heroAt = tee;
-  const far = deg(Math.atan(HERO_ALT / length));
-  const hero: Waypoint = {
-    id: 'H',
-    label: '전체 조망 사진',
-    at: heroAt,
-    altitude: HERO_ALT,
-    gimbal: -Math.round(far + FOV_SHORT / 2 - 2),
-    heading: Math.round(b),
-    zone: zoneLevelAt(heroAt),
-  };
-  const reach = length + 40;
-  const heroView = [heroAt, destination(heroAt, b - FOV_LONG / 2, reach), destination(heroAt, b + FOV_LONG / 2, reach)];
-
   const green: Waypoint = {
     id: 'G',
     label: '그린 탑다운',
@@ -238,8 +218,8 @@ export function planHole(hole: Hole, custom?: RouteSpot[]): HolePlan {
     2 * GREEN_ALT * Math.tan(rad(FOV_LONG / 2))
   );
 
-  const seconds = 60 + (2 * HERO_ALT) / 5 + 40 + routeSeconds + 60;
-  return { hole, line, length, bearing: b, hero, heroView, route, edited, green, greenView, routeMetres, routeSeconds, seconds };
+  const seconds = 60 + routeSeconds + 60;
+  return { hole, line, length, bearing: b, route, edited, green, greenView, routeMetres, routeSeconds, seconds };
 }
 
 /** 그린 탑다운 한 장에 담기는 땅 (가로 × 세로, m). */
@@ -263,7 +243,7 @@ export function batteryGroups(plans: HolePlan[]): { holes: number[]; seconds: nu
   return groups;
 }
 
-export const allWaypoints = (p: HolePlan): Waypoint[] => [p.hero, ...p.route, p.green];
+export const allWaypoints = (p: HolePlan): Waypoint[] => [...p.route, p.green];
 
 export interface CoursePlan {
   /** 코스 전경 파노라마를 찍는 자리 */

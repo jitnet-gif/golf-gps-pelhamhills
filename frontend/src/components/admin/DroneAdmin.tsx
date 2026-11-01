@@ -250,7 +250,7 @@ export function DroneAdmin() {
 
   const plan = selected ? plans.find((p) => p.hole.holeNumber === selected) ?? null : null;
   const bounds = useMemo<FairwayPoint[]>(
-    () => (plan ? [...plan.heroView, ...plan.greenView, ...plan.route.map((w) => w.at)] : plans.flatMap((p) => p.line)),
+    () => (plan ? [...plan.greenView, ...plan.route.map((w) => w.at)] : plans.flatMap((p) => p.line)),
     [plan, plans]
   );
   const enhanced = DRONE_ZONES.filter((z) => z.level === 3 && z.rings);
@@ -348,8 +348,8 @@ export function DroneAdmin() {
         </div>
         <p className="text-xs text-muted-foreground">
           {canEdit
-            ? '홀마다 조망 사진(H), 플라이스루 영상(①부터), 그린 탑다운(G)을 찍습니다. 홀을 고르면 지도에서 웨이포인트를 고칠 수 있습니다. 코스 지도와 조작은 같지만 따로 저장되어 선수 지도에는 영향이 없습니다.'
-            : '홀마다 조망 사진(H), 플라이스루 영상(①부터), 그린 탑다운(G)을 찍습니다. 경로는 코스 지도 수정 계정으로만 고칠 수 있습니다. 로그인은 코스 지도 탭에서 합니다.'}
+            ? '홀마다 플라이스루 영상(①부터)과 그린 탑다운(G)을 찍습니다. 홀을 고르면 지도에서 웨이포인트를 고칠 수 있습니다. 코스 지도와 조작은 같지만 따로 저장되어 선수 지도에는 영향이 없습니다.'
+            : '홀마다 플라이스루 영상(①부터)과 그린 탑다운(G)을 찍습니다. 경로는 코스 지도 수정 계정으로만 고칠 수 있습니다. 로그인은 코스 지도 탭에서 합니다.'}
         </p>
         <nav className="flex gap-1.5 overflow-x-auto pb-1" aria-label="홀 선택">
           {[0, ...plans.map((p) => p.hole.holeNumber)].map((n) => (
@@ -435,10 +435,8 @@ export function DroneAdmin() {
             ))}
           {plan && (
             <>
-              <Polygon positions={plan.heroView} pathOptions={{ color: CAMERA, weight: 1.5, dashArray: '6 4', fillOpacity: 0.08 }} />
               <Polygon positions={plan.greenView} pathOptions={{ color: CAMERA, weight: 1.5, fillOpacity: 0.15 }} />
               <Polyline positions={preview ?? line} interactive={false} pathOptions={{ color: ROUTE, weight: 4 }} />
-              <Marker position={plan.hero.at} icon={badge('H', CAMERA, plan.hero.zone === 3 || plan.hero.zone === 1 || plan.hero.zone === 2)} interactive={false} />
               {canEdit &&
                 !full &&
                 line.slice(0, -1).map((a, i) => {
@@ -751,7 +749,6 @@ function HoleCard({
             </tr>
           </thead>
           <tbody>
-            {row(plan.hero)}
             {plan.route.map(row)}
             {row(plan.green)}
           </tbody>
@@ -759,7 +756,7 @@ function HoleCard({
       </div>
 
       <p className="text-xs text-muted-foreground">
-        H 와 G 는 직접 날려 한 장씩 찍습니다. ①~{lastPoint} 는 DJI Fly ▸ 웨이포인트에서 지도에 같은 자리를 찍고 고도·짐벌·기수를 넣습니다 (속도 {MISSION_SPEED}m/s, ①에서 녹화 시작, {lastPoint}에서 녹화 중지). 그린 한 장에 약 {GREEN_COVERAGE.across}×{GREEN_COVERAGE.along}m 가 담깁니다.
+        G 는 직접 날려 한 장 찍습니다. ①~{lastPoint} 는 DJI Fly ▸ 웨이포인트에서 지도에 같은 자리를 찍고 고도·짐벌·기수를 넣습니다 (속도 {MISSION_SPEED}m/s, ①에서 녹화 시작, {lastPoint}에서 녹화 중지). 그린 한 장에 약 {GREEN_COVERAGE.across}×{GREEN_COVERAGE.along}m 가 담깁니다.
       </p>
 
       <details className="rounded-lg border border-border p-3 text-xs">
