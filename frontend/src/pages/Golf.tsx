@@ -51,7 +51,7 @@ import { GpsStatus } from '@/components/GpsStatus';
 import { loadNavStyle, saveNavStyle, WalkNavigation, type NavStyle } from '@/components/WalkNavigation';
 import { haversineMetres } from '@/lib/geo';
 import { readFairway } from '@/lib/fairwayDistance';
-import { getAdminKey } from '@/lib/adminApi';
+import { isUnlocked } from '@/lib/adminSession';
 import { cachedFullMapStyle, fetchFullMapStyle, type FullMapStyle } from '@/lib/appSettings';
 import { nextTee } from '@/lib/teeGuidance';
 import { narrationId } from '@/hooks/useHoleNarration';
@@ -329,8 +329,8 @@ export default function Golf() {
   }, [courseId, setHolePaths]);
 
   // /admin is not linked for players (see App.tsx). The map editor link shows
-  // only in a tab that already holds the admin key.
-  const [isOperator] = useState(() => getAdminKey() !== null);
+  // only in a tab that has opened the admin screen (staff ID or email).
+  const [isOperator] = useState(isUnlocked);
 
   const { isTracking, startTracking, stopTracking } = useGPS({ enabled: gpsEnabled });
   const { setTee } = useScorecard();

@@ -27,3 +27,6 @@ export { OrderCallBanner } from './OrderCallBanner';
 export { CouponDesk } from './CouponDesk';
 export { CheckinDesk } from './CheckinDesk';
 export { WalletAdmin } from './WalletAdmin';
+export { AdminEntry } from './AdminEntry';
+export { AdminLog } from './AdminLog';
+export { PinPad } from './PinPad';

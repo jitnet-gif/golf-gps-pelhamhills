@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<!-- 운영 화면 직원 ID 로그인 + 행동 기록(0032) 호프 가이드. kmz-guide.html 과 같은 화면·플레이어입니다. 영어가 기본입니다. -->
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font-size:14px}[hidden]{display:none!important}</style>
+<title>Staff ID Sign-in</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* One 16:9 slide at a time with Hope's narration bar underneath. Single dark look, same as the other admin guides. */
+:root {
+  --bg: #0A130F; --surface: #111F18; --raise: #17291F; --line: #24392D;
+  --fg: #E7EFE9; --muted: #98AE9F;
+  --amber: #FFB547; --sky: #5FD4FF; --turf: #7CF29A; --alert: #FF8F6B;
+  --sans: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font-family: var(--sans); }
+.wrap { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 16px 32px; max-width: 1240px; margin: 0 auto; display: grid; gap: 12px; }
+
+.top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.top .name { font: 600 13px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.langbig { margin-left: auto; display: flex; gap: 0; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+.langbig button { border: 0; border-radius: 0; padding: 8px 16px; font: 600 13px var(--sans); background: var(--surface); }
+.langbig button[aria-pressed="true"] { background: var(--amber); color: var(--bg); }
+.langbig kbd { margin-left: 6px; }
+
+.frame { container-type: inline-size; }
+.stage { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; font-size: clamp(13px, 1.3cqw, 20px); }
+@container (min-width: 760px) { .stage { aspect-ratio: 16 / 9; } }
+.slide { display: grid; gap: 1.1em; align-content: center; padding: 2.4em 2.8em; height: 100%; box-sizing: border-box; overflow: auto; animation: rise .35s ease-out; }
+@keyframes rise { from { transform: translateY(6px); opacity: .6; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .slide { animation: none; } }
+.eyebrow { font: 600 .78em var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--amber); }
+h1 { font-size: 3.1em; line-height: 1.12; margin: 0; letter-spacing: -0.02em; text-wrap: balance; }
+h2 { font-size: 2.05em; line-height: 1.2; margin: 0; letter-spacing: -0.015em; text-wrap: balance; }
+.lede { font-size: 1.15em; color: var(--muted); margin: 0; max-width: 50ch; line-height: 1.55; }
+.small { font-size: .88em; color: var(--muted); margin: 0; line-height: 1.5; }
+.amber { color: var(--amber); } .sky { color: var(--sky); } .turf { color: var(--turf); } .alert { color: var(--alert); }
+
+.title-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 2.4em; align-items: center; height: 100%; }
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .6em; }
+.stat { border-top: 2px solid var(--amber); padding-top: .45em; }
+.stat b { display: block; font: 600 1.7em var(--mono); }
+.stat span { font-size: .8em; color: var(--muted); }
+
+/* keypad illustration */
+.pad { background: #000; border: 1px solid var(--line); border-radius: 14px; padding: 1.1em; display: grid; gap: .7em; max-width: 17em; justify-self: center; width: 100%; box-sizing: border-box; }
+.pad .t { font: 600 .9em var(--sans); }
+.dots { display: flex; justify-content: center; gap: .7em; padding: .4em 0; }
+.dots i { width: .8em; height: .8em; border-radius: 50%; background: var(--amber); }
+.dots i.e { background: none; border: 2px solid var(--line); }
+.keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: .4em; }
+.keys span { background: var(--raise); border-radius: 6px; text-align: center; padding: .55em 0; font: 600 1.05em var(--mono); }
+.keys .ok { background: var(--amber); color: var(--bg); }
+.pad .mail { font-size: .78em; color: var(--muted); border-top: 1px solid var(--line); padding-top: .6em; }
+
+.steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .8em; counter-reset: s; }
+.steps li { counter-increment: s; background: var(--raise); border-radius: 8px; padding: 1em 1.05em; display: grid; gap: .4em; align-content: start; min-height: 11em; }
+.steps li::before { content: counter(s); font: 600 1.5em var(--mono); color: var(--amber); }
+.steps b { font-size: 1.1em; line-height: 1.3; } .steps span { font-size: .92em; color: var(--muted); line-height: 1.45; }
+
+.versus { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1em; }
+.way { border: 1px solid var(--line); border-radius: 10px; padding: 1em 1.2em; display: grid; gap: .55em; align-content: start; }
+.way.pick { border-color: var(--turf); } .way.lock { border-color: var(--sky); }
+.way h3 { margin: 0; font-size: 1.2em; }
+.pill { justify-self: start; font: 600 .74em var(--mono); letter-spacing: .08em; padding: .25em .6em; border-radius: 99px; background: var(--raise); }
+.way ul { margin: 0; padding-left: 1.1em; display: grid; gap: .35em; font-size: .92em; line-height: 1.45; }
+.plus::marker { color: var(--turf); } .minus::marker { color: var(--alert); }
+.way code { font: .86em var(--mono); color: var(--sky); overflow-wrap: anywhere; }
+
+.fl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.7em; }
+.fn { position: relative; background: var(--raise); border-radius: 8px; padding: 1.1em 1em; display: grid; gap: .5em; align-content: start; min-height: 10em; }
+.fn b { font-size: 1.12em; line-height: 1.3; } .fn .k { font: 600 .74em var(--mono); letter-spacing: .08em; }
+.fn p { margin: 0; font-size: .9em; color: var(--muted); line-height: 1.45; }
+.fn:not(:last-child)::after { content: "→"; position: absolute; right: -1.35em; top: 50%; transform: translateY(-50%); color: var(--amber); font: 600 1.1em var(--mono); }
+.chips { display: flex; flex-wrap: wrap; gap: .4em; }
+.chips span { background: var(--raise); border-radius: 99px; padding: .3em .75em; font-size: .86em; }
+.chips .no { color: var(--muted); text-decoration: line-through; }
+
+/* log mock */
+.log { background: #000; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; font-size: .9em; }
+.log .row { display: grid; grid-template-columns: 7.2em minmax(0, 1fr) auto; gap: .8em; padding: .6em .9em; border-top: 1px solid var(--line); align-items: baseline; }
+.log .row:first-child { border-top: 0; }
+.log time { font: .85em var(--mono); color: var(--muted); }
+.log .who b { font-weight: 600; } .log .who small { display: block; color: var(--muted); font-size: .84em; margin-top: .15em; }
+.log .tag { font: 600 .74em var(--mono); background: var(--raise); padding: .1em .45em; border-radius: 4px; color: var(--muted); margin-left: .4em; }
+.log .act { font: 600 .82em var(--mono); color: var(--muted); }
+.log .act.del { color: var(--alert); } .log .act.up { color: var(--sky); } .log .act.in { color: var(--turf); }
+.pair { display: grid; grid-template-columns: 1.25fr 1fr; gap: 1.4em; align-items: start; }
+
+.facts { display: grid; gap: .7em; font-size: .98em; line-height: 1.45; }
+.facts div { display: grid; grid-template-columns: 2em 1fr; gap: .4em; }
+.facts div > span:first-child { font: 600 1em var(--mono); }
+.rules { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8em 1.8em; }
+.rules div { border-left: 2px solid var(--amber); padding: .2em 0 .2em .9em; display: grid; gap: .25em; }
+.rules b { font-size: 1.08em; } .rules span { color: var(--muted); font-size: .92em; line-height: 1.45; }
+.rules div.hot { border-color: var(--alert); }
+
+/* narration bar */
+.bar { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 10px; }
+.hope { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.avatar { flex: none; width: 40px; height: 40px; border-radius: 50%; background: var(--raise); border: 2px solid var(--amber); display: grid; place-items: center; font: 600 15px var(--mono); color: var(--amber); }
+.avatar.talking { animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(255,181,71,.18); } }
+@media (prefers-reduced-motion: reduce) { .avatar.talking { animation: none; } }
+.who2 { display: grid; min-width: 0; } .who2 b { font-size: 14px; } .who2 span { font-size: 12px; color: var(--muted); }
+.caption { font-size: 15px; line-height: 1.55; min-height: 2.6em; margin: 0; }
+.caption mark { background: rgba(255,181,71,.22); color: var(--fg); border-radius: 3px; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+.group { display: flex; align-items: center; gap: 6px; }
+button { font: 500 13px var(--sans); color: var(--fg); background: var(--raise); border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+button:hover { border-color: var(--amber); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+button.primary { background: var(--amber); color: var(--bg); border-color: var(--amber); font-weight: 700; min-width: 92px; }
+.count { font: 500 13px var(--mono); color: var(--muted); min-width: 44px; text-align: center; }
+label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+input[type=range] { width: 110px; accent-color: var(--amber); }
+output { font: 500 12px var(--mono); color: var(--fg); min-width: 36px; }
+.hint { font-size: 12px; color: var(--muted); margin: 0; }
+kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+
+@container (max-width: 759px) {
+  .slide { padding: 1.4em 1.2em; }
+  h1 { font-size: 2.2em; } h2 { font-size: 1.6em; }
+  .title-grid, .versus, .pair, .rules { grid-template-columns: minmax(0, 1fr); }
+  .steps, .fl { grid-template-columns: minmax(0, 1fr); }
+  .steps li, .fn { min-height: 0; }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fn:not(:last-child)::after { content: "↓"; right: 50%; top: auto; bottom: -1.5em; transform: none; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <span class="name">Pelham Hills GPS · Admin</span>
+    <div class="langbig" role="group" aria-label="Language">
+      <button type="button" id="lang-en" data-lang="en">EN</button>
+      <button type="button" id="lang-ko" data-lang="ko">한국어<kbd>한/영</kbd></button>
+    </div>
+  </div>
+
+  <div class="frame">
+    <div class="stage" id="stage" aria-live="polite">
+      <!-- 1 -->
+      <section class="slide" data-n="1">
+        <div class="title-grid">
+          <div style="display:grid;gap:1.2em">
+            <span class="eyebrow">Pelham Hills · /admin</span>
+            <h1 data-en="Sign in with your staff ID" data-ko="직원 ID 로 들어가기"></h1>
+            <p class="lede" data-en="The GPS admin now opens the same way as the club admin: your Pelham Shift clock-in number. Everything you change is logged under your name." data-ko="GPS 운영 화면이 이제 클럽 어드민과 같은 방법으로 열립니다. Pelham Shift 출퇴근 번호를 누르세요. 바꾼 것은 모두 내 이름으로 기록됩니다."></p>
+            <div class="stats">
+              <div class="stat"><b>4</b><span data-en="digit staff ID" data-ko="자리 직원 ID"></span></div>
+              <div class="stat"><b>1</b><span data-en="map editor account" data-ko="지도 수정 계정"></span></div>
+              <div class="stat"><b>18</b><span data-en="kinds of data logged" data-ko="기록되는 데이터 종류"></span></div>
+              <div class="stat"><b>0</b><span data-en="ID numbers stored" data-ko="저장되는 번호"></span></div>
+            </div>
+          </div>
+          <div class="pad" aria-hidden="true">
+            <span class="t" data-en="Sign in with staff ID" data-ko="직원 ID 로 들어가기"></span>
+            <div class="dots"><i></i><i></i><i></i><i class="e"></i></div>
+            <div class="keys"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>⌫</span><span>0</span><span class="ok">OK</span></div>
+            <span class="mail" data-en="✉ Manager · Sign in with email" data-ko="✉ 매니저 · 이메일로 로그인"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2 -->
+      <section class="slide" data-n="2" hidden>
+        <span class="eyebrow" data-en="Staff" data-ko="직원"></span>
+        <h2 data-en="Four taps and you're in" data-ko="네 번 누르면 들어갑니다"></h2>
+        <ol class="steps">
+          <li><b data-en="Open /admin" data-ko="/admin 열기"></b><span data-en="On the pro shop PC or your phone. The keypad is the first screen." data-ko="프로 샵 PC 나 휴대폰에서. 첫 화면이 숫자판입니다."></span></li>
+          <li><b data-en="Tap your staff ID" data-ko="직원 ID 누르기"></b><span data-en="The same number you clock in with. It checks itself after four digits." data-ko="출퇴근할 때 누르는 번호입니다. 네 자리를 누르면 바로 확인합니다."></span></li>
+          <li><b data-en="Longer ID? Press OK" data-ko="더 긴 번호는 OK"></b><span data-en="IDs can be up to eight digits. Keep tapping, then press OK." data-ko="번호는 여덟 자리까지 있습니다. 이어서 누르고 OK 를 누르세요."></span></li>
+          <li><b data-en="Check your name" data-ko="내 이름 확인"></b><span data-en="Your name shows at the top. That's the name the log will use." data-ko="화면 위에 내 이름이 보입니다. 기록에 그 이름이 남습니다."></span></li>
+        </ol>
+        <p class="small" data-en="A keyboard works too: type the digits, Backspace to fix, Enter for OK." data-ko="키보드도 됩니다. 숫자를 치고, 고칠 때는 Backspace, OK 는 Enter."></p>
+      </section>
+
+      <!-- 3 -->
+      <section class="slide" data-n="3" hidden>
+        <span class="eyebrow" data-en="Who opens what" data-ko="누가 무엇을 여나"></span>
+        <h2 data-en="Managers use email. Only one account edits the map." data-ko="매니저는 이메일, 지도는 한 계정만"></h2>
+        <div class="versus">
+          <div class="way pick">
+            <span class="pill turf" data-en="STAFF ID" data-ko="직원 ID"></span>
+            <h3 data-en="Staff" data-ko="직원"></h3>
+            <ul>
+              <li class="plus" data-en="Players, banners, scheduled sends" data-ko="플레이어, 배너, 예약 발송"></li>
+              <li class="plus" data-en="Orders, menu, scores, CCTV" data-ko="주문, 메뉴, 스코어, CCTV"></li>
+              <li class="minus" data-en="Course map and drone routes are read-only" data-ko="코스 지도와 드론 경로는 보기만"></li>
+            </ul>
+          </div>
+          <div class="way">
+            <span class="pill amber" data-en="EMAIL" data-ko="이메일"></span>
+            <h3 data-en="Managers" data-ko="매니저"></h3>
+            <ul>
+              <li class="plus" data-en="Tap “Manager · Sign in with email”" data-ko="“매니저 · 이메일로 로그인” 을 누릅니다"></li>
+              <li class="plus" data-en="Same tabs, plus the Log tab" data-ko="같은 탭에 기록 탭이 더 있습니다"></li>
+              <li class="minus" data-en="A manager's staff ID is refused on the keypad" data-ko="매니저 번호는 숫자판에서 받지 않습니다"></li>
+            </ul>
+          </div>
+          <div class="way lock">
+            <span class="pill sky" data-en="MAP ONLY" data-ko="지도 전용"></span>
+            <h3 data-en="Course map" data-ko="코스 지도"></h3>
+            <ul>
+              <li class="plus"><code>analysis@pelhamhills.ca</code></li>
+              <li class="plus" data-en="Tees, pins, fairway lines, cart paths, drone routes" data-ko="티, 핀, 페어웨이 선, 카트 길, 드론 경로"></li>
+              <li class="minus" data-en="Anyone else sees a “Sign in as analysis@” button" data-ko="다른 계정은 “analysis@ 로 로그인” 버튼이 보입니다"></li>
+            </ul>
+          </div>
+        </div>
+        <p class="small" data-en="The database enforces this, not just the screen. A save from any other account is refused." data-ko="화면만 막는 것이 아니라 데이터베이스가 막습니다. 다른 계정의 저장은 서버가 거절합니다."></p>
+      </section>
+
+      <!-- 4 -->
+      <section class="slide" data-n="4" hidden>
+        <span class="eyebrow" data-en="The log" data-ko="기록"></span>
+        <h2 data-en="Every change is written down with your name" data-ko="바꾼 것은 모두 내 이름으로 남습니다"></h2>
+        <div class="fl">
+          <div class="fn"><span class="k amber">1 · ID</span><b data-en="You tap your ID" data-ko="번호를 누릅니다"></b><p data-en="Pelham Shift confirms who you are." data-ko="Pelham Shift 가 누구인지 확인합니다."></p></div>
+          <div class="fn"><span class="k amber">2 · SESSION</span><b data-en="Your session gets your name" data-ko="이 로그인에 이름이 붙습니다"></b><p data-en="The server ties this sign-in to you. The screen can't change it." data-ko="서버가 이 로그인과 이름을 묶습니다. 화면에서 바꿀 수 없습니다."></p></div>
+          <div class="fn"><span class="k amber">3 · SAVE</span><b data-en="You change something" data-ko="무언가를 바꿉니다"></b><p data-en="A banner, an order, a menu price, a coupon stamp…" data-ko="배너, 주문, 메뉴 가격, 쿠폰 도장…"></p></div>
+          <div class="fn"><span class="k amber">4 · LOG</span><b data-en="The database logs it" data-ko="데이터베이스가 적습니다"></b><p data-en="Who, when, which item, and the value before and after." data-ko="누가, 언제, 무엇을, 바뀌기 전과 후."></p></div>
+        </div>
+        <div class="chips">
+          <span data-en="Banners" data-ko="배너"></span><span data-en="Scheduled sends" data-ko="예약 발송"></span><span data-en="Orders" data-ko="주문"></span><span data-en="Menu" data-ko="메뉴"></span><span data-en="Coupon book" data-ko="쿠폰북"></span><span data-en="Check-in" data-ko="체크인"></span><span data-en="Course map" data-ko="코스 지도"></span><span data-en="Sign-in / sign-out" data-ko="로그인 / 로그아웃"></span>
+          <span class="no" data-en="Guests' own orders" data-ko="손님이 직접 한 주문"></span><span class="no" data-en="Your ID number" data-ko="내 직원 번호"></span>
+        </div>
+      </section>
+
+      <!-- 5 -->
+      <section class="slide" data-n="5" hidden>
+        <span class="eyebrow" data-en="Log tab · managers" data-ko="기록 탭 · 매니저"></span>
+        <h2 data-en="Managers can see who did what" data-ko="매니저는 누가 무엇을 했는지 봅니다"></h2>
+        <div class="pair">
+          <div class="log" aria-hidden="true">
+            <div class="row"><time>11-11 14:02</time><span class="who"><b>Jane D.</b><span class="tag">ID</span><small data-en="Menu · Club sandwich · price: 1200 → 1350" data-ko="메뉴 · Club sandwich · price: 1200 → 1350"></small></span><span class="act up" data-en="Changed" data-ko="수정"></span></div>
+            <div class="row"><time>11-11 13:47</time><span class="who"><b>Sam K.</b><span class="tag">ID</span><small data-en="Orders · #412 · status: new → done" data-ko="주문 · #412 · status: new → done"></small></span><span class="act up" data-en="Changed" data-ko="수정"></span></div>
+            <div class="row"><time>11-11 13:30</time><span class="who"><b>Jane D.</b><span class="tag">ID</span><small data-en="Banners · Twilight rate" data-ko="배너 · Twilight rate"></small></span><span class="act del" data-en="Deleted" data-ko="삭제"></span></div>
+            <div class="row"><time>11-11 13:05</time><span class="who"><b data-en="(unknown ID)" data-ko="(알 수 없는 번호)"></b><small data-en="Admin · unknown id" data-ko="운영 화면 · unknown id"></small></span><span class="act del" data-en="Sign-in failed" data-ko="로그인 실패"></span></div>
+            <div class="row"><time>11-11 12:58</time><span class="who"><b>analysis@…</b><small data-en="Course map · hole 7" data-ko="코스 지도 · hole 7"></small></span><span class="act in" data-en="Added" data-ko="추가"></span></div>
+          </div>
+          <div class="facts">
+            <div><span class="turf">✓</span><span data-en="Search by staff name or email." data-ko="직원 이름이나 이메일로 찾습니다."></span></div>
+            <div><span class="turf">✓</span><span data-en="Tap a row to see every changed field." data-ko="줄을 누르면 바뀐 칸이 모두 보입니다."></span></div>
+            <div><span class="turf">✓</span><span data-en="Only managers signed in with email, and analysis@, see this tab." data-ko="이메일로 들어온 매니저와 analysis@ 만 이 탭을 봅니다."></span></div>
+            <div><span class="alert">!</span><span data-en="Nobody can edit or delete the log from the app." data-ko="앱에서는 아무도 기록을 고치거나 지울 수 없습니다."></span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 6 -->
+      <section class="slide" data-n="6" hidden>
+        <span class="eyebrow" data-en="Good habits" data-ko="지켜 주세요"></span>
+        <h2 data-en="Keep the log honest" data-ko="기록이 정확하도록"></h2>
+        <div class="rules">
+          <div><b data-en="Log out when you leave" data-ko="자리를 뜨면 로그아웃"></b><span data-en="Tap Log out at the top right, especially on the shared pro shop PC." data-ko="오른쪽 위 로그아웃을 누르세요. 프로 샵 공용 PC 에서는 꼭."></span></div>
+          <div><b data-en="Closing the tab signs you out" data-ko="탭을 닫으면 다시 번호"></b><span data-en="The next person has to tap their own ID, so nothing lands under your name." data-ko="다음 사람은 자기 번호를 눌러야 하므로, 내 이름으로 남지 않습니다."></span></div>
+          <div><b data-en="Never share your ID" data-ko="번호는 나만"></b><span data-en="It's also your Pelham Shift password. We never store it." data-ko="Pelham Shift 비밀번호이기도 합니다. 어디에도 저장하지 않습니다."></span></div>
+          <div class="hot"><b data-en="Ten wrong tries, ten minutes" data-ko="10번 틀리면 10분 대기"></b><span data-en="After ten wrong IDs in ten minutes, that device waits ten minutes." data-ko="10분 안에 10번 틀리면 그 기기는 10분 동안 기다려야 합니다."></span></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div class="bar">
+    <div class="hope">
+      <div class="avatar" id="avatar" aria-hidden="true">H</div>
+      <div class="who2"><b data-en="Narrator Hope" data-ko="나레이터 호프"></b><span>ElevenLabs Hope Natural</span></div>
+    </div>
+    <p class="caption" id="caption"></p>
+    <div class="controls">
+      <div class="group">
+        <button id="prev" type="button" aria-label="Previous slide">◀</button>
+        <span class="count" id="count">1 / 6</span>
+        <button id="next" type="button" aria-label="Next slide">▶</button>
+      </div>
+      <button class="primary" id="play" type="button"></button>
+      <label><input type="checkbox" id="auto" checked> <span data-en="Auto-advance" data-ko="자동 넘김"></span></label>
+      <label for="pitch"><span data-en="Pitch" data-ko="피치"></span><input type="range" id="pitch" min="0.7" max="1.4" step="0.01"><output id="pitch-out"></output></label>
+      <label for="rate"><span data-en="Speed" data-ko="속도"></span><input type="range" id="rate" min="0.5" max="2" step="0.05"><output id="rate-out"></output></label>
+      <button type="button" id="reset" data-en="Reset" data-ko="기본값"></button>
+    </div>
+    <p class="hint" id="hint"></p>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+<script>
+// 대본. 클립은 같은 문장으로 public/audio/staff-login/ 에 구웠습니다(Hope natural tnSpp4vdxKPjI9w0GnoV, eleven_multilingual_v2, 1×).
+const NARR = [
+  { en: "Hi, I'm Hope. The GPS admin now opens the same way as the club admin, with your Pelham Shift staff ID. Everything you change is logged under your name.",
+    ko: '안녕하세요, 호프입니다. 이제 GPS 운영 화면도 클럽 어드민처럼 Pelham Shift 직원 번호로 들어갑니다. 바꾼 것은 모두 내 이름으로 기록됩니다.' },
+  { en: "Open the admin page and you'll see a keypad. Tap the number you clock in with. After four digits it checks by itself. If your ID is longer, keep tapping and press OK. Your name then shows at the top. That's the name the log will use.",
+    ko: '운영 화면을 열면 숫자판이 보입니다. 출퇴근할 때 누르는 번호를 누르세요. 네 자리를 누르면 바로 확인합니다. 번호가 더 길면 이어서 누르고 OK 를 누르세요. 그러면 화면 위에 내 이름이 보입니다. 기록에도 그 이름이 남습니다.' },
+  { en: "Staff can use the players, banners, orders and menu screens. Managers tap sign in with email instead. The course map and drone routes can only be changed by analysis at pelhamhills dot ca. The database enforces this, so a save from any other account is refused.",
+    ko: '직원은 플레이어, 배너, 주문, 메뉴 화면을 쓸 수 있습니다. 매니저는 이메일로 로그인을 누르세요. 코스 지도와 드론 경로는 analysis 계정만 고칠 수 있습니다. 데이터베이스가 막고 있어서, 다른 계정의 저장은 서버가 거절합니다.' },
+  { en: "Here's how the log works. Pelham Shift confirms who you are, and the server ties this sign-in to your name. When you change a banner, an order, a price or a coupon stamp, the database writes down who, when, what, and the value before and after. Guests' own orders aren't logged, and your ID number is never stored.",
+    ko: '기록은 이렇게 남습니다. Pelham Shift 가 누구인지 확인하고, 서버가 이 로그인에 내 이름을 붙입니다. 배너, 주문, 가격, 쿠폰 도장을 바꾸면 데이터베이스가 누가, 언제, 무엇을, 바뀌기 전과 후를 적습니다. 손님이 직접 한 주문은 기록하지 않고, 직원 번호는 저장하지 않습니다.' },
+  { en: "Managers who sign in with email get a Log tab. Search by a staff name, and tap a row to see every changed field. Nobody can edit or delete the log from the app.",
+    ko: '이메일로 들어온 매니저에게는 기록 탭이 보입니다. 직원 이름으로 찾고, 줄을 누르면 바뀐 칸이 모두 보입니다. 앱에서는 아무도 기록을 고치거나 지울 수 없습니다.' },
+  { en: "A few habits keep the log honest. Log out when you leave, especially on the shared pro shop computer. Closing the tab signs you out too. Never share your ID, because it's also your Pelham Shift password. And after ten wrong tries in ten minutes, that device has to wait ten minutes. Thanks!",
+    ko: '기록이 정확하도록 몇 가지만 지켜 주세요. 자리를 뜰 때는 로그아웃하세요. 프로 샵 공용 컴퓨터에서는 꼭이요. 탭을 닫아도 로그아웃됩니다. 번호는 Pelham Shift 비밀번호이기도 하니 다른 사람에게 알려 주지 마세요. 그리고 10분 안에 10번 틀리면 그 기기는 10분 동안 기다려야 합니다. 감사합니다!' },
+];
+
+const UI = {
+  play: { en: '▶ Play', ko: '▶ 재생' },
+  pause: { en: '❚❚ Pause', ko: '❚❚ 멈춤' },
+  hint: { en: 'Keys: Han/Eng key or L switches language · ← → slides · Space play/pause', ko: '키보드: 한/영 키 또는 L 언어 전환 · ← → 슬라이드 · 스페이스 재생/멈춤' },
+  noPitch: { en: "The pitch module didn't load, so only speed can change.", ko: '피치 조절 모듈을 불러오지 못해 속도만 바꿀 수 있습니다.' },
+};
+
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('hope.' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('hope.' + k, JSON.stringify(v)); } catch (e) {} },
+};
+
+const slides = [...document.querySelectorAll('.slide')];
+const $ = id => document.getElementById(id);
+const pitch = $('pitch'), rate = $('rate');
+const asked = new URLSearchParams(location.search).get('lang');
+// 영어가 기본입니다. 한 번 바꾸면 이 가이드는 그 언어로 다시 열립니다.
+let lang = asked === 'ko' || asked === 'en' ? asked : store.get('staffLogin.lang', 'en');
+let idx = 0, playing = false, token = 0;
+pitch.value = store.get('pitch2', 1);
+rate.value = store.get('rate2', 1);
+
+const clipUrl = (l, i) => `/audio/staff-login/slide-${i + 1}-${l}.mp3`;
+
+// Speed: the browser time-stretches and keeps the pitch. Pitch: a separate shifter, so the two move independently.
+const audio = new Audio();
+audio.preload = 'auto';
+audio.preservesPitch = audio.webkitPreservesPitch = audio.mozPreservesPitch = true;
+let graph = null;
+function ensureGraph() {
+  if (graph || !window.Tone) return;
+  try {
+    const src = Tone.getContext().rawContext.createMediaElementSource(audio);
+    const shift = new Tone.PitchShift({ pitch: 0, windowSize: 0.08 }).toDestination();
+    Tone.connect(src, shift);
+    graph = { src, shift };
+  } catch (e) { graph = null; }
+}
+function applyPitch() {
+  if (!graph) return;
+  const p = +pitch.value;
+  graph.shift.pitch = 12 * Math.log2(p);
+  graph.shift.wet.value = Math.abs(p - 1) < 0.005 ? 0 : 1;
+}
+function applyRate() { audio.defaultPlaybackRate = audio.playbackRate = +rate.value; }
+
+function sentences(text) { return text.match(/[^.!?]+[.!?]?/g).map(s => s.trim()).filter(Boolean); }
+function renderCaption(active = -1) {
+  const parts = sentences(NARR[idx][lang]);
+  $('caption').innerHTML = parts.map((s, i) => i === active ? `<mark>${s}</mark>` : s).join(' ');
+}
+audio.ontimeupdate = () => {
+  if (!playing || !audio.duration) return;
+  const parts = sentences(NARR[idx][lang]), total = parts.reduce((a, s) => a + s.length, 0);
+  const at = audio.currentTime / audio.duration * total;
+  let sum = 0, k = 0;
+  for (; k < parts.length - 1; k++) { sum += parts[k].length; if (sum > at) break; }
+  renderCaption(k);
+};
+
+function applyLang() {
+  document.documentElement.lang = lang;
+  document.title = lang === 'ko' ? '직원 ID 로그인' : 'Staff ID Sign-in';
+  document.querySelectorAll('[data-en]').forEach(e => { e.textContent = e.dataset[lang]; });
+  $('lang-ko').setAttribute('aria-pressed', String(lang === 'ko'));
+  $('lang-en').setAttribute('aria-pressed', String(lang === 'en'));
+  $('play').textContent = UI[playing ? 'pause' : 'play'][lang];
+  $('hint').textContent = window.Tone ? UI.hint[lang] : UI.noPitch[lang];
+  renderCaption();
+}
+
+function show(i) {
+  idx = (i + slides.length) % slides.length;
+  slides.forEach((s, k) => { s.hidden = k !== idx; });
+  $('count').textContent = `${idx + 1} / ${slides.length}`;
+  try { history.replaceState(null, '', location.search + '#s' + (idx + 1)); } catch (e) {}
+  renderCaption();
+}
+
+function playSlide() {
+  const my = ++token;
+  audio.src = clipUrl(lang, idx);
+  applyRate();
+  audio.play().then(() => { if (my === token) $('avatar').classList.add('talking'); })
+    .catch(() => { if (my === token) stop(); });
+}
+audio.onended = () => {
+  $('avatar').classList.remove('talking');
+  if (!playing) return;
+  const my = token;
+  if ($('auto').checked && idx < slides.length - 1) {
+    show(idx + 1);
+    setTimeout(() => { if (playing && my === token) playSlide(); }, 450);
+  } else stop();
+};
+
+function stop() {
+  token++; playing = false;
+  audio.pause();
+  $('avatar').classList.remove('talking');
+  $('play').textContent = UI.play[lang];
+  renderCaption();
+}
+
+async function toggle() {
+  if (playing) { stop(); return; }
+  playing = true;
+  $('play').textContent = UI.pause[lang];
+  if (window.Tone) { try { await Tone.start(); ensureGraph(); applyPitch(); } catch (e) {} }
+  playSlide();
+}
+
+function setLang(l) {
+  if (l === lang) return;
+  lang = l; store.set('staffLogin.lang', l);
+  applyLang();
+  if (playing) playSlide();
+}
+function go(d) { show(idx + d); if (playing) playSlide(); }
+
+$('prev').onclick = () => go(-1);
+$('next').onclick = () => go(1);
+$('play').onclick = toggle;
+$('lang-ko').onclick = () => setLang('ko');
+$('lang-en').onclick = () => setLang('en');
+function syncOut() { $('pitch-out').textContent = (+pitch.value).toFixed(2); $('rate-out').textContent = (+rate.value).toFixed(2) + '×'; }
+pitch.oninput = () => { syncOut(); applyPitch(); store.set('pitch2', +pitch.value); };
+rate.oninput = () => { syncOut(); applyRate(); store.set('rate2', +rate.value); };
+$('reset').onclick = () => { pitch.value = 1; rate.value = 1; pitch.oninput(); rate.oninput(); };
+if (!window.Tone) pitch.disabled = true;
+
+// 한/영 키(HangulMode·Lang1·Lang2) 또는 L 로 언어를 바꿉니다 - 다른 키보다 먼저 봅니다.
+addEventListener('keydown', e => {
+  if (e.target.closest('input')) return;
+  if (e.key === 'HangulMode' || e.key === 'Lang1' || e.key === 'Lang2' || e.code === 'Lang1' || e.code === 'Lang2' || e.code === 'KeyL' || /^[lLㅣ]$/.test(e.key)) {
+    e.preventDefault(); setLang(lang === 'ko' ? 'en' : 'ko'); return;
+  }
+  if (e.key === 'ArrowRight') { e.preventDefault(); go(1); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); go(-1); }
+  else if (e.key === ' ' && !e.target.closest('button')) { e.preventDefault(); toggle(); }
+});
+
+syncOut();
+const m = /^#s([1-9])$/.exec(location.hash);
+show(m ? +m[1] - 1 : 0);
+applyLang();
+</script>
+</body>
+</html>

@@ -10,44 +10,6 @@
 import { supabase } from './supabase';
 import { problemOf } from './holePaths';
 
-const ADMIN_KEY_STORAGE = 'golf_gps_admin_key';
-
-// ============================================================
-// 관리자 키 보관 (운영 화면 입구)
-// ============================================================
-
-/**
- * 관리자 키는 sessionStorage에만 둡니다.
- *
- * localStorage였다면 탭을 닫고 브라우저를 껐다 켜도 키가 남습니다. 프런트
- * 데스크의 공용 PC나 운영자의 휴대폰을 다음 사람이 열었을 때 운영 화면까지
- * 넘어가면 안 됩니다. 탭을 닫으면 사라지는 쪽이 맞습니다.
- */
-export function getAdminKey(): string | null {
-  try {
-    return sessionStorage.getItem(ADMIN_KEY_STORAGE);
-  } catch {
-    // 저장이 막힌 브라우저에서는 이번 화면에서만 쓰고 버립니다.
-    return null;
-  }
-}
-
-export function setAdminKey(key: string): void {
-  try {
-    sessionStorage.setItem(ADMIN_KEY_STORAGE, key);
-  } catch {
-    /* 저장에 실패해도 이번 화면은 그대로 들어갑니다. */
-  }
-}
-
-export function clearAdminKey(): void {
-  try {
-    sessionStorage.removeItem(ADMIN_KEY_STORAGE);
-  } catch {
-    /* 지울 것이 없으면 그대로 둡니다. */
-  }
-}
-
 // ============================================================
 // 에러
 // ============================================================

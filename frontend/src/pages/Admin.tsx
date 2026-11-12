@@ -1,8 +1,10 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useLocation } from 'wouter';
-import { KeyRound, LogOut } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 import {
   AdminAccountGate,
+  AdminEntry,
+  AdminLog,
   CampaignPanel,
   CartPathRecorder,
   CouponDesk,
@@ -19,14 +21,15 @@ import {
   StatsTable,
   WalletAdmin,
 } from '@/components/admin';
-import { clearAdminKey, getAdminKey, setAdminKey, type AdminPromotion } from '@/lib/adminApi';
+import type { AdminPromotion } from '@/lib/adminApi';
+import { endAdmin, isUnlocked, logAccess, whoami, type AdminWho } from '@/lib/adminSession';
 import LangToggle from '@/lib/i18n/LangToggle';
 import { startAuth } from '@/lib/auth';
 import { staffStatus } from '@/lib/staffNotices';
 import { walletAccess } from '@/lib/wallet';
 import { useAppStore } from '@/store/appStore';
 
-type Tab = 'promotions' | 'stats' | 'campaigns' | 'scores' | 'map' | 'drone' | 'cctv' | 'orders' | 'menu' | 'players' | 'coupons' | 'wallet';
+type Tab = 'promotions' | 'stats' | 'campaigns' | 'scores' | 'map' | 'drone' | 'cctv' | 'orders' | 'menu' | 'players' | 'coupons' | 'wallet' | 'log';
 
 const TABS: { id: Tab; label: string }[] = [
   // 라운드가 도는 동안 프로 샵이 제일 자주 여는 탭이라 맨 앞입니다.
@@ -46,6 +49,8 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'coupons', label: '쿠폰북' },
   // 프로 샵 기프트카드 매니저에게만 보입니다(pelhamhills 0121 gps_wallet_access).
   { id: 'wallet', label: '쿠폰·기프트카드' },
+  // 직원 행동 기록(0032). 이메일로 들어온 관리자에게만 보입니다.
+  { id: 'log', label: '기록' },
 ];
 
 /**
@@ -68,7 +73,8 @@ const CCTV_PATH = '/admin/cctv';
  */
 export default function Admin() {
   const [location, navigate] = useLocation();
-  const [hasKey, setHasKey] = useState(() => getAdminKey() !== null);
+  const [unlocked, setUnlockedState] = useState(isUnlocked);
+  const enter = useCallback(() => setUnlockedState(true), []);
   // 지도·CCTV 주소로 들어온 것이 아니면 플레이어 모니터로 엽니다 - 라운드가 도는
   // 동안 운영 화면을 여는 이유가 대개 그것이기 때문입니다.
   const [tab, setTab] = useState<Tab>(() => {
@@ -84,7 +90,11 @@ export default function Admin() {
   // 쿠폰·기프트카드 탭은 기프트카드를 발행할 수 있는 매니저 계정에만 보입니다. 코스 지도만 고치는 관리자와
   // 공용 proshop 계정에는 탭이 없습니다 - 판정은 서버가 합니다.
   const account = useAppStore((s) => s.account);
+  const accountReady = useAppStore((s) => s.accountReady);
   const [canIssue, setCanIssue] = useState(false);
+  // 기록 탭(0032)과 머리의 '누구로 들어왔나'
+  const [canSeeLog, setCanSeeLog] = useState(false);
+  const [who, setWho] = useState<AdminWho | null>(null);
   // 쿠폰북 탭은 직원에게만 보입니다. CouponDesk 는 직원이 아니면 스스로 사라져, 탭만 남으면 빈 화면입니다.
   const [isStaff, setIsStaff] = useState(false);
   useEffect(() => {
@@ -95,8 +105,16 @@ export default function Admin() {
     if (!account) {
       setCanIssue(false);
       setIsStaff(false);
+      setCanSeeLog(false);
+      setWho(null);
       return;
     }
+    logAccess().then((yes) => {
+      if (alive) setCanSeeLog(yes);
+    });
+    whoami().then((w) => {
+      if (alive) setWho(w);
+    });
     walletAccess().then((yes) => {
       if (alive) setCanIssue(yes);
     });
@@ -122,30 +140,41 @@ export default function Admin() {
     else if (id !== 'map' && id !== 'cctv' && (onMap || onCctv)) navigate('/admin', { replace: true });
   };
 
-  if (!hasKey) {
-    return <AdminKeyGate onSubmit={() => setHasKey(true)} />;
+  if (!accountReady) {
+    return <main className="min-h-screen p-6 text-sm text-muted-foreground">불러오는 중...</main>;
+  }
+
+  // 이 탭에서 들어온 적이 없거나, 다른 탭·지도 탭에서 로그아웃해 계정이 없으면 입구로.
+  if (!unlocked || !account) {
+    return <AdminEntry onEnter={enter} />;
   }
 
   return (
     <main className="min-h-screen p-4 pb-16 max-w-3xl mx-auto">
       <header className="flex items-center justify-between gap-3 mb-4">
         <h1 className="text-xl font-bold">운영 관리</h1>
-        <LangToggle className="ml-auto px-3 py-2 rounded-md border border-border text-sm" />
+        <span className="ml-auto min-w-0 truncate text-sm text-muted-foreground" data-no-translate>
+          {who?.name ?? account.email}
+        </span>
+        <LangToggle className="px-3 py-2 rounded-md border border-border text-sm" />
         <button
           type="button"
           onClick={() => {
-            clearAdminKey();
-            setHasKey(false);
+            setUnlockedState(false);
+            void endAdmin();
           }}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-border text-sm text-muted-foreground hover:bg-muted/40 transition-colors"
+          className="inline-flex shrink-0 items-center gap-1.5 px-3 py-2 rounded-md border border-border text-sm text-muted-foreground hover:bg-muted/40 transition-colors"
         >
-          <LogOut className="w-4 h-4" />키 지우기
+          <LogOut className="w-4 h-4" />로그아웃
         </button>
       </header>
 
       {/* 좁은 화면에서 탭이 줄바꿈되며 헤더 높이가 튀지 않게 옆으로 밀립니다. */}
       <nav className="flex gap-2 overflow-x-auto pb-1 mb-4" aria-label="관리 메뉴">
-        {TABS.filter((item) => (item.id !== 'wallet' || canIssue) && (item.id !== 'coupons' || isStaff)).map((item) => (
+        {TABS.filter(
+          (item) =>
+            (item.id !== 'wallet' || canIssue) && (item.id !== 'coupons' || isStaff) && (item.id !== 'log' || canSeeLog),
+        ).map((item) => (
           <button
             key={item.id}
             type="button"
@@ -235,6 +264,8 @@ export default function Admin() {
 
       {tab === 'cctv' && <CctvAdmin />}
 
+      {tab === 'log' && canSeeLog && <AdminLog />}
+
       {tab === 'map' && (
         <AdminAccountGate mapEditor>
           <div className="flex flex-col gap-4">
@@ -244,67 +275,6 @@ export default function Admin() {
           </div>
         </AdminAccountGate>
       )}
-    </main>
-  );
-}
-
-/**
- * 관리자 키 입력
- *
- * 운영 화면의 입구입니다. 이 탭을 닫으면 지워지므로 공용 기기에서 열어 둔
- * 운영 화면이 다음 사람에게 넘어가지 않습니다.
- */
-function AdminKeyGate({ onSubmit }: { onSubmit: () => void }) {
-  const [value, setValue] = useState('');
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-
-    const key = value.trim();
-    if (!key) return;
-
-    setAdminKey(key);
-    onSubmit();
-  };
-
-  return (
-    <main className="min-h-screen flex items-center justify-center p-6">
-      <form
-        onSubmit={submit}
-        className="w-full max-w-sm p-5 rounded-lg border border-border bg-card text-card-foreground"
-      >
-        <div className="flex items-center gap-2 mb-1">
-          <KeyRound className="w-5 h-5 text-primary" />
-          <h1 className="font-semibold text-base">관리자 키</h1>
-          <LangToggle className="ml-auto px-2 py-1 rounded-md border border-border text-xs" />
-        </div>
-
-        <p className="text-sm text-muted-foreground mb-4">
-          운영 화면에 들어가는 키입니다. 이 탭을 닫으면 지워지므로, 공용 기기에서 써도
-          다음 사람에게 넘어가지 않습니다.
-        </p>
-
-        <label className="sr-only" htmlFor="admin-key">
-          관리자 키
-        </label>
-        <input
-          id="admin-key"
-          type="password"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          autoComplete="off"
-          autoFocus
-          className="w-full px-3 py-2 rounded-md border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-        />
-
-        <button
-          type="submit"
-          disabled={!value.trim()}
-          className="w-full mt-4 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
-        >
-          들어가기
-        </button>
-      </form>
     </main>
   );
 }

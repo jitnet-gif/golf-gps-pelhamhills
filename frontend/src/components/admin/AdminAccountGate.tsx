@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { LogOut, RefreshCw, ShieldCheck } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
-import { signOut, startAuth } from '@/lib/auth';
+import { startAuth } from '@/lib/auth';
 import { adminStatus } from '@/lib/adminApi';
 import { mapEditorStatus } from '@/lib/holePaths';
+import { endAdmin } from '@/lib/adminSession';
 import { AccountForm } from '@/components/AccountPanel';
 
 /**
@@ -80,7 +81,7 @@ export function AdminAccountGate({
       </div>
       <button
         type="button"
-        onClick={() => void signOut()}
+        onClick={() => void endAdmin()}
         className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted/40"
       >
         <LogOut className="h-3.5 w-3.5" />
@@ -92,6 +93,22 @@ export function AdminAccountGate({
   if (status === null) return accountStrip('권한 확인 중...', 'muted');
 
   if (status === 'notAdmin') {
+    if (mapEditor) {
+      // 코스 지도·드론 경로는 analysis@pelhamhills.ca 하나만 고칩니다(0030, 0032).
+      // 숫자판으로 들어온 직원은 여기서 그 계정으로 바꿔 로그인합니다 - 로그아웃하면 입구로 돌아갑니다.
+      return (
+        <div className="flex flex-col gap-2">
+          {accountStrip('코스 지도는 analysis@pelhamhills.ca 계정만 고칠 수 있습니다.', 'error')}
+          <button
+            type="button"
+            onClick={() => void endAdmin()}
+            className="inline-flex items-center gap-1.5 self-start rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted/40"
+          >
+            analysis@pelhamhills.ca 로 로그인
+          </button>
+        </div>
+      );
+    }
     return accountStrip(
       `이 계정은 ${role}으로 지정되지 않았습니다. ${role}으로 다시 로그인해 주세요.`,
       'error',
